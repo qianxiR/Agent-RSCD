@@ -1,0 +1,11 @@
+.git
+.history
+.vscode
+__pycache__
+*.pyc
+agent-files
+Apix-Version_2.1
+frontend/node_modules
+backend/model/SamSeg/SamSeg/sam3/*.pt
+backend/model/SamSeg/SamSeg/sam3/*.pth
+backend/model/SamSeg/SamSeg/sam3/*.ckpt

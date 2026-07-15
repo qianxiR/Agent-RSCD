@@ -1,0 +1,221 @@
+/* ==================== Markdown 内容样式（全局，供 v-html 渲染消费）====================
+ * 从原生 styles.css 一比一迁移：富表格卡片 + 正文排版 + 代码块
+ * 全局非 scoped，因为 v-html 生成的 DOM 不受组件 scoped 作用域影响
+ */
+
+/* ---------- 富表格卡片（AI 输出表格增强） ---------- */
+.rich-table-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin: 12px 0;
+  overflow: hidden;
+}
+.rich-table-header {
+  background: var(--bg-panel);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.rich-table-header .row-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+.rich-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.rich-table thead th {
+  background: var(--bg-panel);
+  padding: 8px 12px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.rich-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  text-align: center;
+}
+.rich-table .cell-null {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.rich-table .cell-number {
+  font-family: var(--mono);
+  color: var(--accent-purple);
+}
+.rich-table-footer {
+  background: var(--bg-panel);
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 16px;
+  font-family: var(--mono);
+}
+.rich-table-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.rich-table-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+.rich-table-copy-btn.copied {
+  color: var(--accent-green);
+}
+
+/* ---------- 正文排版（.content-text 内） ---------- */
+.content-text {
+  line-height: 1.65;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-size: 12px;
+}
+.content-text h1,
+.content-text h2,
+.content-text h3,
+.content-text h4 {
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+.content-text h1 { font-size: 1.15em; }
+.content-text h2 { font-size: 1.08em; }
+.content-text h3 { font-size: 1.03em; }
+.content-text p { margin: 4px 0; }
+.content-text ul,
+.content-text ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.content-text li { margin: 2px 0; }
+.content-text a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.content-text a:hover {
+  text-decoration: underline;
+}
+.content-text blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 6px 12px;
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  margin: 6px 0;
+}
+.content-text code {
+  background: var(--bg-inset);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: var(--accent-purple);
+}
+.content-text pre {
+  background: var(--bg-inset);
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  margin: 6px 0;
+}
+.content-text pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.content-text table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+}
+.content-text table th,
+.content-text table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+}
+.content-text img {
+  max-width: 100%;
+  border-radius: var(--r-sm);
+}
+
+/* ==================== GetFeatureInfo 属性弹窗（全局，popup DOM 动态生成无 scoped） ==================== */
+.wms-popup {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  min-width: 180px;
+  max-width: 320px;
+  font-size: var(--fs-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+.wms-popup .popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.wms-popup .popup-title {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: var(--fs-lg);
+}
+.wms-popup .popup-close {
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+}
+.wms-popup .popup-close:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.wms-popup .popup-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.wms-popup .popup-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.wms-popup .popup-table td:first-child {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.wms-popup .popup-table td:last-child {
+  color: var(--text-primary);
+  font-family: var(--mono);
+}

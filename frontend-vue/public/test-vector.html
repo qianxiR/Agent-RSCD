@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>矢量图层独立测试</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Microsoft YaHei',sans-serif;height:100vh;display:flex;flex-direction:column}
+  #toolbar{padding:10px 14px;background:#f5f5f5;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;flex-shrink:0}
+  #toolbar button{padding:6px 16px;cursor:pointer;border:1px solid #999;border-radius:4px;background:#fff;font-size:14px}
+  #toolbar button:hover{background:#e8f0fe;border-color:#2c6fbd}
+  #toolbar button.active{background:#2c6fbd;color:#fff;border-color:#2c6fbd}
+  #status{margin-left:12px;font-size:13px;color:#666}
+  #map{flex:1;min-height:0}
+  .ol-popup{position:absolute;background:#fff;border-radius:6px;padding:8px 12px;box-shadow:0 2px 12px rgba(0,0,0,.15);max-width:300px;font-size:12px;display:none}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="btnSeg" onclick="toggleLayer('seg')">面图层 (seg_9k9x)</button>
+  <button id="btnEdge" onclick="toggleLayer('edge')">线图层 (seg_9k9x_edge)</button>
+  <button onclick="fitBoth()">定位到两图层范围</button>
+  <button onclick="testFetch()" style="background:#fff3cd;border-color:#e6a817">⚡ FETCH直测</button>
+  <span id="status">就绪 — 请点击按钮加载图层</span>
+</div>
+<div id="map"></div>
+<script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@9.2.4/ol.css">
+<script>
+// ===== 配置：与 Vue 版 useMap.js 完全一致 =====
+const WMS_URL = '/api/v1/geoserver/wms'
+
+// 两个图层的 bbox (来自 /api/v1/geoserver/layers/samseg/.../bbox)
+const LAYERS = {
+  seg: {
+    name: '0865e300__seg_9k9x',
+    workspace: 'samseg',
+    fullName: 'samseg:0865e300__seg_9k9x',
+    bbox: [103.963623, 30.958772, 103.974609, 30.968193],
+    strokeColor: '#2c6fbd',
+    loaded: false,
+    layer: null,
+    source: null,
+  },
+  edge: {
+    name: '0865e300__seg_9k9x_edge',
+    workspace: 'samseg',
+    fullName: 'samseg:0865e300__seg_9k9x_edge',
+    bbox: [103.963623, 30.958772, 103.974609, 30.968193],
+    strokeColor: '#e74c3c',  // 红色区别于面图层
+    loaded: false,
+    layer: null,
+    source: null,
+  }
+}
+
+// ===== 生成 boundary SLD (含 LineSymbolizer + PolygonSymbolizer, 与 sld.js 完全一致) =====
+function makeBoundarySLD(layerName, strokeColor) {
+  const c = strokeColor || '#2c6fbd'
+  return '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<StyledLayerDescriptor version="1.0.0" xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc">' +
+    '<NamedLayer><Name>' + layerName + '</Name><UserStyle><FeatureTypeStyle><Rule>' +
+    '<LineSymbolizer>' +
+    '<Stroke><CssParameter name="stroke">' + c + '</CssParameter>' +
+    '<CssParameter name="stroke-width">2</CssParameter></Stroke>' +
+    '</LineSymbolizer>' +
+    '<PolygonSymbolizer>' +
+    '<Fill><CssParameter name="fill">#000000</CssParameter>' +
+    '<CssParameter name="fill-opacity">0</CssParameter></Fill>' +
+    '<Stroke><CssParameter name="stroke">' + c + '</CssParameter>' +
+    '<CssParameter name="stroke-width">2</CssParameter></Stroke>' +
+    '</PolygonSymbolizer>' +
+    '</Rule></FeatureTypeStyle></UserStyle></NamedLayer></StyledLayerDescriptor>'
+}
+
+// ===== 初始化地图 =====
+const map = new ol.Map({
+  target: 'map',
+  layers: [],
+  view: new ol.View({
+    projection: 'EPSG:4326',
+    center: [103.943905, 30.764575],  // 成都
+    zoom: 9,
+  }),
+  controls: ol.control.defaults.defaults({ attribution: false }).extend([
+    new ol.control.ScaleLine(),
+  ]),
+})
+
+// ===== 构建 WMS params (与 useMap.js addWmsLayer 一致) =====
+function buildWmsParams(layerKey) {
+  const ly = LAYERS[layerKey]
+  const params = {
+    LAYERS: ly.fullName,
+    FORMAT: 'image/png',
+    TILED: true,
+    TRANSPARENT: true,
+    VERSION: '1.1.1',
+    SRS: 'EPSG:4326',
+    SLD_BODY: makeBoundarySLD(ly.fullName, ly.strokeColor),
+    STYLES: '',
+  }
+  return params
+}
+
+// ===== 加载/切换图层 =====
+function toggleLayer(layerKey) {
+  const ly = LAYERS[layerKey]
+  const btn = document.getElementById(layerKey === 'seg' ? 'btnSeg' : 'btnEdge')
+  const status = document.getElementById('status')
+
+  if (ly.loaded) {
+    // 卸载
+    if (ly.layer) map.removeLayer(ly.layer)
+    ly.loaded = false
+    ly.layer = null
+    ly.source = null
+    btn.classList.remove('active')
+    status.textContent = '已移除: ' + ly.fullName
+    log('移除图层', ly.fullName)
+  } else {
+    // 加载
+    const params = buildWmsParams(layerKey)
+    log('创建 ImageWMS (非瓦片)', ly.fullName, 'params keys=', Object.keys(params))
+
+    // ★ ImageWMS 替代 TileWMS:
+    //   TileWMS 在 OL 9.2.4 中对极小范围图层 (0.01°) tileUrlFunction 返回 undefined,
+    //   导致所有瓦片 url=undefined → tileloaderror, 无论先 fit 还是后 fit 都无效。
+    //   ImageWMS 直接根据当前 view.extent 发单张 GetMap, 不依赖 tileGrid, 无此问题。
+    const source = new ol.source.ImageWMS({
+      url: WMS_URL,
+      params: params,
+      serverType: 'geoserver',
+    })
+
+    const layer = new ol.layer.Image({ source: source, zIndex: 10 })
+    layer.set('layerName', ly.name)
+    layer.set('workspace', ly.workspace)
+    ly.source = source
+    ly.layer = layer
+
+    // ★ 先 fit，再 addLayer（修复 url=undefined）
+    map.getView().fit(ol.proj.transformExtent(ly.bbox, 'EPSG:4326', 'EPSG:4326'), {
+      padding: [40, 40, 40, 40],
+      maxZoom: 18,
+    })
+
+    map.addLayer(layer)
+    ly.loaded = true
+    btn.classList.add('active')
+    status.textContent = '加载中: ' + ly.fullName + ' ... 看控制台日志'
+
+    // 监听加载事件 (ImageWMS 用 imageloadstart/end/error)
+    source.on('imageloadstart', function(e) {
+      // ImageWMS 内部用 <img> 标签加载, src 在 image 对象上
+      const img = e.image || e.target?.image_
+      const src = img?.getAttribute?.('src') || img?.src || '(无URL)'
+      log('imageloadstart', ly.name, 'url=', src)
+      status.textContent = '请求中: ' + ly.fullName + ' → ' + src.substring(0, 120) + '...'
+    })
+    source.on('imageloadend', function(e) {
+      const img = e.image || e.target?.image_
+      const src = img?.getAttribute?.('src') || img?.src || '(无URL)'
+      log('imageloadend ✓', ly.name, 'url=', src)
+      status.textContent = '加载成功 ✓ ' + ly.fullName
+    })
+    source.on('imageloaderror', function(e) {
+      const img = e.image || e.target?.image_
+      const src = img?.getAttribute?.('src') || img?.src || '(无URL)'
+      log('imageloaderror ✗', ly.name, 'url=', src)
+      // 同时 fetch 一下看 HTTP 状态
+      fetch(src, { method: 'HEAD' }).then(function(r) {
+        log('  HTTP状态:', r.status, '内容类型:', r.headers.get('Content-Type'))
+      }).catch(function(err) {
+        log('  fetch失败:', err.message || err)
+      })
+      status.textContent = '加载失败 ✗ ' + ly.fullName + ' | URL首120字: ' + (src || '').substring(0, 120)
+    })
+  }
+}
+
+// ===== FETCH 直测：绕过 OL，手动构造 WMS 请求验证 GeoServer =====
+function testFetch() {
+  const view = map.getView()
+  const extent = view.calculateExtent(map.getSize())
+  const [w, h] = map.getSize()
+  const bbox = extent.join(',')
+  const status = document.getElementById('status')
+
+  // 测试两个图层
+  ['seg', 'edge'].forEach(function(key) {
+    const ly = LAYERS[key]
+    const url = WMS_URL + '?' + new URLSearchParams({
+      SERVICE: 'WMS',
+      VERSION: '1.1.1',
+      REQUEST: 'GetMap',
+      FORMAT: 'image/png',
+      TRANSPARENT: 'TRUE',
+      LAYERS: ly.fullName,
+      SRS: 'EPSG:4326',
+      STYLES: '',
+      SLD_BODY: makeBoundarySLD(ly.fullName, ly.strokeColor),
+      WIDTH: w,
+      HEIGHT: h,
+      BBOX: bbox,
+    }).toString()
+
+    log('FETCH', ly.fullName)
+    log('  URL前200:', url.substring(0, 200))
+    status.textContent = 'FETCH 测试: ' + ly.fullName + ' ...'
+
+    fetch(url).then(function(r) {
+      log('  HTTP', r.status, '| type:', r.headers.get('Content-Type'), '| size:', r.headers.get('Content-Length') || '?')
+      return r.blob()
+    }).then(function(blob) {
+      log('  Blob size:', blob.size, 'B  type:', blob.type)
+      if (blob.size > 2000 && blob.type === 'image/png') {
+        status.textContent = 'FETCH 成功 ✓ ' + ly.fullName + ' (' + blob.size + 'B PNG)'
+      } else if (blob.type.includes('json') || blob.type.includes('text') || blob.type.includes('xml')) {
+        blob.text().then(function(t) {
+          log('  响应内容:', t.substring(0, 300))
+          status.textContent = 'FETCH 非图片: ' + ly.fullName + ' → ' + t.substring(0, 100)
+        })
+      } else {
+        status.textContent = 'FETCH 异常: ' + ly.fullName + ' blob=' + blob.size + 'B type=' + blob.type
+      }
+    }).catch(function(e) {
+      log('  fetch FAIL:', e.message || e)
+      status.textContent = 'FETCH 失败 ✗ ' + ly.fullName + ': ' + (e.message || e)
+    })
+  })
+}
+function fitBoth() {
+  const extent = [
+    Math.min(LAYERS.seg.bbox[0], LAYERS.edge.bbox[0]),
+    Math.min(LAYERS.seg.bbox[1], LAYERS.edge.bbox[1]),
+    Math.max(LAYERS.seg.bbox[2], LAYERS.edge.bbox[2]),
+    Math.max(LAYERS.seg.bbox[3], LAYERS.edge.bbox[3]),
+  ]
+  map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 18 })
+}
+
+// ===== 日志 =====
+function log() {
+  var args = Array.prototype.slice.call(arguments)
+  args.unshift('[test-vector]')
+  console.log.apply(console, args)
+}
+
+// 页面加载完成
+log('测试页就绪')
+log('面图层:', LAYERS.seg.fullName, 'bbox:', LAYERS.seg.bbox)
+log('线图层:', LAYERS.edge.fullName, 'bbox:', LAYERS.edge.bbox)
+log('WMS代理:', WMS_URL)
+</script>
+</body>
+</html>

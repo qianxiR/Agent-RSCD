@@ -1,0 +1,137 @@
+/* ==================== 全局弹窗毛玻璃风格 ==================== */
+
+:root {
+  --glass-overlay: color-mix(in srgb, var(--bg-elevated) 28%, transparent);
+  --glass-surface: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  --glass-surface-strong: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  --glass-border: color-mix(in srgb, var(--border-strong) 58%, transparent);
+  --glass-border-strong: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  --glass-border-soft: color-mix(in srgb, var(--border-strong) 38%, transparent);
+  --glass-accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+  --glass-danger-surface: color-mix(in srgb, var(--accent-red) 8%, transparent);
+  --glass-danger-border: color-mix(in srgb, var(--accent-red) 34%, transparent);
+  --glass-shadow: var(--shadow-float);
+  --glass-blur: blur(18px);
+}
+
+.el-overlay {
+  background-color: var(--glass-overlay) !important;
+  backdrop-filter: blur(2px);
+}
+
+.el-message-box,
+.el-dialog {
+  background: var(--glass-surface) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--glass-shadow) !important;
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.el-message-box__header,
+.el-dialog__header {
+  border-bottom: 1px solid var(--glass-border-soft);
+  padding: 14px 16px 12px !important;
+}
+
+.el-message-box__title,
+.el-dialog__title {
+  color: var(--text-primary) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+.el-message-box__content,
+.el-dialog__body {
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+}
+
+.el-message-box__btns,
+.el-dialog__footer {
+  border-top: 1px solid var(--glass-border-soft);
+  padding: 10px 16px 14px !important;
+}
+
+.el-message-box .el-input__wrapper,
+.el-dialog .el-input__wrapper,
+.el-dialog .el-select__wrapper {
+  background: var(--glass-surface-strong) !important;
+  border: 1px solid var(--glass-border-strong) !important;
+  border-radius: var(--r-sm) !important;
+  box-shadow: none !important;
+}
+
+.el-message-box .el-button,
+.el-dialog .el-button {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border-strong) !important;
+  border-radius: var(--r-sm) !important;
+  color: var(--text-secondary) !important;
+}
+
+.el-message-box .el-button:hover,
+.el-dialog .el-button:hover {
+  border-color: var(--glass-accent-border) !important;
+  color: var(--accent) !important;
+}
+
+.el-message-box .el-button--primary,
+.el-dialog .el-button--primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+
+.el-message-box .el-button--primary:hover,
+.el-dialog .el-button--primary:hover {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+  color: #fff !important;
+}
+
+.el-popper.is-light,
+.el-popover.el-popper,
+.el-select__popper.el-popper,
+.el-dropdown__popper.el-popper,
+.el-picker-panel.el-popper {
+  background: var(--glass-surface-strong) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--glass-shadow) !important;
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary) !important;
+}
+
+.el-popper.is-light .el-popper__arrow::before {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border) !important;
+}
+
+.el-select-dropdown__item,
+.el-dropdown-menu__item,
+.el-picker-panel__body,
+.el-popover.el-popper {
+  font-size: var(--fs-md) !important;
+}
+
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.el-image-viewer__mask {
+  background: color-mix(in srgb, var(--text-primary) 28%, transparent) !important;
+  backdrop-filter: blur(8px);
+}
+
+.el-image-viewer__btn {
+  background: var(--glass-surface) !important;
+  border: 1px solid var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary) !important;
+}

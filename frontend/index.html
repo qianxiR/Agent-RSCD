@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>国土智察 城市遥感智能监测系统</title>
+
+  <!-- ==================== 色彩体系: colors.css (ui / map 两块, 先于 styles.css 加载) ==================== -->
+  <link rel="stylesheet" href="colors.css">
+  <!-- ==================== 风格: styles.css (从 index.html 拆出) ==================== -->
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- ==================== Markdown解析层 + 代码高亮层 (本地 vendor) ==================== -->
+  <script src="vendor/markdown-it.min.js"></script>
+  <link rel="stylesheet" href="vendor/prism.css" />
+  <script src="vendor/prism.min.js"></script>
+
+  <!-- ==================== OpenLayers 地图引擎 (本地 vendor, 在业务脚本之前加载) ==================== -->
+  <link rel="stylesheet" href="vendor/ol.css">
+  <script src="vendor/ol.js"></script>
+</head>
+
+<body>
+
+<div class="header">
+  <h1><img src="image.svg" alt="logo" class="header-logo">国土智察 城市遥感智能监测系统</h1>
+  </div>
+</div>
+
+<div class="main">
+  <div class="conv-sidebar" id="convSidebar">
+
+    <!-- ★ Tab 栏: 对话管理 / 图层管理 (左栏内切换, 图层管理从中间区域移入) -->
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" id="sidebarTabConv" onclick="switchSidebarTab('conv')">对话管理</button>
+      <button class="sidebar-tab" id="sidebarTabLayer" onclick="switchSidebarTab('layer')">图层管理</button>
+    </div>
+
+    <!-- ★ 对话管理 pane -->
+    <div class="sidebar-pane" id="sidebarPaneConv">
+    <div class="sidebar-search">
+      <input type="text" id="convSearchInput" placeholder="搜索会话…" oninput="filterConvList()" />
+    </div>
+    <div class="sidebar-header">
+      <h3>项目管理</h3>
+      <button class="new-group-btn" onclick="createGroupFromSidebar()">+ 新建项目</button>
+    </div>
+    <div class="conv-list" id="convList">
+      <div class="conv-empty">加载中...</div>
+    </div>
+    <!-- 右键菜单 -->
+    <div class="conv-context-menu" id="convContextMenu">
+      <div class="menu-item" onclick="renameConvFromMenu()">重命名</div>
+      <div class="menu-item has-submenu">移动到项目
+        <div class="conv-submenu" id="convMoveSubmenu"></div>
+      </div>
+      <div class="menu-divider"></div>
+      <div class="menu-item danger" onclick="deleteConvFromMenu()">删除对话</div>
+    </div>
+    <!-- 分组右键菜单 -->
+    <div class="conv-context-menu" id="groupContextMenu">
+      <div class="menu-item" onclick="renameGroupFromMenu()">重命名</div>
+      <div class="menu-divider"></div>
+      <div class="menu-item danger" onclick="deleteGroupFromMenu()">删除项目</div>
+    </div>
+    <!-- 全局视图右键菜单 -->
+    <div class="conv-context-menu" id="allConvContextMenu">
+      <div class="menu-item" onclick="createGroupFromMenu()">新建项目</div>
+    </div>
+    </div><!-- /sidebarPaneConv -->
+
+    <!-- ★ 图层管理 pane (从中间区域移入左栏, 复用原 .layer-panel 工具栏与图层树) -->
+    <div class="sidebar-pane sidebar-pane-layer" id="sidebarPaneLayer" style="display:none;">
+      <div class="layer-panel-toolbar">
+        <button class="layer-upload-btn" onclick="uploadLayerFromPanel('raster')" title="上传影像(GeoTIFF/COG)并发布为栅格图层">＋ 影像</button>
+        <button class="layer-upload-btn" onclick="uploadLayerFromPanel('vector')" title="上传矢量(Shapefile/GeoJSON)并发布为矢量图层">＋ 矢量</button>
+        <button class="layer-refresh-btn" onclick="refreshLayerPanel()" title="刷新图层列表">刷新</button>
+        <input type="text" class="layer-search-input" id="layerSearchInput" placeholder="过滤图层…" oninput="filterLayerTree()">
+      </div>
+      <div class="layer-tree" id="layerTree">
+        <div class="layer-tree-empty">切换到本页签自动加载 GeoServer 图层…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ★ 拖拽分隔条: 侧栏 | 中间影像 -->
+  <div class="resizer resizer-v" data-target="sidebar" title="拖动调整宽度"></div>
+
+  <!-- ==================== 中间: 地图工作区 (固定显示地图, 不再 Tab 切换) ==================== -->
+  <div class="wms-panel" id="wmsPanel">
+    <div class="wms-header">
+      <h3>地图</h3>
+      <div class="wms-header-actions">
+        <button class="wms-clear-btn" onclick="clearWmsPanel()" title="清空所有影像" id="wmsClearBtn">清空</button>
+      </div>
+    </div>
+    <!-- ★ 地图视图 (OpenLayers 容器, 固定显示) -->
+    <div class="wms-stage" id="wmsStage">
+      <!-- ★ OpenLayers 地图挂载点 (替换原卡片墙 wms-viewport) -->
+      <div id="wmsViewport" class="ol-map-host"></div>
+      <!-- OL 自带控件: Zoom(缩放) + ScaleLine(比例尺) + MousePosition(经纬度) -->
+    </div>
+  </div>
+
+  <!-- ★ 拖拽分隔条: 中间影像 | 聊天 -->
+  <div class="resizer resizer-v" data-target="chat" title="拖动调整宽度"></div>
+
+  <div class="right-sidebar" id="chatArea">
+    <div class="ai-header">
+      <div class="ai-title">
+        <div class="ai-avatar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg></div>
+        <span>GeoAI Copilot</span>
+      </div>
+      <div class="ai-actions">
+        <button class="ai-action-btn" title="新建对话" onclick="newConversation()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="ai-action-btn" title="任务日志监控" onclick="openTaskMonitor()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="10" x2="16" y2="10"/><line x1="12" y1="14" x2="16" y2="14"/></svg>
+        </button>
+        <button class="ai-action-btn" title="查看对话日志" onclick="openConversationTraceWindow()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="ai-chat" id="messages" style="display:flex;flex-direction:column;">
+      <div class="welcome-area" id="welcomeArea">
+        <div class="welcome-title">我是国土智察 AI 助手<br>可以帮你查看影像、分析数据、管理图层</div>
+        <div class="quick-questions">
+          <button class="quick-question" onclick="sendDemo('列出 GeoServer 所有服务')">GeoServer 服务</button>
+          <button class="quick-question" onclick="sendDemo('列出数据库所有表')">数据库表</button>
+          <button class="quick-question" onclick="sendDemo('显示图层示例影像')">查看影像</button>
+          <button class="quick-question" onclick="sendDemo('你记住了关于我的哪些信息？')">我的记忆</button>
+        </div>
+        <div class="welcome-shortcuts">
+          <div class="shortcuts-title">快捷操作</div>
+          <div class="shortcuts-grid">
+            <button class="demo-btn" onclick="sendDemo('显示 &lt;图层名&gt; 原始影像')">显示影像</button>
+            <button class="demo-btn" onclick="sendDemo('下载 &lt;图层名&gt; 原始影像')">下载影像</button>
+            <button class="demo-btn" onclick="sendDemo('列出 GeoServer 所有服务')">GeoServer</button>
+            <button class="demo-btn" onclick="sendDemo('列出数据库所有表')">数据库</button>
+            <button class="demo-btn" onclick="sendDemo('上传影像，路径是 /path/to/layer.tif')">上传影像</button>
+            <button class="demo-btn" onclick="sendDemo('上传矢量，路径是 /path/to/layer.shp')">上传矢量</button>
+            <button class="demo-btn" onclick="sendDemo('查询并渲染 &lt;表名&gt; 表')">渲染表格</button>
+            <button class="demo-btn" onclick="sendDemo('下载矢量图层 &lt;图层名&gt;')">下载矢量</button>
+            <button class="demo-btn" onclick="sendDemo('统计 &lt;表名&gt; 表的数据')">表统计</button>
+            <button class="demo-btn" onclick="sendDemo('向 &lt;表名&gt; 表插入数据，&lt;列1&gt; 值1，&lt;列2&gt; 值2')">插入数据</button>
+            <button class="demo-btn" onclick="sendDemo('将 &lt;表名&gt; 表中 &lt;条件列&gt; 为 &lt;条件值&gt; 的记录，&lt;目标列&gt; 改为 &lt;新值&gt;')">更新数据</button>
+            <button class="demo-btn" onclick="sendDemo('删除 &lt;表名&gt; 表中 &lt;条件列&gt; 为 &lt;条件值&gt; 的记录')">删除数据</button>
+            <button class="demo-btn" onclick="uploadAndAnalyze('segment')">分割分析</button>
+            <button class="demo-btn" onclick="uploadAndAnalyze('change')">变化检测</button>
+            <button class="demo-btn" onclick="sendDemo('把本地影像 /path/to/layer.tif 完整接入系统：上传到 GeoServer 发布为图层，登记到元数据表，并在地图上显示出来')">数据入库</button>
+            <button class="demo-btn" onclick="sendDemo('查询影像元数据目录')">影像目录</button>
+            <button class="demo-btn" onclick="sendDemo('为本地 GeoTIFF /path/to/layer.tif 构建影像金字塔')">金字塔</button>
+            <button class="demo-btn" onclick="sendDemo('把本地 GeoTIFF /path/to/layer.tif 转换为 COG 格式')">COG 转换</button>
+            <button class="demo-btn" onclick="sendDemo('检查矢量 /path/to/redline.shp 的拓扑质量')">拓扑检查</button>
+            <button class="demo-btn" onclick="sendDemo('对最近一次变化检测结果生成统计图表（饼图+柱图）')">统计图表</button>
+            <button class="demo-btn" onclick="sendDemo('对最近一次变化检测结果生成 PDF 监测报告')">监测报告</button>
+            <button class="demo-btn" onclick="sendDemo('把最近一次变化检测的图斑矢量导出为 Shapefile')">导出矢量</button>
+            <button class="demo-btn" onclick="sendDemo('你记住了关于我的哪些信息？')">长期记忆</button>
+            <button class="demo-btn" onclick="sendDemo('总结一下我们当前这个对话之前聊了什么')">会话摘要</button>
+            <button class="demo-btn new-conv-btn" onclick="clearMemoryDemo()">清空记忆</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="ai-input-area">
+      <div class="input-wrapper">
+        <button id="uploadBtn" class="input-upload-btn" onclick="uploadToInput()" title="上传资料 (图片 / JSON / GeoJSON / MD / PDF 等, 可多选)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>
+        <textarea class="ai-textarea" id="inputBox" placeholder="输入消息 (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
+        <button id="stopBtn" class="stop-btn" onclick="stopChat()" title="停止当前对话">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        </button>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()" title="发送消息">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 加载顺序 (按功能区 + 依赖链排列) ====================
+     依赖链: core (state/ws-chat) → project → map → chat → core (ws-send/init)
+     约束:
+       - core/state.js 必须最先 (定义 convStates/activeConvId/wsClient 全局变量)
+       - core/ws-chat.js 必须在 core/ws-send.js 之前 (定义 WsChatClient 类)
+       - chat/conv-core.js 必须在 core/ws-send.js 之前 (registerConvCallbacks 被 initWsClient 调用)
+       - core/init.js 必须最后 (调用所有初始化函数)
+-->
+
+<!-- ════════ core: 基础设施 (通信 + 状态) ════════ -->
+<!-- 1. WebSocket 客户端 (定义 WsChatClient 类) -->
+<script src="core/ws-chat.js"></script>
+<!-- 2. 状态管理 (convStates, activeConvId, wsClient 全局变量) -->
+<script src="core/state.js"></script>
+
+<!-- ════════ project: 项目管理 (左侧栏) ════════ -->
+<!-- 3. 侧栏渲染 (loadConvList, renderConvTree, 右键 CRUD) -->
+<script src="project/sidebar.js"></script>
+<!-- 4. 工作区文件浏览器 (文件夹树, 项目=文件夹) -->
+<script src="project/workspace.js"></script>
+
+<!-- ════════ map: 影像预览 ════════ -->
+<!-- 5. WMS 影像预览 + Markdown 渲染 + 卡片墙 (showWmsInPanel/showImageInPanel) -->
+<script src="map/wms-render.js"></script>
+<!-- 5b. 图层管理面板 (工作空间树 + 显隐/删除/上传/定位, 对接 /api/v1/geoserver/*) -->
+<script src="map/layer-panel.js"></script>
+<!-- 6. 任务日志监控面板 (对接 /api/v1/tasks) -->
+<script src="map/task-monitor.js"></script>
+
+<!-- ════════ chat: AI 聊天面板 ════════ -->
+<!-- 7. 消息渲染 + UI 辅助 (气泡, Modal, Layout, Markdown 增强) -->
+<script src="chat/msg-ui.js"></script>
+<!-- 8. Thinking 日志聚合 + frontend_action 派发 -->
+<script src="chat/thinking.js"></script>
+<!-- 9. 对话核心 (切换, 回调注册, 历史消息加载/重建) -->
+<script src="chat/conv-core.js"></script>
+<!-- 10. SamSeg 上传 + 对话动作 (newConversation/doSend/stopChat) -->
+<script src="chat/samseg.js"></script>
+
+<!-- ════════ core: 启动 ════════ -->
+<!-- 11. WebSocket 初始化 + 发送 (initWsClient, sendMessage) -->
+<script src="core/ws-send.js"></script>
+<!-- 12. 启动编排 (最后加载, 调用所有初始化函数) -->
+<script src="core/init.js"></script>
+</body>
+</html>

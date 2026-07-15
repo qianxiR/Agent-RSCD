@@ -1,0 +1,63 @@
+# 遥感变化监测分析报告
+
+## 报告基本信息
+
+- **报告生成时间**: {{ generated_at }}
+- **监测区域**: {{ region_name | default('用户指定区域') }}
+- **数据来源**: T1 = {{ t1_name }} / T2 = {{ t2_name }}
+- **业务变化类型**: {{ change_type | default('未分类') }} {% if change_confidence %}(置信度 {{ change_confidence }}){% endif %}
+
+---
+
+## 一、变化概况
+
+本期监测共识别出 **{{ total_features }}** 个变化图斑，总变化面积 **{{ total_area_m2 }} 平方米**（约 **{{ total_area_ha }} 公顷**），占监测区域总面积的 **{{ changed_percent }}%**。
+
+{% if change_reason %}
+**判读依据**: {{ change_reason }}
+{% endif %}
+
+{% if overlay_image_path %}
+## 二、图斑叠加原图
+
+![矢量图斑叠加原图]({{ overlay_image_path }})
+
+{% if overlay_image_caption %}
+{{ overlay_image_caption }}
+{% endif %}
+
+{% endif %}
+
+## 三、各类别变化统计
+
+| 变化类别 | 图斑数 | 面积 (平方米) | 面积 (公顷) | 占比 |
+|---------|-------|--------------|------------|------|
+{% for c in per_class -%}
+| {{ c.name }} | {{ c.count }} | {{ c.area_m2 }} | {{ "%.2f" | format(c.area_m2 / 10000) }} | {{ "%.2f" | format(c.area_m2 / total_area_m2 * 100 if total_area_m2 > 0 else 0) }}% |
+{% endfor %}
+
+## 四、主要变化分析
+
+{% if dominant_class %}
+监测区域内变化最显著的地物类型为 **{{ dominant_class.name }}**，共 **{{ dominant_class.count }}** 个图斑，面积 **{{ dominant_class.area_m2 }} 平方米**，是本期监测的主导变化。
+{% endif %}
+
+{% if change_type == '新增建筑' %}
+本区域出现新增建筑活动，建议进一步核查是否存在违规用地或未经审批的建设行为。
+{% elif change_type == '耕地转林地' %}
+本区域出现耕地用途变化（转为林草地），建议关注是否属于退耕还林政策范畴或非法占用耕地。
+{% elif change_type == '推土' %}
+本区域出现大面积土地平整（推土）活动，通常是新增建设的前兆，建议重点关注并跟踪后续变化。
+{% elif change_type == '水体变化' %}
+本区域水体发生显著变化，建议核查是否存在非法填湖、围垦或自然水文变化。
+{% endif %}
+
+## 五、建议与后续工作
+
+1. 对重点变化图斑进行实地核查，确认变化合法性
+2. 持续跟踪监测区域，建立动态变化档案
+3. 结合规划用地数据，对疑似违规变化进行专项分析
+
+---
+
+*本报告由「国土智察 城市遥感智能监测系统」自动生成，仅供监测分析参考。*

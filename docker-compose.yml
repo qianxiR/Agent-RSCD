@@ -1,0 +1,109 @@
+name: agent-flow-study
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    image: agent-flow-backend:latest
+    container_name: agent-flow-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      geoserver:
+        condition: service_started
+      sandbox-image:
+        condition: service_completed_successfully
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: cd
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-001117}
+      AGENT_DB_HOST: postgres
+      AGENT_DB_PORT: 5432
+      AGENT_DB_NAME: Agent_study
+      AGENT_DB_USER: postgres
+      AGENT_DB_PASSWORD: ${POSTGRES_PASSWORD:-001117}
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_USERNAME: ${GEOSERVER_USERNAME:-admin}
+      GEOSERVER_PASSWORD: ${GEOSERVER_PASSWORD:-geoserver}
+      FILE_STORAGE_ROOT: /app/agent-files
+      SAMSEG_UPLOAD_ROOT: /app/agent-files/samseg/send
+      SAMSEG_OUTPUT_ROOT: /app/agent-files/samseg/generate
+      SAMSEG_VECTOR_ROOT: /app/agent-files/samseg/vector
+      GEOSERVER_DOWNLOAD_ROOT: /app/agent-files/geoserver/generate
+      SANDBOX_WORKSPACE_DIR: /app/agent-files/sandbox/workspace
+      SANDBOX_ENABLED: "true"
+      SANDBOX_DOCKER_IMAGE: agent-sandbox:latest
+      SANDBOX_DOCKER_VOLUME: agent-flow-study_agent-files
+      SANDBOX_DOCKER_NETWORK: agent-flow-net
+      SANDBOX_EXEC_TIMEOUT: ${SANDBOX_EXEC_TIMEOUT:-60}
+      SAMSEG_ENABLED: ${SAMSEG_ENABLED:-false}
+      SAMSEG_DEVICE: ${SAMSEG_DEVICE:-cpu}
+    ports:
+      - "8020:8020"
+    volumes:
+      - agent-files:/app/agent-files
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - agent-flow-net
+    restart: unless-stopped
+
+  sandbox-image:
+    image: docker:29-cli
+    container_name: agent-flow-sandbox-image-builder
+    working_dir: /src
+    command: build -t agent-sandbox:latest -f sandbox/Dockerfile .
+    volumes:
+      - .:/src
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - agent-flow-net
+    restart: "no"
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: agent-flow-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-001117}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - agent-flow-net
+    restart: unless-stopped
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.26.x
+    container_name: agent-flow-geoserver
+    environment:
+      GEOSERVER_ADMIN_USER: ${GEOSERVER_USERNAME:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${GEOSERVER_PASSWORD:-geoserver}
+    ports:
+      - "8081:8080"
+    volumes:
+      - geoserver-data:/opt/geoserver_data
+    networks:
+      - agent-flow-net
+    restart: unless-stopped
+
+volumes:
+  agent-files:
+  postgres-data:
+  geoserver-data:
+
+networks:
+  agent-flow-net:
+    name: agent-flow-net

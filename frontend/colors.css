@@ -1,0 +1,40 @@
+/* ==================== 色彩体系 (集中管理) ====================
+ * 入参: 无 (CSS 自定义属性, 供 :root 全局消费)
+ * 方法: 按"职责"分两块声明颜色变量 ——
+ *   ui  : 系统界面配色 (背景 / 边框 / 强调 / 文字 / 语义状态色)
+ *   map : GeoServer 数据渲染色 (图表系列色 / 矢量要素样式 / 边界 SLD),
+ *         由 map/wms-render.js 通过 _cssVar(name, fallback) 读取
+ * 出参: 无 (声明型样式表, 自身不产生可视输出)
+ * 说明: 字体 / 字号 / 圆角等非颜色令牌仍留在 styles.css;
+ *       GeoServer 图例 legend.hex 由后端动态返回, 不在此静态化。 */
+:root {
+  /* ---------- ui: 系统界面配色 ---------- */
+  --bg-base:#ffffff;--bg-panel:#f1f7fc;--bg-elevated:#fff;--bg-hover:#e0eef8;--bg-inset:#e9f2f9;
+  --border:#cee0ee;--border-strong:#9dbcd5;
+  --accent:#2c6fbd;--accent-hover:#205599;--accent-soft:rgba(44,111,189,0.08);
+  --accent-green:#3fae5a;--accent-amber:#d68910;--accent-red:#cf4444;--accent-purple:#3949c0;
+  --accent-blue:#559ed8;
+  --text-primary:#1e2d3a;--text-secondary:#5a7488;--text-muted:#94abbf;
+  /* 兼容令牌: 右侧面板主色别名 (与 --accent / --accent-hover 同值, 历史引用保留) */
+  --primary:#2c6fbd;--primary-dark:#205599;
+  /* 调用链路追踪弹窗 (trace-modal) 专属配色 */
+  --trace-sub:#6b8193;         /* 副标题文字 */
+  --trace-card-bg:#fbfdff;     /* 追踪条目卡片底 */
+  --trace-card-border:#e1edf6; /* 追踪条目卡片边 */
+  --trace-pre-bg:#f3f8fc;      /* 代码块底 */
+  --trace-pre-text:#395061;    /* 代码块文字 */
+  --trace-time:#7b92a5;        /* 时间戳文字 */
+  --trace-empty:#8aa0b1;       /* 空态文字 */
+  --trace-prompt:#7c4dff;      /* prompt 类型标识色 (紫) */
+
+  /* ---------- map: GeoServer 数据渲染色 ---------- */
+  /* 图表数据系列调色板 (饼图 / 柱状图按序取色, 见 wms-render.js renderChart) */
+  --map-chart-1:#4d6bfe;--map-chart-2:#10b981;--map-chart-3:#f59e0b;
+  --map-chart-4:#ef4444;--map-chart-5:#8b5cf6;--map-chart-6:#ec4899;
+  /* 矢量要素样式 (见 wms-render.js 矢量图层, 按线 / 面几何类型区分) */
+  --map-vector-line:#FF6B35;               /* 线要素描边色 (醒目橙) */
+  --map-vector-fill:rgba(44,111,189,0.25); /* 面要素填充色 (基于 accent 的半透明) */
+  --map-vector-stroke:#2c6fbd;             /* 面要素描边色 */
+  /* GeoServer 边界线 SLD 描边 / 标注色 (默认跟随主题强调色, 见 _makeBoundarySLD) */
+  --map-boundary:var(--accent);
+}

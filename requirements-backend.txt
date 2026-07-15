@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+requests
+langchain-core
+langchain-openai
+openai
+psycopg2-binary
+pydantic
+tiktoken
+pandas
+numpy
+Pillow
+matplotlib
+openpyxl

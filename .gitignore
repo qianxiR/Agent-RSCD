@@ -1,0 +1,41 @@
+.history
+.vscode
+Apix-version_2.1
+docker
+node_modules
+npm-debug.log
+package-lock.json
+package.json
+yarn.lock
+yarn-error.log
+yarn-debug.log
+yarn-debug.log.json
+yarn-error.log.json
+yarn-debug.log.json
+tests/__pycache__
+tests/data
+backend/model/SamSeg/SamSeg/resources
+agent-files
+output
+*.pyc
+*.log
+*.png
+*.pt
+
+# Windows reserved filenames
+nul
+
+# model cache
+backend/model/SamSeg/SamSeg/checkpoints/
+
+# test artifacts / backups
+tests/artifacts/test-vector.html
+
+# Local Codex desktop bundle
+OpenAI.Codex_26.506.3741.0_x64_免安装版/
+
+# Generated test reports, metrics, and database backups
+tests/artifacts/
+
+# Playwright CLI debugging snapshots
+.playwright-cli/
