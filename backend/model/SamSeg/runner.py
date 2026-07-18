@@ -358,6 +358,8 @@ def run_segment(
             shp_stem=Path(vector_output_path).stem,
         )
         if vec:
+            if vec.get("vector_path"):
+                result["vector_path"] = vec["vector_path"]
             result["vector_stats"] = vec["vector_stats"]
             if vec.get("shp_path"):
                 result["shp_path"] = vec["shp_path"]
@@ -491,6 +493,8 @@ def run_change_detection(
             shp_stem=Path(vector_output_path).stem,
         )
         if vec:
+            if vec.get("vector_path"):
+                result["vector_path"] = vec["vector_path"]
             result["vector_stats"] = vec["vector_stats"]
             if vec.get("shp_path"):
                 result["shp_path"] = vec["shp_path"]

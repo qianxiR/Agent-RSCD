@@ -335,7 +335,7 @@ def generate_monitor_report(
     # 准备 Jinja2 上下文
     context = {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "region_name": region_name,
+        "region_name": region_name or "未命名监测区域",
         "t1_name": t1_name or Path(change_geojson_path).stem + "_t1",
         "t2_name": t2_name or Path(change_geojson_path).stem + "_t2",
         "change_type": change_type,
@@ -344,11 +344,17 @@ def generate_monitor_report(
         "total_features": stats["total_features"],
         "total_area_m2": stats["total_area_m2"],
         "total_area_ha": round(stats["total_area_m2"] / 10000, 2),
-        "changed_percent": "—",  # 无监测区总面积时留空
+        "changed_percent": "未计算（未提供监测范围总面积）",
         "per_class": per_class,
         "dominant_class": dominant,
         "overlay_image_path": str(overlay_path) if overlay_path else "",
         "overlay_image_caption": overlay_image_caption,
+        "analysis_method": "基于输入矢量图斑的自动统计与空间叠加分析",
+        "data_source_note": "本报告使用当前任务产生或从 GeoServer 回读的矢量图斑及原始影像证据。",
+        "quality_note": (
+            "自动监测结果受影像时相、空间分辨率、云阴影、配准误差、分类模型和图斑提取参数影响。"
+            "报告中的变化结论为初判结果，不构成权属、用途、违法或审批认定。"
+        ),
     }
 
     # 渲染 Markdown
@@ -529,12 +535,34 @@ def _md_to_pdf(md_content: str, output_path: str) -> None:
         except Exception:
             continue
 
-    doc = SimpleDocTemplate(output_path, pagesize=A4,
-                            topMargin=50, bottomMargin=50, leftMargin=50, rightMargin=50)
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        topMargin=62,
+        bottomMargin=52,
+        leftMargin=54,
+        rightMargin=54,
+        title="自然资源遥感监测成果报告",
+        author="国土智察 自然资源遥感智能监测系统",
+    )
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle("H1CJK", parent=styles["Heading1"], fontName=font_name, fontSize=18, spaceAfter=14)
-    h2 = ParagraphStyle("H2CJK", parent=styles["Heading2"], fontName=font_name, fontSize=14, spaceAfter=10)
-    body = ParagraphStyle("BodyCJK", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=18)
+    h1 = ParagraphStyle(
+        "H1CJK", parent=styles["Heading1"], fontName=font_name, fontSize=20,
+        leading=28, alignment=1, textColor=colors.HexColor("#17365D"), spaceAfter=22,
+    )
+    h2 = ParagraphStyle(
+        "H2CJK", parent=styles["Heading2"], fontName=font_name, fontSize=13,
+        leading=20, textColor=colors.HexColor("#17365D"), spaceBefore=14, spaceAfter=8,
+        borderWidth=0, borderPadding=0,
+    )
+    body = ParagraphStyle(
+        "BodyCJK", parent=styles["BodyText"], fontName=font_name, fontSize=10,
+        leading=17, spaceAfter=3,
+    )
+    caption = ParagraphStyle(
+        "CaptionCJK", parent=body, alignment=1, fontSize=8.5, leading=13,
+        textColor=colors.HexColor("#595959"), spaceAfter=8,
+    )
 
     story = []
     lines = md_content.split("\n")
@@ -556,17 +584,39 @@ def _md_to_pdf(md_content: str, output_path: str) -> None:
                     table_rows.append(row)
                 i += 1
             if table_rows:
-                t = Table(table_rows, hAlign="LEFT")
+                column_count = max(len(row) for row in table_rows)
+                table_cells = []
+                for row in table_rows:
+                    normalized = row + [""] * (column_count - len(row))
+                    table_cells.append([
+                        Paragraph(
+                            cell.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+                            body,
+                        )
+                        for cell in normalized
+                    ])
+                t = Table(
+                    table_cells,
+                    colWidths=[doc.width / column_count] * column_count,
+                    repeatRows=1,
+                    hAlign="LEFT",
+                    splitByRow=1,
+                )
                 t.setStyle(TableStyle([
                     ("FONTNAME", (0, 0), (-1, -1), font_name),
                     ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4a90e2")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f0f7ff")]),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B7C9D6")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#EDF3F8")]),
                 ]))
                 story.append(t)
-                story.append(Spacer(1, 8))
+                story.append(Spacer(1, 12))
             continue
         elif _parse_markdown_image(line):
             image_info = _parse_markdown_image(line) or {}
@@ -574,7 +624,7 @@ def _md_to_pdf(md_content: str, output_path: str) -> None:
                 story,
                 image_info.get("path", ""),
                 image_info.get("caption", ""),
-                body,
+                caption,
                 doc.width,
             )
         elif line.startswith("---"):
@@ -582,12 +632,34 @@ def _md_to_pdf(md_content: str, output_path: str) -> None:
         elif line.strip():
             # 转义 XML 特殊字符
             text = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
             story.append(Paragraph(text, body))
         else:
             story.append(Spacer(1, 6))
         i += 1
 
-    doc.build(story)
+    def _draw_page(canvas, page_doc):
+        """
+        入参:
+          - canvas: ReportLab 当前页画布。
+          - page_doc: 当前 PDF 文档对象。
+        方法:
+          - 在每页绘制统一页眉、页脚和页码，保证多页报告的身份与页序连续。
+        出参:
+          - None。
+        """
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#1F4E78"))
+        canvas.setLineWidth(0.6)
+        canvas.line(page_doc.leftMargin, A4[1] - 38, A4[0] - page_doc.rightMargin, A4[1] - 38)
+        canvas.setFont(font_name, 8)
+        canvas.setFillColor(colors.HexColor("#595959"))
+        canvas.drawString(page_doc.leftMargin, A4[1] - 29, "自然资源遥感监测成果报告")
+        canvas.drawRightString(A4[0] - page_doc.rightMargin, 27, f"第 {canvas.getPageNumber()} 页")
+        canvas.drawString(page_doc.leftMargin, 27, "国土智察 自然资源遥感智能监测系统")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
 
 
 def _md_to_docx(md_content: str, output_path: str) -> None:

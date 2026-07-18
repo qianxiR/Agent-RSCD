@@ -420,6 +420,57 @@ def fork_from_node(conversation_id: str, parent_node_id: str) -> Optional[str]:
             return None
 
 
+def fork_before_node(conversation_id: str, target_node_id: str) -> Optional[Dict[str, Any]]:
+    """
+    入参:
+      - conversation_id: 会话 ID。
+      - target_node_id: 要被编辑替换的消息节点 ID。
+    方法:
+      - 读取目标节点的父节点，把目标及其后的当前分支消息标记为隐藏。
+      - 将 active_leaf_node 回退到目标父节点；目标为首条消息时回退到 NULL 根节点。
+    出参:
+      - {parent_node_id, hidden_count}；节点不存在或数据库不可用时返回 None。
+    """
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, parent_id FROM message
+                       WHERE conversation_id = %s AND node_id = %s AND is_active = TRUE""",
+                    (conversation_id, target_node_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    logger.warning(f"[ForkBefore] 节点不存在: conv={conversation_id} node={target_node_id}")
+                    return None
+                target_db_id, parent_node_id = row
+                cur.execute(
+                    """UPDATE message SET is_active = FALSE
+                       WHERE conversation_id = %s AND id >= %s AND is_active = TRUE""",
+                    (conversation_id, target_db_id),
+                )
+                hidden_count = cur.rowcount
+                cur.execute(
+                    """UPDATE conversation
+                       SET active_leaf_node = %s, updated_at = now()
+                       WHERE id = %s""",
+                    (parent_node_id, conversation_id),
+                )
+            conn.commit()
+            parent_value = str(parent_node_id) if parent_node_id else None
+            logger.info(
+                f"[ForkBefore] conv={conversation_id} target={target_node_id} "
+                f"parent={parent_value} hidden={hidden_count}"
+            )
+            return {"parent_node_id": parent_value, "hidden_count": hidden_count}
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[ForkBefore] 失败 conv={conversation_id}: {e}")
+            return None
+
+
 def get_active_leaf_node(conversation_id: str) -> Optional[str]:
     """获取会话当前 active 分支的叶子节点 node_id (新消息挂在这之后)。"""
     with get_conn() as conn:
@@ -1746,6 +1797,50 @@ def get_task(task_id: int) -> Optional[Dict[str, Any]]:
             }
         except Exception as e:
             logger.error(f"查询任务失败 [task={task_id}]: {e}")
+            return None
+
+
+def get_latest_plan_task(conversation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    入参:
+      - conversation_id: 当前会话 ID。
+    方法:
+      - 查询最近一条 task_type=agent_plan 的 ai_task 完整快照。
+      - 复用 ai_task.input/output 保存计划, 不新增数据库表。
+    出参:
+      - 计划任务 dict; 不存在或数据库不可用时返回 None。
+    """
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, conversation_id, user_id, task_type, tool_name,
+                              status, input, output, progress, error,
+                              started_at, finished_at, created_at,
+                              parent_task_id, agent_role, goal, verification
+                       FROM ai_task
+                       WHERE conversation_id = %s AND task_type = 'agent_plan'
+                       ORDER BY id DESC LIMIT 1""",
+                    (conversation_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+            return {
+                "id": row[0], "conversation_id": row[1], "user_id": row[2],
+                "task_type": row[3], "tool_name": row[4], "status": row[5],
+                "input": row[6], "output": row[7], "progress": row[8],
+                "error": row[9],
+                "started_at": row[10].isoformat() if row[10] else None,
+                "finished_at": row[11].isoformat() if row[11] else None,
+                "created_at": row[12].isoformat() if row[12] else None,
+                "parent_task_id": row[13], "agent_role": row[14],
+                "goal": row[15], "verification": row[16],
+            }
+        except Exception as e:
+            logger.error(f"查询计划任务失败 [conv={conversation_id}]: {e}")
             return None
 
 

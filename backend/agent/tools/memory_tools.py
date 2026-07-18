@@ -49,11 +49,19 @@ def view_user_memory() -> Dict[str, Any]:
     """
     try:
         from backend.agent.memory import agent_db
+        from backend.agent.memory.lesson_policy import format_accepted_lesson_for_prompt
         user_id = get_current_user_id()
         # 合并: 当前用户私有 + 全局共享 (与 build_user_profile_text 注入逻辑一致)
         own = agent_db.load_user_memory(user_id) or []
         shared = agent_db.load_user_memory("global") or []
-        memories = own + shared
+        memories = []
+        for item in own + shared:
+            if item.get("category") != "lesson":
+                memories.append(item)
+                continue
+            accepted_value = format_accepted_lesson_for_prompt(item.get("value"))
+            if accepted_value:
+                memories.append({**item, "value": accepted_value})
 
         if not memories:
             return {

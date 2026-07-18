@@ -1,3 +1,20 @@
+<!-- skill-contract
+{
+  "version": "1.0",
+  "trigger_conditions": ["单张遥感影像语义分割", "提取指定地物并生成监测报告"],
+  "required_inputs": ["image_path", "classes"],
+  "steps": [
+    {"step_id": "segment", "goal": "执行指定类别语义分割", "tool_name": "segment_image", "required_inputs": ["image_path", "classes"], "expected_outputs": ["vector_url", "mask_tif_url", "stats"], "verification_rules": ["agent_validation.status=passed"], "required": true},
+    {"step_id": "report", "goal": "基于分割矢量生成监测报告", "tool_name": "generate_monitor_report", "required_inputs": ["change_geojson_path"], "expected_outputs": ["report_path", "report_url"], "verification_rules": ["agent_validation.status=passed", "report_path exists"], "required": true}
+  ],
+  "tool_allowlist": ["segment_image", "generate_monitor_report"],
+  "expected_outputs": ["mask_tif_url", "vector_url", "report_url"],
+  "verification_rules": ["每个必需步骤均为 agent_validation.status=passed"],
+  "fallback_rule": "失败时执行 repair_plan；证据不足时不得宣告完成",
+  "promotion_evidence": "分割产物和报告均通过真实路径验证"
+}
+-->
+
 # 工作流：一键分割 + 可视化 + 报告
 
 > 当用户上传一张影像并要求"分割""识别地物""分析类别"时，自动执行完整的分割→可视化→报告链路。

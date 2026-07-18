@@ -17,6 +17,7 @@ Skill 文档约定 (Markdown 头部可含 YAML-like 元信息, 解析尽力而�
 
 依赖方向: model.skills 仅依赖标准库 + config, 无跨层依赖。
 """
+import json
 import os
 import re
 import logging
@@ -30,6 +31,27 @@ _SKILLS_DIR = Path(__file__).resolve().parent
 
 # 已加载的 skill 列表 (首次访问时懒加载, 内容稳定后缓存)
 _skills_cache: Optional[List[Dict[str, Any]]] = None
+
+
+def _parse_contract(text: str) -> Dict[str, Any]:
+    """
+    入参:
+      - text: 完整 Markdown 技能文档。
+    方法:
+      - 读取 `<!-- skill-contract ... -->` 中的 JSON 对象。
+      - 解析失败返回空字典, 由 selector 的质量门拒绝执行。
+    出参:
+      - 结构化技能契约。
+    """
+    match = re.search(r"<!--\s*skill-contract\s*(\{.*?\})\s*-->", text, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        contract = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        logger.warning(f"技能契约 JSON 无法解析: {exc}")
+        return {}
+    return contract if isinstance(contract, dict) else {}
 
 
 def _parse_markdown(file_path: Path) -> Dict[str, Any]:
@@ -94,6 +116,7 @@ def _parse_markdown(file_path: Path) -> Dict[str, Any]:
         "keywords": [k for k in keywords if k],
         "content": text,
         "file": file_path.name,
+        "contract": _parse_contract(text),
     }
 
 
@@ -132,7 +155,14 @@ def reload() -> List[Dict[str, Any]]:
 def list_skills() -> List[Dict[str, Any]]:
     """返回所有已加载 skill 的元信息 (不含全文 content, 供 agent 选择)。"""
     return [
-        {"name": s["name"], "title": s["title"], "keywords": s["keywords"]}
+        {
+            "name": s["name"],
+            "title": s["title"],
+            "keywords": s["keywords"],
+            "version": (s.get("contract") or {}).get("version"),
+            "contract_valid": bool(s.get("contract")),
+            "required_inputs": list((s.get("contract") or {}).get("required_inputs") or []),
+        }
         for s in _load_all()
     ]
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 核心 Agent 聊天服务 (Agent 层)
 - 入参: ToolChatRequest (prompt, model, conversation_id 等)
 - 方法: WebSocket 全双工处理
@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
+    SystemMessage,
     ToolMessage,
 )
 
@@ -53,11 +54,22 @@ from backend.agent.ws_manager import WebSocketManager
 from backend.agent.memory import memory_context as memory_mod
 from backend.agent.memory import agent_db
 from backend.agent.memory import pattern_tracker
+from backend.agent.memory.task_state import (
+    apply_step_observation,
+    build_plan_context_text,
+    can_finalize_plan,
+    create_plan_state,
+    load_plan_state,
+    persist_plan_state,
+    start_tool_step,
+)
+from backend.agent.memory.lesson_policy import parse_accepted_lesson_contracts
 from backend.agent.runtime.observation_builder import (
     build_observation_tool_message,
     build_repair_followup_system_message,
     should_disable_tools_for_next_repair_turn,
 )
+from backend.agent.runtime.skill_execution import apply_skill_selection_to_plan
 from backend.agent.observability.decision_audit import (
     append_jsonl,
     audit_repair_plan_following,
@@ -879,6 +891,12 @@ class AgentChatService:
             disable_tools_next_turn = False
             pending_repair_audit = None
             pending_repair_attempt = None
+            current_plan, plan_task_id = load_plan_state(conversation_id)
+            if current_plan and current_plan.get("status") == "completed":
+                current_plan, plan_task_id = None, None
+            accepted_lessons = parse_accepted_lesson_contracts(
+                agent_db.load_user_memory("global", category="lesson")
+            )
             # ★ 本轮聊天图片收集: chat_image action 产生的图片, 待最终回复落库时挂到最后一条 assistant 消息
             _turn_images = []
             uploaded_images = _normalize_chat_images(req.images)
@@ -1061,6 +1079,28 @@ class AgentChatService:
                 # 无工具调用 → thinking 内容即为最终回复
                 if not ai_message.tool_calls:
                     content = ai_message.content or ""
+                    plan_allowed, plan_reason = can_finalize_plan(current_plan)
+                    blocked_step = next(
+                        (
+                            item for item in (current_plan or {}).get("steps", [])
+                            if item.get("required", True) and item.get("status") == "blocked"
+                        ),
+                        None,
+                    )
+                    next_action = ((blocked_step or {}).get("repair_plan") or {}).get("next_action") or ""
+                    waiting_for_user = next_action.startswith("request_")
+                    if not plan_allowed and not waiting_for_user:
+                        all_messages.append(AIMessage(
+                            content=content,
+                            additional_kwargs={"thinking_content": ai_message.content or content},
+                        ))
+                        all_messages.append(SystemMessage(content=(
+                            f"显式计划完成门已拦截本次收尾: {plan_reason}。"
+                            "不得向用户宣告完成；立即执行当前步骤的 next_action 或 repair_plan，"
+                            "并在获得 agent_validation.status=passed 后再收尾。\n"
+                            f"{build_plan_context_text(current_plan)}"
+                        )))
+                        continue
                     if content:
                         for i in range(0, len(content), 5):
                             await ws_manager.send_to_session(session_id, {
@@ -1080,7 +1120,8 @@ class AgentChatService:
                     if _turn_images:
                         agent_db.set_last_assistant_images(conversation_id, _turn_images)
                     # ★ 标记完成 + 立即发 done (不等记忆/摘要, 降低首字节延迟)
-                    agent_db.update_conversation_status(conversation_id, "completed")
+                    conversation_status = "completed" if plan_allowed else "stopped"
+                    agent_db.update_conversation_status(conversation_id, conversation_status)
                     await ws_manager.send_to_session(session_id, {
                         "type": "done",
                         "conversation_id": conversation_id,
@@ -1112,6 +1153,12 @@ class AgentChatService:
                     tool_name = tool_call["name"]
                     tool_args = tool_call["args"]
                     tool_call_id = tool_call.get("id", str(uuid.uuid4()))
+                    if current_plan is None:
+                        current_plan = create_plan_state(conversation_id, req.prompt)
+                    active_plan_step = start_tool_step(current_plan, tool_name, tool_args)
+                    plan_task_id = persist_plan_state(
+                        conversation_id, req.user_id, current_plan, plan_task_id
+                    )
 
                     # 通知前端
                     await ws_manager.send_to_session(session_id, {
@@ -1159,12 +1206,16 @@ class AgentChatService:
                             #   LangChain @tool 包装后, 原函数存在 .coroutine (async) 或 .func (sync)
                             import inspect as _inspect
                             _underlying = getattr(tool_func, 'coroutine', None) or getattr(tool_func, 'func', None)
+                            invoke_args = dict(tool_args)
+                            if tool_name == "lookup_skill":
+                                invoke_args["accepted_lessons"] = accepted_lessons
+                                invoke_args["current_plan"] = current_plan
                             if _underlying and _inspect.iscoroutinefunction(_underlying):
                                 # 异步工具 (沙盒) → event loop 上 await, 支持 CancelledError 响应
-                                tool_result = await tool_func.ainvoke(tool_args)
+                                tool_result = await tool_func.ainvoke(invoke_args)
                             else:
                                 # 同步工具 → 线程池, 不阻塞 event loop
-                                tool_result = await asyncio.to_thread(tool_func.invoke, tool_args)
+                                tool_result = await asyncio.to_thread(tool_func.invoke, invoke_args)
                         except asyncio.CancelledError:
                             # ★ 工具执行中被取消 → 标记任务 cancelled 后向上抛, 走 CancelledError 分支回滚
                             if _task_id is not None:
@@ -1282,7 +1333,25 @@ class AgentChatService:
                         tool_result=tool_result,
                         user_goal=req.prompt,
                     )
+                    apply_step_observation(
+                        current_plan,
+                        active_plan_step["step_id"],
+                        tool_name,
+                        tool_result if isinstance(tool_result, dict) else {},
+                    )
+                    if tool_name == "lookup_skill" and isinstance(tool_result, dict):
+                        skill_data = tool_result.get("data")
+                        skill_data = skill_data if isinstance(skill_data, dict) else {}
+                        apply_skill_selection_to_plan(
+                            current_plan,
+                            skill_data.get("selection") or {},
+                            skill_data.get("context_inputs") or {},
+                        )
+                    plan_task_id = persist_plan_state(
+                        conversation_id, req.user_id, current_plan, plan_task_id
+                    )
                     all_messages.append(tool_message)
+                    all_messages.append(SystemMessage(content=build_plan_context_text(current_plan)))
                     await ws_manager.send_to_session(session_id, {
                         "type": "tool_result",
                         "tool_call_id": tool_call_id,
@@ -1335,13 +1404,6 @@ class AgentChatService:
                     logger.warning(f"[WS] 沙盒回收调度失败 conv={conversation_id}: {sb_err}")
 
             agent_db.update_conversation_status(conversation_id, "stopped")
-            try:
-                await ws_manager.send_to_session(session_id, {
-                    "type": "chat_stopped",
-                    "conversation_id": conversation_id,
-                })
-            except Exception as send_err:
-                logger.warning(f"[WS] Failed to send chat_stopped: {send_err}")
 
             # ★ 对话结束时提取一次长期记忆 (全量分析; 取代每轮提取, 降低 LLM 调用成本)
             #   与下面 _async_self_correction_scan 并行两路: 本路偏好/事实, 自纠路错误案例.
@@ -1388,6 +1450,5 @@ class AgentChatService:
                 if not ws_manager.active_tasks[session_id]:
                     del ws_manager.active_tasks[session_id]
             logger.info(f"[WS] Task cleaned up: session={session_id}, conv={conversation_id}")
-
 
 

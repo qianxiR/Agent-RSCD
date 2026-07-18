@@ -58,7 +58,6 @@ _CORRECTION_KEYWORDS = [
 
 # 教训记忆的 user_id (全局共享, 所有用户都能读到)
 GLOBAL_LESSON_USER_ID = "global"
-GLOBAL_WORKFLOW_USER_ID = "global"
 
 # 教训去重窗口: 同一工具 + 同一错误关键词 1 小时内只记一次 (避免刷库)
 _DEDUP_TTL_SECONDS = 3600
@@ -92,13 +91,13 @@ _DISTILL_LESSON_SYSTEM = """你是经验提炼助手。下面会给你一段"工
 """
 
 
-async def _distill_correction_to_structured(correction: Dict[str, Any]) -> Optional[str]:
+async def _distill_correction_to_structured(correction: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """用 LLM 把一次自纠原始素材提炼成五段结构化经验文本.
 
     入参:
       - correction: detect_self_corrections 返回的单条 dict (7 字段)
     出参:
-      - 成功: 返回拼好的结构化文本 (现象/根因/正确方法/验证信号/严重度 五段)
+      - 成功: 返回结构化 dict (现象/根因/正确方法/验证信号/严重度 五段)
       - 失败 (LLM 超时/返回缺字段/解析错误): 返回 None (★ 不降级, 由调用方决定跳过)
 
     复用 memory_context 的 LLM 实例和 JSON 解析器, 不重复造轮子.
@@ -157,15 +156,8 @@ async def _distill_correction_to_structured(correction: Dict[str, Any]) -> Optio
         logger.info(f"[SelfCorrection] 严重度非法 '{severity}', 跳过 tool={correction.get('tool_name')}")
         return None
 
-    # 拼成固定五段格式文本 (与 build_user_profile_text 注入端契约一致)
-    text = (
-        f"现象：{data['现象'].strip()}\n"
-        f"根因：{data['根因'].strip()}\n"
-        f"正确方法：\n{data['正确方法'].strip()}\n"
-        f"验证信号：{data['验证信号'].strip()}\n"
-        f"严重度：{severity}"
-    )
-    return text
+    data["严重度"] = severity
+    return data
 
 
 def detect_self_corrections(messages: List) -> List[Dict[str, Any]]:
@@ -202,8 +194,17 @@ def detect_self_corrections(messages: List) -> List[Dict[str, Any]]:
 
         # 解析 ToolMessage content (是 JSON 字符串)
         tool_result = _parse_tool_content(msg.content)
-        if not tool_result or tool_result.get("type") != "error":
-            continue  # 不是错误, 跳过
+        failed_validation = tool_result.get("agent_validation") if isinstance(tool_result, dict) else None
+        failed_validation = failed_validation if isinstance(failed_validation, dict) else {}
+        is_failed_observation = (
+            isinstance(tool_result, dict)
+            and (
+                tool_result.get("type") == "error"
+                or failed_validation.get("status") in {"failed", "warning"}
+            )
+        )
+        if not is_failed_observation:
+            continue
 
         # 找到失败的工具名
         failed_tc = tool_call_index.get(msg.tool_call_id, {})
@@ -211,12 +212,15 @@ def detect_self_corrections(messages: List) -> List[Dict[str, Any]]:
         failed_args = failed_tc.get("args", {})
         error_msg = (tool_result.get("msg") or tool_result.get("stderr")
                      or str(tool_result))[:300]
+        repair_plan = failed_validation.get("repair_plan") or {}
 
         # 向后看最多 6 条消息, 找"修复 thinking" + "成功重调"
         correction_thinking = ""
         fixed_by_tool = None
         fixed_args_hint = ""
         found_fix = False
+        next_agent_validation = {}
+        repaired_tool_call_id = ""
 
         for j in range(i + 1, min(i + 7, n)):
             nxt = messages[j]
@@ -240,8 +244,12 @@ def detect_self_corrections(messages: List) -> List[Dict[str, Any]]:
                                 kmsg = messages[k]
                                 if isinstance(kmsg, ToolMessage) and kmsg.tool_call_id == tc.get("id"):
                                     kres = _parse_tool_content(kmsg.content)
-                                    if kres and kres.get("type") != "error":
+                                    validation = kres.get("agent_validation") if isinstance(kres, dict) else None
+                                    validation = validation if isinstance(validation, dict) else {}
+                                    if validation.get("status") == "passed":
                                         found_fix = True
+                                        next_agent_validation = validation
+                                        repaired_tool_call_id = tc.get("id") or ""
                                     break
                             if found_fix:
                                 break
@@ -257,6 +265,14 @@ def detect_self_corrections(messages: List) -> List[Dict[str, Any]]:
                 "fixed_by_tool": fixed_by_tool,
                 "fixed_args_hint": fixed_args_hint,
                 "severity": severity,  # high / medium / low
+                "failure_type": repair_plan.get("failure_type") or "unknown_failure",
+                "repair_plan": repair_plan,
+                "actual_repair_action": fixed_by_tool,
+                "next_agent_validation": next_agent_validation,
+                "repair_success": True,
+                "evidence_refs": [
+                    ref for ref in [msg.tool_call_id, repaired_tool_call_id] if ref
+                ],
                 "detected_at": datetime.now().isoformat(timespec="seconds"),
             })
 
@@ -344,26 +360,40 @@ async def save_lesson_to_memory(correction: Dict[str, Any]) -> bool:
 
     返回: 是否新写入 (True=新教训, False=去重跳过或提炼失败)
     """
-    # 去重 key: 工具名 + 错误关键词指纹
-    error_fingerprint = _extract_error_fingerprint(correction["error_msg"])
-    dedup_key = f"lesson_{correction['tool_name']}_{error_fingerprint}"
-
-    # 时间窗去重 (内存级, 避免短期重复刷库)
-    import time
-    now = time.time()
-    if dedup_key in _recent_lessons:
-        if now - _recent_lessons[dedup_key] < _DEDUP_TTL_SECONDS:
-            logger.debug(f"[SelfCorrection] 教训去重跳过: {dedup_key}")
-            return False
-    _recent_lessons[dedup_key] = now
-
     # ★ LLM 提炼: 失败返回 None → 不降级, 直接跳过
-    value = await _distill_correction_to_structured(correction)
-    if not value:
-        logger.info(f"[SelfCorrection] 提炼失败跳过 (不降级) tool={correction['tool_name']} key={dedup_key}")
+    distilled = await _distill_correction_to_structured(correction)
+    if not distilled:
+        logger.info(f"[SelfCorrection] 提炼失败跳过 (不降级) tool={correction['tool_name']}")
         return False
 
     from backend.agent.memory import agent_db
+    from backend.agent.memory.lesson_policy import (
+        audit_lesson_decision,
+        build_lesson_contract,
+        choose_strongest_lesson,
+    )
+
+    lesson = build_lesson_contract(correction, distilled)
+    audit_lesson_decision(lesson)
+    if lesson["status"] != "accepted":
+        logger.info(
+            f"[SelfCorrection] 教训未准入: status={lesson['status']} "
+            f"reason={lesson['admission_reason']}"
+        )
+        return False
+
+    dedup_key = lesson["dedup_key"]
+    import time
+    now = time.time()
+    if dedup_key in _recent_lessons and now - _recent_lessons[dedup_key] < _DEDUP_TTL_SECONDS:
+        logger.debug(f"[SelfCorrection] 教训去重跳过: {dedup_key}")
+        return False
+    existing = agent_db.load_user_memory(GLOBAL_LESSON_USER_ID, category="lesson")
+    if not choose_strongest_lesson(lesson, [item.get("value") for item in existing]):
+        logger.debug(f"[SelfCorrection] 已有证据强度不低于候选: {dedup_key}")
+        return False
+    _recent_lessons[dedup_key] = now
+    value = json.dumps(lesson, ensure_ascii=False)
     ok = agent_db.save_user_memory(
         user_id=GLOBAL_LESSON_USER_ID,
         key=dedup_key,
@@ -372,70 +402,10 @@ async def save_lesson_to_memory(correction: Dict[str, Any]) -> bool:
     )
     if ok:
         logger.info(
-            f"[SelfCorrection] 教训已沉淀 (结构化): tool={correction['tool_name']} "
+            f"[SelfCorrection] 教训已沉淀 (accepted): tool={correction['tool_name']} "
             f"severity={correction['severity']} key={dedup_key}"
         )
     return ok
-
-
-def save_workflow_to_memory(correction: Dict[str, Any]) -> bool:
-    """
-    [DEPRECATED] 把一次"失败 -> 探索 -> 修复成功"过程沉淀为全局执行过程记忆。
-
-    ★ 已废弃: scan_and_save_corrections 不再调用此函数 (与 lesson 内容重复,
-      且为旧的流水账格式). 保留仅为避免破坏 import. 结构化教训统一走 save_lesson_to_memory.
-
-    入参:
-      - correction: detect_self_corrections 识别出的单次自纠结果
-    方法:
-      - 基于工具名与错误指纹生成稳定 key
-      - value 记录失败现象、探索动作、成功修复方式与复用建议
-      - 这样做是为了让长期记忆不仅记"结论教训", 还记"可复用执行路径"
-    出参:
-      - True 表示成功写入或覆盖全局过程记忆
-    """
-    from backend.agent.memory import agent_db
-
-    error_fingerprint = _extract_error_fingerprint(correction["error_msg"])
-    process_key = f"workflow_{correction['tool_name']}_{error_fingerprint}"
-    thinking = (correction.get("correction_thinking") or "").strip() or "无显式反思文本"
-    fixed_by_tool = correction.get("fixed_by_tool") or correction["tool_name"]
-    fixed_args_hint = correction.get("fixed_args_hint") or "无参数摘要"
-    value = (
-        f"执行过程记忆: 工具 {correction['tool_name']} 初次执行失败，"
-        f"失败现象为 {correction['error_msg'][:200]}。"
-        f"随后智能体进行了如下探索/修复思路：{thinking[:240]}。"
-        f"最终通过 {fixed_by_tool} 完成修复，关键参数或动作摘要为 {fixed_args_hint[:200]}。"
-        f"复用建议: 下次遇到同类错误，优先沿这条修复路径继续探索，不要直接停止或改写成用户教程。"
-    )
-    ok = agent_db.save_user_memory(
-        user_id=GLOBAL_WORKFLOW_USER_ID,
-        key=process_key,
-        value=value,
-        category="workflow",
-    )
-    if ok:
-        logger.info(
-            f"[SelfCorrection] 过程记忆已沉淀: tool={correction['tool_name']} key={process_key}"
-        )
-    return ok
-
-
-def _extract_error_fingerprint(error_msg: str) -> str:
-    """从错误消息提取指纹 (用于去重).
-    保留关键英文词 + 中文关键词, 去掉具体路径/数字.
-    """
-    # 去掉路径和数字
-    s = re.sub(r"[A-Za-z]:[\\/][^\s]+", "<path>", error_msg)  # Windows 路径
-    s = re.sub(r"/[^\s]+", "<path>", s)  # Unix 路径
-    s = re.sub(r"\d+", "N", s)  # 数字
-    s = re.sub(r"\s+", " ", s).strip()
-    # 截断
-    if len(s) > 60:
-        s = s[:60]
-    # 转 ascii 安全的 key
-    s = re.sub(r"[^A-Za-z0-9_<>\u4e00-\u9fa5]", "_", s)
-    return s or "unknown"
 
 
 async def scan_and_save_corrections(messages: List, user_id: str = None) -> List[Dict]:

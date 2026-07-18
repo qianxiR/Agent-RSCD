@@ -43,7 +43,7 @@ function startResize(which, ev) {
     <header class="app-header">
       <h1>
         <img src="/image.svg" alt="logo" class="header-logo">
-        <span class="header-accent">国土智察</span> 城市遥感智能监测系统
+        <span class="header-accent">国土智察</span> 自然资源遥感智能监测系统
       </h1>
       <div class="header-status">
         <span class="status-dot" :class="wsStatus"></span>

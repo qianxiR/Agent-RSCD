@@ -142,10 +142,15 @@ export function getImageMeta(path) {
 // ==================== 对话分支 (fork / regenerate) ====================
 
 // 从指定消息节点分叉 + 回显新 prompt（后端只 fork，LLM 由前端走 WS chat_request）
-// 入参: convId, { parent_node_id(分叉点 node_id), prompt(新 prompt), model? }
+// 入参: convId, { parent_node_id?(分叉点), replace_node_id?(被替换节点), prompt, model? }
 // 出参: { status, leaf_node_id, prompt, message } 或 { status:'error', msg }
-export function regenerateConversation(convId, { parent_node_id, prompt, model = null }) {
-  const body = { parent_node_id, prompt }
+export function regenerateConversation(
+  convId,
+  { parent_node_id = null, replace_node_id = null, prompt, model = null },
+) {
+  const body = { prompt }
+  if (parent_node_id) body.parent_node_id = parent_node_id
+  if (replace_node_id) body.replace_node_id = replace_node_id
   if (model) body.model = model
   return request(`/api/v1/conversations/${convId}/regenerate`, {
     method: 'POST',

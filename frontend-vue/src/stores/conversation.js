@@ -192,6 +192,7 @@ function normalizeHistoryMessage(m) {
       images: Array.isArray(m.images) ? m.images : [],
       selectedLayers: Array.isArray(m.selected_layers) ? m.selected_layers : [],
       nodeId: m.node_id || null,
+      parentNodeId: m.parent_id || null,
     }
   }
   if (role === 'tool') {
@@ -203,6 +204,7 @@ function normalizeHistoryMessage(m) {
       toolCallId: m.tool_call_id || '',
       status: 'done',
       nodeId: m.node_id || null,
+      parentNodeId: m.parent_id || null,
     }
   }
   const parts = normalizeAssistantParts({
@@ -226,6 +228,7 @@ function normalizeHistoryMessage(m) {
     }),
     status: 'done',
     nodeId: m.node_id || null,
+    parentNodeId: m.parent_id || null,
   }
 }
 
@@ -462,6 +465,7 @@ export const useConversationStore = defineStore('conversation', {
       // 方法: 将后端实时返回的工具结果合并到对应 tool call，使当前 steps 内联展示结果
       // 出参: 无
       const st = this.getConv(convId)
+      if (st._stopped) return
       const message = findAssistantForToolResult(st)
       if (!message) return
       const ok = attachToolResultToCalls(message.toolCalls, {
@@ -525,8 +529,14 @@ export const useConversationStore = defineStore('conversation', {
 
     // 用户停止标记（onChatStopped 前的中间态）
     markStopped(convId) {
+      // 入参: convId 用户主动停止的对话 ID。
+      // 方法: 立即归档当前回复并恢复输入，同时保留停止屏障以丢弃后端迟到片段。
+      // 出参: 无；后端 chat_stopped 到达后由 finishAssistant 清除停止屏障。
       const st = this.convStates[convId]
-      if (st) st._stopped = true
+      if (!st) return
+      st._stopped = true
+      this.finishAssistant(convId, 'stopped')
+      st._stopped = true
     },
 
     // ==================== 历史回填 ====================

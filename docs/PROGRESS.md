@@ -8,7 +8,7 @@
 
 基于 WebSocket 的 Agent 系统。LLM（Qwen via DashScope）驱动 ReAct 推理 + 工具编排，用自然语言操作 **GeoServer 图层服务 + PostgreSQL 数据库 + SamSeg 遥感分析 + 沙盒代码执行**。
 
-三层架构（agent → model → data），前端支持聊天 UI + **OpenLayers 地图容器**影像/矢量预览 + 项目会话管理。品牌名：**国土智察 城市遥感智能监测系统**。
+三层架构（agent → model → data），前端支持聊天 UI + **OpenLayers 地图容器**影像/矢量预览 + 项目会话管理。品牌名：**国土智察 自然资源遥感智能监测系统**。
 
 ---
 

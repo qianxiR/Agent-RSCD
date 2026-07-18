@@ -55,7 +55,12 @@ from langchain_core.messages import (
 from backend.config import settings
 from backend.agent.memory import agent_db
 from backend.agent.prompt import build_system_prompt, build_system_prompt_blocks
-from backend.agent.memory.task_state import build_task_state_text
+from backend.agent.memory.task_state import (
+    build_plan_context_text,
+    build_task_state_text,
+    load_plan_state,
+)
+from backend.agent.memory.lesson_policy import format_accepted_lesson_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -267,15 +272,19 @@ def build_context_messages(
         history=history,
         conversation_summary=summary_text or "",
     )
+    persisted_plan, _ = load_plan_state(conversation_id)
+    plan_state_text = build_plan_context_text(persisted_plan)
 
     system_prompt = build_system_prompt(
         conversation_summary=summary_text,
         user_profile=user_profile_text,
         task_state=task_state_text,
+        plan_state=plan_state_text,
     ) if not settings.enable_context_cache else build_system_prompt_blocks(
         conversation_summary=summary_text,
         user_profile=user_profile_text,
         task_state=task_state_text,
+        plan_state=plan_state_text,
     )
 
     # 拼装: [System] + history + [Human]
@@ -861,8 +870,13 @@ def build_user_profile_text(user_id: str) -> str:
             continue
         label = cat_labels.get(cat, cat)
         for it in items:
+            value = it["value"]
+            if cat == "lesson":
+                value = format_accepted_lesson_for_prompt(value)
+                if not value:
+                    continue
             # value 可能含换行 (结构化教训五段格式), 换行后补 4 空格缩进保持结构
-            indented = it['value'].replace("\n", "\n    ")
+            indented = value.replace("\n", "\n    ")
             lines.append(f"- [{label}] {it['key']}:\n    {indented}")
     # 兜底: 处理未归类的 category
     for cat, items in by_cat.items():

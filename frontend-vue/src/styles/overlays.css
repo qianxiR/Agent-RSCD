@@ -92,6 +92,78 @@
   color: #fff !important;
 }
 
+/* 删除对话属于不可恢复操作：取消分隔线，用留白和危险色建立层级。 */
+.conversation-delete-dialog {
+  width: min(400px, calc(100vw - 32px)) !important;
+  padding-bottom: 0 !important;
+  border-color: var(--glass-danger-border) !important;
+}
+
+.conversation-delete-dialog .el-message-box__header {
+  padding: 18px 20px 8px !important;
+  border-bottom: none !important;
+}
+
+.conversation-delete-dialog .el-message-box__title {
+  font-size: 16px !important;
+  line-height: 24px;
+}
+
+.conversation-delete-dialog .el-message-box__content {
+  padding: 8px 20px 12px !important;
+}
+
+.conversation-delete-dialog .el-message-box__container {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.conversation-delete-dialog .el-message-box__status {
+  position: static !important;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--glass-danger-surface);
+  color: var(--accent-red) !important;
+  transform: none !important;
+  font-size: 18px !important;
+}
+
+.conversation-delete-dialog .el-message-box__message {
+  min-width: 0;
+  padding: 5px 0 0 !important;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.conversation-delete-dialog .el-message-box__btns {
+  gap: 8px;
+  padding: 8px 20px 18px !important;
+  border-top: none !important;
+}
+
+.conversation-delete-dialog .el-message-box__btns .el-button {
+  min-width: 72px;
+  height: 32px;
+  padding: 0 14px;
+}
+
+.conversation-delete-dialog .el-message-box__btns .el-button--primary {
+  background: var(--accent-red) !important;
+  border-color: var(--accent-red) !important;
+}
+
+.conversation-delete-dialog .el-message-box__btns .el-button--primary:hover {
+  background: #b93636 !important;
+  border-color: #b93636 !important;
+}
+
 .el-popper.is-light,
 .el-popover.el-popper,
 .el-select__popper.el-popper,

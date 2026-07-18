@@ -1,3 +1,20 @@
+<!-- skill-contract
+{
+  "version": "1.0",
+  "trigger_conditions": ["上传 GeoTIFF 到 GeoServer", "发布栅格图层并在地图显示"],
+  "required_inputs": ["file_path"],
+  "steps": [
+    {"step_id": "upload", "goal": "上传栅格影像并登记图层", "tool_name": "upload_raster_layer", "required_inputs": ["file_path"], "expected_outputs": ["layer_name", "workspace"], "verification_rules": ["agent_validation.status=passed"], "required": true},
+    {"step_id": "display", "goal": "加载并定位已发布图层", "tool_name": "load_geoserver_layer", "required_inputs": ["layer_name", "workspace"], "expected_outputs": ["frontend_result"], "verification_rules": ["agent_validation.status=passed", "frontend visible=true"], "required": true}
+  ],
+  "tool_allowlist": ["upload_raster_layer", "load_geoserver_layer"],
+  "expected_outputs": ["layer_name", "workspace", "frontend visible=true"],
+  "verification_rules": ["GeoServer 图层存在", "前端确认图层可见"],
+  "fallback_rule": "失败时执行 repair_plan；缺文件或 CRS 时请求最小必要输入",
+  "promotion_evidence": "服务端图层与前端可见性均通过验证"
+}
+-->
+
 # 工作流：上传影像到 GeoServer + 前端显示
 
 > 当用户想把本地影像发布为 GeoServer 图层服务并在界面显示时，执行上传→发布→加载链路。

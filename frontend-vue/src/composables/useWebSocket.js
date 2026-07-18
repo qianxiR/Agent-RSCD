@@ -1,4 +1,5 @@
 import { useConversationStore } from '@/stores/conversation'
+import { useProjectStore } from '@/stores/project'
 import { getTasks } from '@/services/api'
 
 // ==================== WebSocket 传输层（composable）====================
@@ -22,8 +23,15 @@ const HEAVY_TOOL_RE = /segment|detect_change|report|pyramid|cog|topology|compone
 // 模块级单例：整个应用共用一条 WS 连接
 let _ws = null
 let _store = null
+let _reconnectTimer = null
+let _reconnectAttempt = 0
+let _manualDisconnect = false
 // 任务轮询定时器：convId → setInterval handle
 const _taskPollers = {}
+const _layerRefreshPending = new Set()
+
+const RECONNECT_BASE_DELAY = 1000
+const RECONNECT_MAX_DELAY = 10000
 
 function getStore() {
   if (!_store) _store = useConversationStore()
@@ -35,8 +43,10 @@ function getStore() {
 // 方法: 若是重工具且该会话未在轮询 → 立即查一次 + 启动 3s 轮询; 轻工具忽略
 // 出参: 无（副作用: 写 store.activeTask + 启动定时器）
 function startTaskPolling(convId, toolName) {
-  if (!convId || _taskPollers[convId]) return
+  if (!convId) return
   if (!HEAVY_TOOL_RE.test(toolName || '')) return
+  _layerRefreshPending.add(convId)
+  if (_taskPollers[convId]) return
   // 占位任务（立即让 UI 显示"运行中"，轮询命中真实 task 后覆盖）
   getStore().setActiveTask(convId, { id: null, tool_name: toolName, status: 'running', progress: 0, error: '' })
   pollOnce(convId)
@@ -51,7 +61,10 @@ async function pollOnce(convId) {
     const task = (data.tasks || [])[0]
     if (!task) return
     getStore().setActiveTask(convId, task)
-    if (['done', 'failed', 'cancelled'].includes(task.status)) stopTaskPolling(convId)
+    if (['done', 'failed', 'cancelled'].includes(task.status)) {
+      finishLayerRefresh(convId, task.status)
+      stopTaskPolling(convId)
+    }
   } catch (e) {
     // 查询失败不中断轮询（网络抖动等）
   }
@@ -64,6 +77,29 @@ function stopTaskPolling(convId) {
     clearInterval(_taskPollers[convId])
     delete _taskPollers[convId]
   }
+}
+
+// 入参: convId 对话 ID, status 分析任务或对话终态。
+// 方法: 仅在存在重分析任务且成功完成时递增图层版本；终态消费标记，保证每轮只刷新一次。
+// 出参: 无；LayerPanel 监听 layerListVersion 后静默重新拉取 GeoServer 图层树。
+function finishLayerRefresh(convId, status) {
+  if (!_layerRefreshPending.has(convId)) return
+  _layerRefreshPending.delete(convId)
+  if (status === 'done') useProjectStore().bumpLayerVersion()
+}
+
+// 入参: convId 对话 ID, eventData 分析工具返回的前端渲染参数。
+// 方法: 识别已发布的底图、面和边缘图层；发布参数到达即刷新目录，并消费任务兜底标记。
+// 出参: 无；未包含 GeoServer 图层参数的普通前端动作不会触发刷新。
+function refreshPublishedLayerCatalog(convId, eventData) {
+  const publishedLayerKeys = ['base_layer', 'polygon_layer', 'edge_layer']
+  const hasPublishedLayer = publishedLayerKeys.some((key) => {
+    const layer = eventData?.[key]
+    return !!(layer?.layer_name && layer?.workspace)
+  })
+  if (!hasPublishedLayer) return
+  _layerRefreshPending.delete(convId)
+  useProjectStore().bumpLayerVersion()
 }
 
 
@@ -142,6 +178,7 @@ function handleConvMessage(convId, data) {
     case 'frontend_action':
       // ★ 交由分发器执行具体动作 + 统一回传 tool_result(解除后端阻塞)
       //   动态 import 打破循环依赖: useFrontendAction 反向依赖本模块
+      refreshPublishedLayerCatalog(convId, data.event_data)
       import('./useFrontendAction').then(({ useFrontendAction }) => {
         useFrontendAction().dispatch({
           event_type: data.event_type,
@@ -156,16 +193,19 @@ function handleConvMessage(convId, data) {
       break
     case 'error':
       store.finishAssistant(convId, 'error', data.content || '未知错误')
+      finishLayerRefresh(convId, 'failed')
       stopTaskPolling(convId)
       store.clearActiveTask(convId)
       break
     case 'done':
       store.finishAssistant(convId, 'done')
+      finishLayerRefresh(convId, 'done')
       stopTaskPolling(convId)
       store.clearActiveTask(convId)
       break
     case 'chat_stopped':
       store.finishAssistant(convId, 'stopped')
+      finishLayerRefresh(convId, 'cancelled')
       stopTaskPolling(convId)
       store.clearActiveTask(convId)
       break
@@ -189,38 +229,67 @@ function sendRaw(payload) {
 
 // ==================== 对外接口 ====================
 
+function scheduleReconnect() {
+  // 入参: 无。
+  // 方法: 按指数退避安排唯一重连任务，避免后端启动稍晚时连接永久停留在断开状态。
+  // 出参: 无；主动断开或已有重连任务时不重复调度。
+  if (_manualDisconnect || _reconnectTimer) return
+  const delay = Math.min(RECONNECT_BASE_DELAY * (2 ** _reconnectAttempt), RECONNECT_MAX_DELAY)
+  _reconnectAttempt += 1
+  _reconnectTimer = setTimeout(() => {
+    _reconnectTimer = null
+    connect()
+  }, delay)
+}
+
 // 入参: 无
 // 方法: 建立唯一 WS 连接，绑定 onopen/onmessage/onclose/onerror
 // 出参: 无（状态写入 store.wsStatus）
 function connect() {
-  if (_ws && _ws.readyState === WebSocket.OPEN) return
+  // 入参: 无。
+  // 方法: 复用已连接或连接中的实例；新连接失败时由 close 事件进入受控重连。
+  // 出参: 无；连接状态同步写入 Pinia store。
+  if (_ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(_ws.readyState)) return
+  _manualDisconnect = false
   const store = getStore()
   store.setWsStatus('connecting')
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   const url = `${proto}//${location.host}${WS_PATH}`
-  _ws = new WebSocket(url)
+  const socket = new WebSocket(url)
+  _ws = socket
 
-  _ws.onopen = () => {
+  socket.onopen = () => {
     console.log('[WS] 已连接')
+    _reconnectAttempt = 0
     store.setWsStatus('connected')
   }
-  _ws.onmessage = (event) => handleRawMessage(event.data)
-  _ws.onclose = () => {
+  socket.onmessage = (event) => handleRawMessage(event.data)
+  socket.onclose = () => {
+    if (_ws !== socket) return
     console.log('[WS] 已断开')
+    _ws = null
     store.setWsStatus('disconnected')
+    scheduleReconnect()
   }
-  _ws.onerror = () => {
+  socket.onerror = () => {
     console.error('[WS] 连接错误')
     store.setWsStatus('error')
   }
 }
 
 function disconnect() {
+  // 入参: 无。
+  // 方法: 标记主动断开并清理待执行重连，防止组件主动销毁后重新建立连接。
+  // 出参: 无；连接状态归为 disconnected。
+  _manualDisconnect = true
+  if (_reconnectTimer) clearTimeout(_reconnectTimer)
+  _reconnectTimer = null
   if (_ws) {
     _ws.close()
     _ws = null
   }
+  getStore().setWsStatus('disconnected')
 }
 
 function isConnected() {
@@ -247,9 +316,18 @@ function sendChat({ prompt, conversation_id, project_id = null, model = 'qwen-pl
 
 // 入参: conversation_id（可选，不传则停止全部）
 function sendStop(conversation_id = null) {
+  // 入参: conversation_id 可选；指定时停止该对话，否则请求停止当前连接全部对话。
+  // 方法: 发送停止请求后立即终止对应任务轮询，避免等待后端模型线程清理期间持续请求。
+  // 出参: boolean；发送成功返回 true，连接不可用返回 false。
   const payload = { type: 'stop_chat' }
   if (conversation_id) payload.conversation_id = conversation_id
-  return sendRaw(payload)
+  const sent = sendRaw(payload)
+  if (sent && conversation_id) {
+    finishLayerRefresh(conversation_id, 'cancelled')
+    stopTaskPolling(conversation_id)
+    getStore().clearActiveTask(conversation_id)
+  }
+  return sent
 }
 
 // 入参: { request_id, status, data } —— 解除后端 wait_for_frontend_result 阻塞

@@ -62,8 +62,13 @@ async function ensureHistoryLoaded(convId) {
 // 入参: { prompt, projectId?, images?, selectedLayers? }
 // 出参: boolean 是否发送成功
 function send({ prompt, projectId = null, images = [], selectedLayers = [] }) {
+  // 入参: prompt、项目、影像和图层上下文。
+  // 方法: 先确认 WebSocket 可发送，再创建本地消息状态，避免断线时产生悬空回复。
+  // 出参: boolean；连接不可用或会话正在发送时返回 false，且不修改消息列表。
   const store = useConversationStore()
   const ws = useWebSocket()
+
+  if (!ws.isConnected()) return false
 
   let convId = store.activeConvId
   if (!convId) {
@@ -102,28 +107,34 @@ function switchTo(convId) {
   ensureHistoryLoaded(convId)
 }
 
-// ★ 重新生成编排：fork 掉指定 AI 消息的分支 → 用编辑后 prompt 重发
-// 入参: { nodeId(目标 AI 消息 nodeId), prompt(编辑后文本) }
-// 方法: 先 reload 历史拿完整 nodeId → 找该 AI 的 parent human nodeId 作分叉点
-//   → regenerateConversation(fork + 回显 prompt) → loadHistory 刷新(旧分支已隐藏) → send 走 WS
+// ★ 重新生成编排：普通模式从节点后分叉，编辑模式替换目标用户消息及后续分支
+// 入参: { nodeId, prompt, replace?, images?, selectedLayers? }
+// 方法: reload 历史补齐节点链 → 调用对应分叉模式 → 刷新历史 → 经 WS 重发消息
 // 出参: boolean 是否成功发起
-async function regenerate({ nodeId, prompt }) {
+async function regenerate({ nodeId, prompt, replace = false, images = [], selectedLayers = [] }) {
   const store = useConversationStore()
   const convId = store.activeConvId
   if (!convId) return false
   // reload 历史，确保拿到完整 nodeId 链（实时生成的 AI 消息需此步补 nodeId）
   const data = await getConvMessages(convId)
   store.loadHistory(convId, data.messages || [])
-  const forkNode = resolveForkNode(store.active.messages, nodeId)
-  if (!forkNode) {
+  const targetNode = replace ? nodeId : resolveForkNode(store.active.messages, nodeId)
+  if (!targetNode) {
     console.warn('[chat] 未找到分叉点 node:', nodeId)
     return false
   }
-  await regenerateConversation(convId, { parent_node_id: forkNode, prompt })
-  // fork 后重灌历史（旧 AI 回复已隐藏），再用编辑后 prompt 发新对话
+  const result = await regenerateConversation(convId, {
+    parent_node_id: replace ? null : targetNode,
+    replace_node_id: replace ? targetNode : null,
+    prompt,
+  })
+  if (result.status !== 'success') {
+    throw new Error(result.msg || '对话分支更新失败')
+  }
+  // 分叉后重灌历史，再用编辑后的上下文发起新回合。
   const refreshed = await getConvMessages(convId)
   store.loadHistory(convId, refreshed.messages || [])
-  return send({ prompt })
+  return send({ prompt, images, selectedLayers })
 }
 
 // 入参: messages 当前消息列表, targetNodeId 目标消息 nodeId

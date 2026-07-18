@@ -16,6 +16,7 @@ def build_system_prompt(
     conversation_summary: str = None,
     user_profile: str = None,
     task_state: str = None,
+    plan_state: str = None,
 ) -> str:
     """
     入参:
@@ -31,7 +32,7 @@ def build_system_prompt(
     """
     return SYSTEM_PROMPT_TEMPLATE.format(
         tools_catalog=build_tools_catalog(),
-        dynamic_section=build_dynamic_section(conversation_summary, user_profile, task_state),
+        dynamic_section=build_dynamic_section(conversation_summary, user_profile, task_state, plan_state),
     )
 
 
@@ -39,6 +40,7 @@ def build_system_prompt_blocks(
     conversation_summary: str = None,
     user_profile: str = None,
     task_state: str = None,
+    plan_state: str = None,
 ) -> list:
     """
     入参:
@@ -56,7 +58,7 @@ def build_system_prompt_blocks(
         tools_catalog=build_tools_catalog(),
         dynamic_section="",
     )
-    dynamic_text = build_dynamic_section(conversation_summary, user_profile, task_state)
+    dynamic_text = build_dynamic_section(conversation_summary, user_profile, task_state, plan_state)
 
     return [
         {

@@ -298,7 +298,7 @@ list_available_skills() -> Dict       # 列出所有技能元数据 {name, title
 
 ## 11. 视觉设计系统（配色令牌）
 
-> 项目品牌：**国土智察 城市遥感智能监测系统**
+> 项目品牌：**国土智察 自然资源遥感智能监测系统**
 > 配色基于 logo（`frontend/image.svg`）色带提取，四色体系：白 / 浅蓝 / 浅绿 / 深蓝。
 > 所有颜色通过 CSS 变量（`:root`）集中管理，定义在 `frontend/styles.css`。
 

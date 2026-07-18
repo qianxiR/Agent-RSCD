@@ -28,6 +28,7 @@ import uuid
 import asyncio
 import logging
 from pathlib import Path
+from typing import Optional
 
 # 将项目根目录加入 sys.path, 使 from xxx 导入正常工作
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -68,7 +69,7 @@ import backend.agent.tools
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="国土智察-城市遥感智能监测系统", version="1.0.0")
+app = FastAPI(title="国土智察-自然资源遥感智能监测系统", version="1.0.0")
 
 # CORS - 允许前端跨域访问
 app.add_middleware(
@@ -431,10 +432,15 @@ async def fork_conversation(conversation_id: str, req: ForkRequest):
 
 
 class RegenerateRequest(BaseModel):
-    """从指定节点重新生成对话 (fork + 发起新对话)"""
-    parent_node_id: str   # 分叉点 (从哪条消息之后重新开始)
+    """
+    入参: prompt 必填；parent_node_id 与 replace_node_id 按分支模式二选一。
+    方法: 校验重新生成或编辑替换请求的结构化参数。
+    出参: FastAPI regenerate 路由使用的请求模型。
+    """
+    parent_node_id: Optional[str] = None   # 分叉点 (从哪条消息之后重新开始)
+    replace_node_id: Optional[str] = None  # 编辑模式: 替换该用户消息及其后续分支
     prompt: str           # 新的 prompt (编辑后的用户输入)
-    model: str = None     # 可选, 指定模型 (默认用 settings.llm_model)
+    model: Optional[str] = None  # 可选, 指定模型 (默认用 settings.llm_model)
 
 
 @app.post("/api/v1/conversations/{conversation_id}/regenerate")
@@ -448,10 +454,16 @@ async def regenerate_from_node(conversation_id: str, req: RegenerateRequest):
       实际的 LLM 对话由前端拿到响应后, 通过 WebSocket 发 chat_request 触发
       (复用现有 tool_chat_ws 流程, append_message 会自动挂到 active_leaf_node)。
     """
-    # Step 1: fork (隐藏旧分支)
-    new_leaf = agent_db.fork_from_node(conversation_id, req.parent_node_id)
-    if not new_leaf:
-        return {"status": "error", "msg": "分叉失败: 节点不存在或数据库不可用"}
+    # 编辑用户消息时从目标之前分叉；重新生成 AI 时仍从指定父节点之后分叉。
+    if req.replace_node_id:
+        fork_result = agent_db.fork_before_node(conversation_id, req.replace_node_id)
+        if fork_result is None:
+            return {"status": "error", "msg": "编辑分叉失败: 节点不存在或数据库不可用"}
+        new_leaf = fork_result.get("parent_node_id")
+    else:
+        new_leaf = agent_db.fork_from_node(conversation_id, req.parent_node_id)
+        if not new_leaf:
+            return {"status": "error", "msg": "分叉失败: 节点不存在或数据库不可用"}
     # Step 2: 返回新 leaf + prompt, 前端据此发 WebSocket chat_request
     return {
         "status": "success",
@@ -1532,11 +1544,12 @@ async def websocket_chat(websocket: WebSocket, session_id: str = None):
                 if conv_id:
                     cancelled = ws_manager.cancel_task(sid, conversation_id=conv_id)
                     logger.info(f"[WS] stop_chat: conv={conv_id}, cancelled={cancelled}")
-                    if not cancelled:
-                        await ws_manager.send_to_session(sid, {
-                            "type": "chat_stopped",
-                            "conversation_id": conv_id,
-                        })
+                    # 停止确认必须与模型线程清理解耦，先恢复前端交互，再由取消分支完成回滚和资源收尾。
+                    await ws_manager.send_to_session(sid, {
+                        "type": "chat_stopped",
+                        "conversation_id": conv_id,
+                        "cancelled": cancelled,
+                    })
                 else:
                     # 停止该 session 下所有活跃对话
                     cancelled = ws_manager.cancel_task(sid)

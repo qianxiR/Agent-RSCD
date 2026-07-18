@@ -271,10 +271,9 @@ def vectorize_mask_to_geojson(
         logger.info("[Vectorize] 矢量化无有效要素 (可能 min_area 过大或全背景)")
         return None
 
-    # 写 GeoJSON
+    # 写出下游报告、统计和下载工具共同依赖的标准交换文件；只生成 SHP 会破坏既有 vector_path 契约。
     os.makedirs(os.path.dirname(output_geojson_path) or ".", exist_ok=True)
-    # ★ 不再写 GeoJSON, 直接出 SHP
-    # gdf.to_file(output_geojson_path, driver="GeoJSON", encoding="utf-8")
+    gdf.to_file(output_geojson_path, driver="GeoJSON", encoding="utf-8")
 
     # 统计
     per_class = {}
@@ -299,7 +298,10 @@ def vectorize_mask_to_geojson(
         f"({vector_stats['total_features']} 要素, {vector_stats['total_area_m2']} m², "
         f"crs={'有' if vector_stats['has_crs'] else '无'})"
     )
-    result = {"vector_stats": vector_stats}
+    result = {
+        "vector_path": str(Path(output_geojson_path).resolve()),
+        "vector_stats": vector_stats,
+    }
 
     # ---- 同源 Shapefile 导出 (面 SHP + 边线 SHP, 复用同一个 gdf) ----
     if output_shp_dir:

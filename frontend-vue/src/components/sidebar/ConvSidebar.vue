@@ -111,9 +111,14 @@ function onOpenLayer() {
 }
 
 async function onDelete(conv) {
-  await ElMessageBox.confirm(`确定删除「${conv.title || '该对话'}」？`, '删除对话', {
+  // 入参: conv 待删除的会话摘要，必须包含有效会话 ID。
+  // 方法: 使用危险操作专属弹窗明确不可恢复语义，确认后同步删除后端记录与前端状态。
+  // 出参: Promise<void>；用户取消时由 Element Plus 终止后续删除流程。
+  const title = conv.title || '该对话'
+  await ElMessageBox.confirm(`删除后将无法恢复「${title}」及其消息记录。`, '删除对话', {
     type: 'warning',
-    confirmButtonText: '删除',
+    customClass: 'conversation-delete-dialog',
+    confirmButtonText: '确认删除',
     cancelButtonText: '取消',
   })
   try {

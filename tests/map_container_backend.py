@@ -117,6 +117,7 @@ def test_segment_image():
     data = result.get("data", {})
     # ★ 关键产物校验
     _file_exists(data.get("mask_tif_path"), "mask_tif (带 CRS 掩膜)")
+    _file_exists(data.get("vector_path"), "GeoJSON 矢量图斑")
     _file_exists(data.get("shp_dir_path"), "shp 目录 (多文件)")
     # instruction.params 里的 URL (前端渲染用)
     params = result.get("instruction", {}).get("params", {})
@@ -153,7 +154,9 @@ def test_detect_change():
 
     data = result.get("data", {})
     _file_exists(data.get("mask_tif_path"), "变化 mask_tif")
+    _file_exists(data.get("vector_path"), "变化 GeoJSON")
     _file_exists(data.get("shp_dir_path"), "变化 shp 目录")
+    _check(data.get("change_type", {}).get("source") == "rule", "业务类型判读不阻塞主流程")
     stats = data.get("stats", {})
     print(f"  变化区域: {stats.get('total_regions')} 个, 占比 {stats.get('changed_percent')}%")
     return data

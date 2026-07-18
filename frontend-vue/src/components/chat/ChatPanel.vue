@@ -2,7 +2,7 @@
 // ==================== 聊天面板 ====================
 // ★ 对应原生 chat/ 面板：welcome 欢迎页 + 消息列表 + 输入区
 //   样式一比一对齐原生 .ai-chat / .welcome-area / .ai-input-area
-import { ref, computed, watch, nextTick, useTemplateRef } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount, useTemplateRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConversationStore } from '@/stores/conversation'
@@ -28,6 +28,7 @@ const map = useMap()
 const input = ref('')
 const scrollRef = useTemplateRef('scrollRef')
 const pendingImages = ref([])
+const pendingImagePreviewUrls = ref(new Map())
 const pendingLayers = ref([])
 const layerPickerVisible = ref(false)
 const layerPickerLoading = ref(false)
@@ -76,12 +77,17 @@ function onEnter(e) {
 }
 
 function onSend() {
+  // 入参: 无，读取当前输入、附件及待选图层。
+  // 方法: 仅在发送成功后清空编辑区，连接抖动时保留用户尚未发出的内容。
+  // 出参: 无；发送失败不会改变输入和附件状态。
   const text = input.value.trim()
   if (!text) return
   const images = pendingImages.value.slice()
   const selectedLayers = pendingLayers.value.slice()
-  send({ prompt: text, images, selectedLayers })
+  const sent = send({ prompt: text, images, selectedLayers })
+  if (!sent) return
   input.value = ''
+  releaseAllPendingImagePreviews()
   pendingImages.value = []
   pendingLayers.value = []
   layerPickerVisible.value = false
@@ -89,6 +95,9 @@ function onSend() {
 }
 
 function onQuick(prompt) {
+  // 入参: prompt 快捷问题文本。
+  // 方法: 复用发送编排；断线时不创建本地伪消息。
+  // 出参: 无。
   send({ prompt })
 }
 
@@ -130,7 +139,44 @@ function selectLayer(layer) {
 // 方法: 从待发送上传影像列表移除对应项。
 // 出参: 无
 function removePendingImage(index) {
+  releasePendingImagePreview(pendingImages.value[index])
   pendingImages.value.splice(index, 1)
+}
+
+// 入参: image 待发送影像附件。
+// 方法: 优先返回与用户所选 File 一一对应的本地对象 URL，未命中时回退服务器预览地址。
+// 出参: string，当前附件的缩略图地址。
+function getPendingImagePreview(image) {
+  return pendingImagePreviewUrls.value.get(image?.path) || image?.preview_url || ''
+}
+
+// 入参: image 后端已保存的影像附件，需包含 preview_url。
+// 方法: 禁用 HTTP 缓存逐项获取已转码的 PNG，并生成当前附件独立的对象 URL。
+// 出参: Promise<string>；预览不可用时返回空字符串，由界面回退服务器地址。
+function createPendingImagePreview(image) {
+  if (!image?.preview_url) return Promise.resolve('')
+  return fetch(image.preview_url, { cache: 'no-store' })
+    .then((response) => response.ok ? response.blob() : null)
+    .then((blob) => blob ? URL.createObjectURL(blob) : '')
+    .catch(() => '')
+}
+
+// 入参: image 待移除或已发送的影像附件。
+// 方法: 撤销该附件的本地对象 URL，并删除路径到 URL 的对应关系。
+// 出参: 无。
+function releasePendingImagePreview(image) {
+  const previewUrl = pendingImagePreviewUrls.value.get(image?.path)
+  if (!previewUrl) return
+  URL.revokeObjectURL(previewUrl)
+  pendingImagePreviewUrls.value.delete(image.path)
+}
+
+// 入参: 无。
+// 方法: 批量撤销待发送区的本地对象 URL，防止发送、切换或卸载后持有文件内存。
+// 出参: 无。
+function releaseAllPendingImagePreviews() {
+  pendingImagePreviewUrls.value.forEach((previewUrl) => URL.revokeObjectURL(previewUrl))
+  pendingImagePreviewUrls.value.clear()
 }
 
 // 入参: index 待移除的图层下标。
@@ -183,6 +229,10 @@ function onUpload() {
       const uploadedFiles = Array.isArray(data.files)
         ? data.files
         : paths.map((p) => ({ name: p.split(/[\\/]/).pop(), path: p, preview_url: '', source: 'upload' }))
+      const previewUrls = await Promise.all(uploadedFiles.map(createPendingImagePreview))
+      previewUrls.forEach((previewUrl, index) => {
+        if (previewUrl) pendingImagePreviewUrls.value.set(uploadedFiles[index].path, previewUrl)
+      })
       pendingImages.value.push(...uploadedFiles)
       // 逐张发布到 GeoServer（必须 await 成功，否则图层管理无该图层）
       for (const p of paths) {
@@ -224,6 +274,43 @@ function onInput(e) {
     layerPickerVisible.value = false
   }
 }
+
+// 入参: msg 用户消息对象，包含 content、nodeId 及附件上下文。
+// 方法: 校验任务状态，弹出预填编辑框；确认后从该用户节点之前分叉并重新发送。
+// 出参: Promise<void>；取消编辑或输入为空时不修改对话。
+async function onEdit(msg) {
+  if (active.value?.isSending) {
+    ElMessage.warning('当前任务正在执行，请先停止后再编辑')
+    return
+  }
+  let value
+  try {
+    const result = await ElMessageBox.prompt('修改消息后，将重新生成此处之后的对话', '编辑消息', {
+      inputValue: msg.content || '',
+      confirmButtonText: '重新发送',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+    })
+    value = result.value
+  } catch (action) {
+    if (action === 'cancel' || action === 'close') return
+    throw action
+  }
+  const prompt = (value || '').trim()
+  if (!prompt) return
+  try {
+    const sent = await regenerate({
+      nodeId: msg.nodeId,
+      prompt,
+      replace: true,
+      images: Array.isArray(msg.images) ? msg.images : [],
+      selectedLayers: Array.isArray(msg.selectedLayers) ? msg.selectedLayers : [],
+    })
+    if (!sent) ElMessage.warning('消息未发送，请检查连接状态')
+  } catch (e) {
+    ElMessage.error('编辑消息失败: ' + e.message)
+  }
+}
 // 发送后复位到默认高度
 function resetHeight() {
   nextTick(() => {
@@ -241,6 +328,8 @@ function scrollToBottom() {
   const el = scrollRef.value
   if (el) el.scrollTop = el.scrollHeight
 }
+
+onBeforeUnmount(releaseAllPendingImagePreviews)
 </script>
 
 <template>
@@ -295,6 +384,7 @@ function scrollToBottom() {
           :message="m"
           :streaming="m.status === 'streaming'"
           @regenerate="onRegenerate"
+          @edit="onEdit"
         />
         <!-- 重工具执行进度条（tool_call 触发轮询写入 activeTask，done 清除） -->
         <TaskProgressBar v-if="active.activeTask" :task="active.activeTask" />
@@ -310,7 +400,7 @@ function scrollToBottom() {
             :key="`${img.path}-${idx}`"
             class="pending-attachment image"
           >
-            <img v-if="img.preview_url" class="pending-thumb" :src="img.preview_url" :alt="img.name" />
+            <img v-if="getPendingImagePreview(img)" class="pending-thumb" :src="getPendingImagePreview(img)" :alt="img.name" />
             <span v-else class="pending-file-icon">▦</span>
             <span class="pending-name" :title="img.name">{{ img.name }}</span>
             <button class="pending-remove" title="移除影像" @click="removePendingImage(idx)">×</button>
@@ -349,7 +439,6 @@ function scrollToBottom() {
               class="ai-textarea"
               rows="1"
               placeholder="输入消息 (Enter 发送, Shift+Enter 换行)"
-              :disabled="wsStatus !== 'connected'"
               @keydown.enter="onEnter"
               @input="onInput"
               style="width: 100%; box-sizing: border-box;"

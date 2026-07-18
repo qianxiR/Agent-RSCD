@@ -93,6 +93,19 @@ def _build_image_url(filename: str) -> str:
     return f"/api/v1/download/{rel}/{filename}"
 
 
+def _build_vector_url(vector_path: Optional[str]) -> Optional[str]:
+    """
+    入参: vector_path 已生成的矢量文件绝对路径，可为空。
+    方法: 校验文件真实存在后，基于统一文件根目录构造受控下载 URL。
+    出参: 前端可访问的 /api/v1/download URL；文件缺失时返回 None。
+    """
+    if not vector_path or not Path(vector_path).is_file():
+        return None
+    from backend.model.tools._paths import build_download_url
+    file_root = Path(settings.file_storage_root).resolve()
+    return build_download_url(Path(vector_path).resolve(), file_root)
+
+
 
 def _build_input_image_url(image_path: str) -> Optional[str]:
     """
@@ -363,7 +376,10 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
 
         # ★ P1 矢量化: 准备 GeoJSON 输出路径 (与 PNG 同名换扩展名)
         vec_dir = _ensure_vector_dir()
-        vec_file = out_file.replace(".png", ".geojson")
+        # GeoJSON 使用 ASCII 文件名，规避 Windows GDAL/Fiona 对中文文件名的兼容差异。
+        from backend.model.SamSeg.geoio import ascii_stem
+        vec_stem = ascii_stem(Path(out_file).stem, fallback=f"{conv}_seg_{suffix}")
+        vec_file = f"{vec_stem}.geojson"
         vec_path = str(vec_dir / vec_file)
 
         t0 = time.time()
@@ -386,6 +402,8 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
         legend = result.get("legend", [])  # ★ 颜色→类别图注 (与 PNG 颜色严格一致)
         # ★ P1: 矢量统计 (面积/图斑数, 供摘要)
         vector_stats = result.get("vector_stats")
+        vector_path = result.get("vector_path")
+        vector_url = _build_vector_url(vector_path)
 
         # ★ 构建详细摘要供 LLM 综合描述
         per_class_lines = []
@@ -474,6 +492,7 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
             "legend": legend,
             # ★ 是否带 CRS (前端据此决定真实定位 or 拒绝渲染)
             "has_crs": has_crs,
+            "vector_url": vector_url,
         }
         # ★ 掩膜 GeoTIFF 不再自动渲染叠加 (仅保留为可下载产物); artifact_path 指向边缘线供下载
         if mask_tif_path:
@@ -496,6 +515,8 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
                 "elapsed": round(elapsed, 1),
                 "stats": stats,
                 "vector_stats": vector_stats,
+                "vector_path": vector_path,
+                "vector_url": vector_url,
                 "has_crs": has_crs,
                 "mask_tif_path": mask_tif_path,
                 "mask_tif_url": mask_tif_url,
@@ -566,7 +587,10 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
 
         # ★ P1 矢量化: 准备变化图斑 GeoJSON 输出路径
         vec_dir = _ensure_vector_dir()
-        vec_file = out_file.replace(".png", ".geojson")
+        # 与分割流程保持同一产物契约：ASCII GeoJSON + 同源 Shapefile。
+        from backend.model.SamSeg.geoio import ascii_stem
+        vec_stem = ascii_stem(Path(out_file).stem, fallback=f"{conv}_change_{suffix}")
+        vec_file = f"{vec_stem}.geojson"
         vec_path = str(vec_dir / vec_file)
 
         t0 = time.time()
@@ -590,22 +614,13 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
         legend = result.get("legend", [])  # ★ 颜色→类别图注 (与 PNG 颜色严格一致)
         # ★ P1: 矢量变化图斑统计 (面积/图斑数, 供摘要)
         vector_stats = result.get("vector_stats")
+        vector_path = result.get("vector_path")
+        vector_url = _build_vector_url(vector_path)
 
-        # ★ Phase B: 业务类型语义判读 (#7) — VLM 优先, 规则兜底
-        change_type_info = None
-        try:
-            class_lines = runner._normalize_classes(classes)
-            change_type_info = runner.classify_change_type(
-                t1_path=t1_path,
-                t2_path=t2_path,
-                result_png_path=out_path,
-                vector_stats=vector_stats,
-                stats=stats,
-                class_lines=class_lines,
-            )
-        except Exception as ce:
-            logger.warning(f"[SamSeg] 业务类型判读失败, 跳过: {ce}")
-            change_type_info = None
+        # 业务类型判读必须在本地确定性完成，避免外部 VLM 网络请求阻塞检测任务终态。
+        present_classes = [item.get("name", "") for item in stats.get("per_class", [])]
+        change_type_info = runner.classify_change_type_by_rule(present_classes, stats)
+        change_type_info["source"] = "rule"
 
         # ★ 构建详细摘要供 LLM 综合描述
         per_class_lines = []
@@ -710,6 +725,7 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             "legend": legend,
             # ★ 是否带 CRS (前端据此决定真实定位 or 拒绝渲染)
             "has_crs": has_crs,
+            "vector_url": vector_url,
         }
         # ★ 掩膜 GeoTIFF 不再自动渲染叠加 (仅保留为可下载产物); artifact_path 指向掩膜供下载
         if mask_tif_path:
@@ -733,6 +749,8 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 "elapsed": round(elapsed, 1),
                 "stats": stats,
                 "vector_stats": vector_stats,
+                "vector_path": vector_path,
+                "vector_url": vector_url,
                 "change_type": change_type_info,
                 "has_crs": has_crs,
                 "mask_tif_path": mask_tif_path,

@@ -16,6 +16,7 @@ import json
 import uuid
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -64,6 +65,13 @@ def main():
                 "type": "error",
                 "msg": "Glyph missing from current font (Noto Sans CJK SC), 中文标签显示为方块",
                 "stderr": "findfont: Font family 'Noto Sans CJK SC' not found",
+                "agent_validation": {
+                    "status": "failed",
+                    "repair_plan": {
+                        "failure_type": "permission_or_path_error",
+                        "next_action": "install_font_then_retry",
+                    },
+                },
             }),
             tool_call_id=tc_id_1,
         ),
@@ -78,7 +86,14 @@ def main():
             tool_calls=[{"name": "run_shell_command", "args": {"command": "pip install fonts-noto-cjk"}, "id": tc_id_2}],
         ),
         ToolMessage(
-            content=json.dumps({"type": "success", "summary": "安装成功"}),
+            content=json.dumps({
+                "type": "success",
+                "summary": "安装成功",
+                "agent_validation": {
+                    "status": "passed",
+                    "evidence": ["font_available", "render_readable"],
+                },
+            }),
             tool_call_id=tc_id_2,
         ),
         AIMessage(content="图已修复"),
@@ -101,16 +116,34 @@ def main():
     existing = agent_db.load_user_memory(GLOBAL_LESSON_USER_ID)
     deleted = 0
     for m in existing:
-        if "lesson_run_python_code" in m["key"]:
+        if m["category"] != "lesson":
+            continue
+        try:
+            lesson = json.loads(m["value"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if lesson.get("failure_signature", "").startswith("run_python_code|"):
             agent_db.delete_user_memory(GLOBAL_LESSON_USER_ID, m["key"])
             deleted += 1
-    print(f"  清理了 {deleted} 条旧 lesson 记忆 (仅 lesson_run_python_code_*)")
+    print(f"  清理了 {deleted} 条旧 lesson 记忆 (仅 run_python_code 结构化教训)")
 
     # 清除去重缓存 (测试用)
     from backend.agent.memory import self_correction as sc_mod
     sc_mod._recent_lessons.clear()
 
-    saved = asyncio.run(scan_and_save_corrections(messages, user_id="test_user"))
+    distilled_lesson = {
+        "现象": "matplotlib 中文标签显示为方块并出现 Glyph missing 警告",
+        "根因": "运行环境缺少可被 matplotlib 发现的中文字体",
+        "正确方法": "调用 run_shell_command 安装中文字体并刷新字体缓存后重新绘图",
+        "验证信号": "重新绘图后中文正常显示且无 Glyph missing 警告",
+        "严重度": "high",
+    }
+    distill_patch = patch(
+        "backend.agent.memory.self_correction._distill_correction_to_structured",
+        new=AsyncMock(return_value=distilled_lesson),
+    )
+    with distill_patch:
+        saved = asyncio.run(scan_and_save_corrections(messages, user_id="test_user"))
     overall_ok &= check(len(saved) >= 1, f"沉淀了 {len(saved)} 条教训")
     if saved:
         s = saved[0]
@@ -127,7 +160,11 @@ def main():
         print(f"    value: {lm['value'][:120]}...")
 
     # 测试去重: 再扫一次, 不应写入
-    saved_again = asyncio.run(scan_and_save_corrections(messages, user_id="test_user"))
+    with patch(
+        "backend.agent.memory.self_correction._distill_correction_to_structured",
+        new=AsyncMock(return_value=distilled_lesson),
+    ):
+        saved_again = asyncio.run(scan_and_save_corrections(messages, user_id="test_user"))
     overall_ok &= check(len(saved_again) == 0, f"去重生效: 第二次扫描写入 {len(saved_again)} 条 (期望 0)")
 
     # ==================== 测试 3: system_prompt 注入验证 ====================

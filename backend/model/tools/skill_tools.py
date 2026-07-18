@@ -22,13 +22,19 @@ from typing import Dict, Any
 from langchain_core.tools import tool
 from backend.model.tools.tool_registry import register_tool
 from backend.model.skills import loader as skills_loader
+from backend.model.skills.selector import select_skill
 
 logger = logging.getLogger(__name__)
 
 
 @register_tool("skill")
 @tool
-def lookup_skill(query: str) -> Dict[str, Any]:
+def lookup_skill(
+    query: str,
+    context_inputs: Dict[str, Any] = None,
+    accepted_lessons: list = None,
+    current_plan: Dict[str, Any] = None,
+) -> Dict[str, Any]:
     """
     检索长任务技能方案。当用户提出一个需要多步骤、多次工具调用的复杂长任务时
     (如"把影像入库"、"完整接入一份数据"、"批量处理多份数据"), 调用本工具
@@ -50,48 +56,69 @@ def lookup_skill(query: str) -> Dict[str, Any]:
     出参:
         - 匹配的技能方案列表, 每项含 name/title/完整执行步骤(content)。
         - agent 应选择 score 最高的方案, 阅读其 content 中的步骤逐步执行。
-        - 若无匹配, 返回空列表, agent 需自行拆解任务或向用户澄清。
+      - context_inputs (dict): 已确认的初始输入, 用于技能执行质量门。
+      - accepted_lessons (list): 主控内部提供的已准入教训。
+      - current_plan (dict): 主控内部提供的当前显式计划。
+      - 若无可执行匹配, 返回候选缺失输入, agent 只请求最小必要信息。
     """
     try:
-        matches = skills_loader.retrieve_skills(query, top_k=3)
+        selection = select_skill(
+            query,
+            context_inputs=context_inputs or {},
+            accepted_lessons=accepted_lessons or [],
+            current_plan=current_plan or {},
+        )
+        best = selection.get("selected_skill")
 
-        if not matches:
+        if not best:
             available = skills_loader.list_skills()
             avail_desc = "、".join(f"{s['title']}({s['name']})" for s in available) if available else "暂无"
             return {
                 "type": "success",
-                "summary": f"未检索到匹配「{query}」的长任务方案。\n当前可用方案: {avail_desc}\n请尝试更明确的描述, 或自行拆解任务。",
-                "data": {"query": query, "matches": [], "available": available},
+                "summary": (
+                    f"未找到输入完备且契约有效的可执行技能「{query}」。\n"
+                    f"当前可用方案: {avail_desc}\n"
+                    "这些方案仅表示契约已注册，不代表当前输入可执行。"
+                    "请根据 candidates.missing_inputs 或 available.required_inputs 请求最小必要输入。"
+                ),
+                "data": {
+                    "query": query,
+                    "selection": selection,
+                    "context_inputs": context_inputs or {},
+                    "matches": [],
+                    "available": available,
+                },
             }
 
-        # 构造结果: 完整返回最佳匹配的步骤, 其余仅返回元信息
-        best = matches[0]
-        others = [
-            {"name": m["name"], "title": m["title"], "score": m["score"]}
-            for m in matches[1:]
-        ]
-
         logger.info(
-            f"[Skill] lookup query={query!r} → best={best['name']} (score={best['score']}), "
-            f"others={len(others)}"
+            f"[Skill] lookup query={query!r} → selected={best['name']} "
+            f"score={best['score']} reasons={selection.get('match_reasons')}"
         )
 
         return {
             "type": "success",
             "summary": (
                 f"📚 检索到长任务方案: 【{best['title']}】\n"
-                f"请按下列步骤逐步执行:\n\n"
+                f"匹配依据: {', '.join(selection.get('match_reasons') or [])}\n"
+                f"技能步骤已进入显式计划, 请按检查点逐步执行:\n\n"
                 f"{best['content']}"
             ),
             "data": {
                 "query": query,
+                "selection": selection,
+                "context_inputs": context_inputs or {},
                 "best_match": {
                     "name": best["name"],
                     "title": best["title"],
                     "score": best["score"],
+                    "version": best["version"],
+                    "contract": best["contract"],
                     "content": best["content"],
                 },
-                "other_candidates": others,
+                "other_candidates": [
+                    item for item in selection.get("candidates") or []
+                    if item.get("name") != best["name"]
+                ],
             },
         }
     except Exception as e:
@@ -123,7 +150,11 @@ def list_available_skills() -> Dict[str, Any]:
         lines = [f"📋 系统具备 {len(skills)} 个标准化长任务方案:\n"]
         for s in skills:
             kw = ", ".join(s["keywords"][:4]) if s.get("keywords") else ""
-            lines.append(f"  • 【{s['title']}】({s['name']}) — 关键词: {kw}")
+            required = ", ".join(s.get("required_inputs") or []) or "无"
+            lines.append(
+                f"  • 【{s['title']}】({s['name']}) v{s.get('version') or '?'} "
+                f"— 契约有效: {s.get('contract_valid')} — 执行必填输入: {required} — 关键词: {kw}"
+            )
         lines.append("\n需要执行某个方案时, 调用 lookup_skill 检索其详细步骤。")
 
         return {

@@ -1,3 +1,21 @@
+<!-- skill-contract
+{
+  "version": "1.0",
+  "trigger_conditions": ["双时相遥感影像变化检测", "违建或新增建筑监测"],
+  "required_inputs": ["t1_path", "t2_path"],
+  "steps": [
+    {"step_id": "detect", "goal": "执行双时相变化检测", "tool_name": "detect_change", "required_inputs": ["t1_path", "t2_path"], "expected_outputs": ["vector_url", "mask_tif_url", "stats"], "verification_rules": ["agent_validation.status=passed"], "required": true},
+    {"step_id": "chart", "goal": "生成变化统计图表", "tool_name": "generate_change_stats_chart", "required_inputs": ["change_geojson_path"], "expected_outputs": ["chart_path"], "verification_rules": ["agent_validation.status=passed"], "required": true},
+    {"step_id": "report", "goal": "生成变化监测报告", "tool_name": "generate_monitor_report", "required_inputs": ["change_geojson_path"], "expected_outputs": ["report_path", "report_url"], "verification_rules": ["agent_validation.status=passed", "report_path exists"], "required": true}
+  ],
+  "tool_allowlist": ["detect_change", "generate_change_stats_chart", "generate_monitor_report"],
+  "expected_outputs": ["mask_tif_url", "vector_url", "chart_path", "report_url"],
+  "verification_rules": ["每个必需步骤均为 agent_validation.status=passed"],
+  "fallback_rule": "失败时执行 repair_plan；无显著变化时保留无变化证据并生成报告",
+  "promotion_evidence": "变化矢量、统计图和报告均通过客观验证"
+}
+-->
+
 # 工作流：一键变化检测 + 可视化 + 报告
 
 > 当用户上传两张时相影像并要求"变化检测""对比变化""违建监测"时，自动执行完整的检测→可视化→报告链路。
