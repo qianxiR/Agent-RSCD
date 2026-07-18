@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates. All Rights Reserved
+from functools import lru_cache
 from typing import Dict, List
 
 import numpy as np
@@ -12,9 +13,18 @@ from torchvision.transforms import v2
 
 
 class Sam3Processor:
-    """ """
+    """
+    入参: SAM3 图像模型、统一输入分辨率、推理设备和实例置信度阈值。
+    方法: 管理图像特征、文本特征和几何提示，文本特征按完整 prompt 做有界缓存。
+    出参: 为单图、批量图像和文本/几何提示提供可复用的推理状态。
+    """
 
     def __init__(self, model, resolution=1008, device="cuda", confidence_threshold=0.5):
+        """
+        入参: model 为已加载模型；resolution 为正方形输入边长；device 为 torch 设备。
+        方法: 构建确定性的图像预处理，并初始化 grounding 所需的 FindStage。
+        出参: 完成初始化的 Sam3Processor 实例。
+        """
         self.model = model
         self.resolution = resolution
         self.device = device
@@ -111,12 +121,16 @@ class Sam3Processor:
 
     @torch.inference_mode()
     def set_text_prompt(self, prompt: str, state: Dict):
-        """Sets the text prompt and run the inference"""
+        """
+        入参: prompt 为完整文本指令；state 必须包含 set_image 生成的 backbone_out。
+        方法: 复用缓存的文本特征并执行 grounding，避免跨轮次和跨 tile 重复编码同一文本。
+        出参: 写入实例框、实例掩膜、语义掩膜和置信度后的同一 state。
+        """
 
         if "backbone_out" not in state:
             raise ValueError("You must call set_image before set_text_prompt")
 
-        text_outputs = self.model.backbone.forward_text([prompt], device=self.device)
+        text_outputs = self._encode_text_prompt(prompt)
         # text_outputs['language_features']: [32, 1, 256]
         # text_outputs['language_mask']: [1, 32]
         # text_outputs['language_embeds']: [32, 1, 1024]
@@ -127,6 +141,15 @@ class Sam3Processor:
             state["geometric_prompt"] = self.model._get_dummy_prompt()
 
         return self._forward_grounding(state)
+
+    @lru_cache(maxsize=128)
+    def _encode_text_prompt(self, prompt: str):
+        """
+        入参: prompt 为未拆分、可哈希的文本字符串。
+        方法: 调用文本 backbone 一次，并按 processor 实例缓存最多 128 组设备端特征。
+        出参: 包含 language_features、language_mask 和 language_embeds 的只读特征字典。
+        """
+        return self.model.backbone.forward_text([prompt], device=self.device)
 
     @torch.inference_mode()
     def add_geometric_prompt(self, box: List, label: bool, state: Dict):

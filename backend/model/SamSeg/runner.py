@@ -17,6 +17,7 @@ SamSeg 推理封装层 (Model 层 / SamSeg)
 """
 import sys
 import logging
+import time
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -280,7 +281,8 @@ def run_segment(
     coverage_target: float = 0.95,
     vector_output_path: Optional[str] = None,
     min_area_m2: float = 50.0,
-) -> Optional[str]:
+    referring_expression: Optional[str] = None,
+) -> Optional[dict]:
     """
     语义分割: 单张图 → 类别掩膜 → 彩色 PNG (+ 可选矢量 GeoJSON)。
     - 入参:
@@ -289,10 +291,12 @@ def run_segment(
       - classes: 逗号分隔类别名 (中文/英文), 留空用默认 7 类
       - vector_output_path: 矢量 GeoJSON 输出路径 (None=不产出矢量)
       - min_area_m2: 矢量化的最小面积过滤 (平方米)
+      - referring_expression: 可选完整指代表达；提供后只输出符合大小/方位/参照关系的单个实例
       - 其余参数: 模型路径/设备/推理参数, 一般用默认
     - 出参: 成功返回 {output_path, stats, legend, [vector_stats, shp_path, edge_shp_path]};
             失败返回 None. 矢量化失败不影响 PNG/统计.
     """
+    started_at = time.perf_counter()
     import numpy as np
     from PIL import Image
     Image.MAX_IMAGE_PIXELS = None  # 大图不告警
@@ -301,23 +305,46 @@ def run_segment(
     processor, dev = _get_processor(
         ckpt or str(_DEFAULT_CKPT), bpe or str(_DEFAULT_BPE), conf, device or ""
     )
+    model_ready_at = time.perf_counter()
 
-    # 类别 → query
+    # 类别定义先用于普通语义分割；指代模式会在选出目标后收敛成单一类别。
     class_lines = _normalize_classes(classes)
-    query_words, query_idx_tensor, num_cls, num_queries = _build_query_tensors(class_lines)
-    query_idx_tensor = query_idx_tensor.to(dev)
 
     # 读图
     img = Image.open(image_path).convert("RGB")
-    logger.info(f"[SamSeg] 分割开始: {image_path} ({img.size[0]}x{img.size[1]}), {num_cls} 类")
+    image_ready_at = time.perf_counter()
+    referring_metadata = None
+    if referring_expression:
+        from .referring import run_referring_inference
 
-    # 多轮迭代推理
-    seg = infer.multipass_inference(
-        processor, query_words, query_idx_tensor, num_cls, num_queries,
-        dev, img, prob=prob, max_passes=max_passes, coverage_target=coverage_target,
-    )
+        seg, referring_metadata = run_referring_inference(
+            processor,
+            img,
+            referring_expression,
+            classes or "",
+        )
+        class_lines = ["background", referring_metadata["target_prompt"]]
+        num_cls = len(class_lines)
+        logger.info(
+            f"[SamSeg] 指代分割: expression={referring_expression!r}, "
+            f"target={referring_metadata['target_prompt']}, "
+            f"candidates={referring_metadata['candidate_count']}, "
+            f"selected={referring_metadata['selected_index']}"
+        )
+    else:
+        query_words, query_idx_tensor, num_cls, num_queries = _build_query_tensors(class_lines)
+        query_idx_tensor = query_idx_tensor.to(dev)
+        logger.info(
+            f"[SamSeg] 分割开始: {image_path} ({img.size[0]}x{img.size[1]}), {num_cls} 类"
+        )
+        seg = infer.multipass_inference(
+            processor, query_words, query_idx_tensor, num_cls, num_queries,
+            dev, img, prob=prob, max_passes=max_passes, coverage_target=coverage_target,
+        )
+    inference_done_at = time.perf_counter()
     # 后处理 (形态学平滑/去碎片/填洞)
     seg = infer.postprocess(seg, num_cls)
+    postprocess_done_at = time.perf_counter()
 
     # 上色存 PNG (★ 可视化逻辑收敛到 visualize.save_color_mask_png)
     cls_name_map = {idx: [s.strip() for s in line.split(",")] for idx, line in enumerate(class_lines)}
@@ -331,6 +358,8 @@ def run_segment(
     legend = _build_legend(palette, class_lines)
 
     result = {"output_path": output_path, "stats": stats, "legend": legend}
+    if referring_metadata is not None:
+        result["referring"] = referring_metadata
 
     # ★ GeoTIFF 带 CRS 掩膜 (源影像有 CRS 时生成, 供 GIS 直接打开)
     import os
@@ -369,7 +398,19 @@ def run_segment(
             if vec.get("edge_shp_path"):
                 result["edge_shp_path"] = vec["edge_shp_path"]
 
-    logger.info(f"[SamSeg] 分割完成, 结果存: {output_path}, 区域={stats['total_regions']}个")
+    finished_at = time.perf_counter()
+    result["performance"] = {
+        "model_ready_seconds": round(model_ready_at - started_at, 4),
+        "image_decode_seconds": round(image_ready_at - model_ready_at, 4),
+        "inference_seconds": round(inference_done_at - image_ready_at, 4),
+        "postprocess_seconds": round(postprocess_done_at - inference_done_at, 4),
+        "artifact_seconds": round(finished_at - postprocess_done_at, 4),
+        "total_seconds": round(finished_at - started_at, 4),
+    }
+    logger.info(
+        f"[SamSeg] 分割完成, 结果存: {output_path}, 区域={stats['total_regions']}个, "
+        f"performance={result['performance']}"
+    )
     return result
 
 

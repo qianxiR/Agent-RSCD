@@ -324,7 +324,11 @@ def _build_base_layer_params(image_path: str, cls_tag: str) -> dict:
 
 @register_tool("samseg")
 @tool
-def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
+def segment_image(
+    image_path: str,
+    classes: str = "",
+    referring_expression: str = "",
+) -> Dict[str, Any]:
     """
     对一张图片做语义分割, 按指定地物类别生成彩色掩膜图, 在前端展示分割结果。
 
@@ -340,10 +344,13 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
         - classes (str): 要识别的类别, 逗号分隔, 支持中文/英文。
           常用: 建筑/道路/水/植被/农田/裸地 或 building/road/water/vegetation/farmland/bareland。
           留空则用默认 7 类 (建筑/道路/水/裸地/植被/农田)。
+        - referring_expression (str): 可选完整指代表达。用于选择单个实例，例如
+          "最大的建筑"、"左上角的建筑"、"道路北侧最大的建筑"。使用时 classes 应只填目标类别。
     出参: frontend_action 指令, 前端右侧面板展示彩色分割结果
 
     示例:
         segment_image("E:/.../agent-files/send/{conv}/photo.png", "建筑,道路,水")
+        segment_image("E:/.../agent-files/send/{conv}/photo.png", "建筑", "道路北侧最大的建筑")
         segment_image("E:/.../agent-files/send/{conv}/photo.png")  # 用默认全部类别
     """
     from backend.model.SamSeg import runner
@@ -388,6 +395,7 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
             output_path=out_path,
             classes=classes or None,
             vector_output_path=vec_path,
+            referring_expression=referring_expression or None,
         )
         elapsed = time.time() - t0
 
@@ -398,6 +406,7 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
         # ★ 输入影像 URL: 让前端能从服务器读取原图, 与结果对比展示
         input_image_url = _build_input_image_url(image_path)
         cls_desc = classes if classes else "(建筑/道路/水/裸地/植被/农田)"
+        referring_metadata = result.get("referring")
         stats = result.get("stats", {})
         legend = result.get("legend", [])  # ★ 颜色→类别图注 (与 PNG 颜色严格一致)
         # ★ P1: 矢量统计 (面积/图斑数, 供摘要)
@@ -512,7 +521,10 @@ def segment_image(image_path: str, classes: str = "") -> Dict[str, Any]:
             "data": {
                 "image_path": image_path,
                 "classes": cls_desc,
+                "referring_expression": referring_expression or None,
+                "referring": referring_metadata,
                 "elapsed": round(elapsed, 1),
+                "performance": result.get("performance", {}),
                 "stats": stats,
                 "vector_stats": vector_stats,
                 "vector_path": vector_path,

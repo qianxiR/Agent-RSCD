@@ -167,6 +167,37 @@ def load_classes(path):
     return query_words, query_idx, num_cls, num_queries
 
 
+def _merge_prompt_result(seg_logits, query_index, result, target_size):
+    """
+    入参: query logits、query 索引、单 prompt 结果和目标 (H, W)。
+    方法: 批量融合实例概率、语义概率和存在性分数，保持原逐实例 max 语义。
+    出参: 原位更新后的 seg_logits。
+    """
+    instance_logits = result["masks_logits"].squeeze(1)
+    if instance_logits.shape[0] > 0:
+        if instance_logits.shape[-2:] != target_size:
+            instance_logits = F.interpolate(
+                instance_logits.unsqueeze(1),
+                size=target_size, mode="bilinear", align_corners=False,
+            ).squeeze(1)
+        weighted_instances = instance_logits * result["object_score"].view(-1, 1, 1)
+        seg_logits[query_index] = torch.maximum(
+            seg_logits[query_index], weighted_instances.amax(dim=0)
+        )
+
+    semantic_logit = result["semantic_mask_logits"]
+    if semantic_logit.shape[-2:] != target_size:
+        semantic_logit = F.interpolate(
+            semantic_logit, size=target_size, mode="bilinear", align_corners=False,
+        )
+    seg_logits[query_index] = torch.maximum(
+        seg_logits[query_index], semantic_logit.squeeze()
+    )
+    seg_logits[query_index] = seg_logits[query_index] * result["presence_score"]
+    return seg_logits
+
+
+@torch.inference_mode()
 def inference_single_view(processor, query_words, num_queries, device, image):
     """
     入参:
@@ -175,36 +206,17 @@ def inference_single_view(processor, query_words, num_queries, device, image):
         num_queries: 提示总数
         device: 计算设备
         image: PIL.Image
-    方法: 双头融合推理（实例头+语义头+存在性过滤）
+    方法: 图像编码一次，文本逐项执行双头融合推理（实例头+语义头+存在性过滤）
     出参: seg_logits - (num_queries, H, W)
     """
     w, h = image.size
     seg_logits = torch.zeros((num_queries, h, w), device=device)
 
-    with torch.no_grad():
-        state = processor.set_image(image)
-        for qi, word in enumerate(query_words):
-            processor.reset_all_prompts(state)
-            state = processor.set_text_prompt(prompt=word, state=state)
-
-            if state["masks_logits"].shape[0] > 0:
-                for inst_id in range(state["masks_logits"].shape[0]):
-                    inst_logit = state["masks_logits"][inst_id].squeeze()
-                    inst_score = state["object_score"][inst_id]
-                    if inst_logit.shape != (h, w):
-                        inst_logit = F.interpolate(
-                            inst_logit.view(1, 1, *inst_logit.shape),
-                            size=(h, w), mode="bilinear", align_corners=False,
-                        ).squeeze()
-                    seg_logits[qi] = torch.max(seg_logits[qi], inst_logit * inst_score)
-
-            sem_logit = state["semantic_mask_logits"]
-            if sem_logit.shape != (h, w):
-                sem_logit = F.interpolate(
-                    sem_logit, size=(h, w), mode="bilinear", align_corners=False,
-                ).squeeze()
-            seg_logits[qi] = torch.max(seg_logits[qi], sem_logit)
-            seg_logits[qi] = seg_logits[qi] * state["presence_score"]
+    state = processor.set_image(image)
+    for query_index, word in enumerate(query_words):
+        processor.reset_all_prompts(state)
+        result = processor.set_text_prompt(prompt=word, state=state)
+        _merge_prompt_result(seg_logits, query_index, result, (h, w))
 
     return seg_logits
 
