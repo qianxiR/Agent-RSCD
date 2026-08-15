@@ -89,3 +89,52 @@ python tests\segment_auto_report_test.py
 ```powershell
 conda run -n sam3 python tests\e2e_segment_auto_report_eval.py
 ```
+
+## 7. 四层能力指标（2026-07-25 建立）
+
+> 四层能力评估设计见 [capability-four-layers.md](capability-four-layers.md)。与 1-6 节的 harness 约束指标互补：harness 指标测"约束是否生效"，四层指标测"Agent 完整能力"。
+
+### 7.1 第①层 任务规划指标
+
+| 指标 | 含义 | 计算方式 | 证据来源 | 当前值 | 门槛 |
+|---|---|---|---|---|---|
+| `task_planning_accuracy` | 任务规划准确率 | 通过样本数 / 总样本数 | `tests\artifacts\task_planning_metrics.json` | 3 / 3 (100%) | ≥ 2/3 |
+| `tool_selection_accuracy` | 首步工具选择准确率 | 选对工具任务数 / 总任务数 | `tests\artifacts\task_planning_metrics.json` | 3 / 3 (100%) | ≥ 80% |
+| `param_completeness_rate` | 关键参数完整率 | 关键参数非空任务数 / 总任务数 | `tests\artifacts\task_planning_metrics.json` | 3 / 3 (100%) | ≥ 90% |
+
+固定命令:
+
+```powershell
+python tests\task_planning_eval.py
+```
+
+### 7.2 第③层 失败探索指标
+
+| 指标 | 含义 | 计算方式 | 证据来源 | 当前值 | 门槛 |
+|---|---|---|---|---|---|
+| `exploration_direction_accuracy` | 探索方向准确率 | 首步方向正确的场景数 / 总场景数 | `tests\artifacts\exploration_metrics.json` | 5 / 6 (83%) | ≥ 80% |
+| `blind_retry_rate` | 盲目重试率 | 盲目重试场景数 / 总场景数 | `tests\artifacts\exploration_metrics.json` | 1 / 6 (17%) | ≤ 20% |
+
+固定命令:
+
+```powershell
+python tests\exploration_eval.py
+```
+
+### 7.3 第④层 思维链质量指标（LLM-as-judge）
+
+| 指标 | 含义 | 计算方式 | 证据来源 | 当前值 | 门槛 |
+|---|---|---|---|---|---|
+| `thinking_quality_score` | 思维链质量综合分 | 4 维平均 × 20（百分制） | `tests\artifacts\thinking_quality_metrics.json` | 90.5 / 100 | ≥ 70/100 |
+| `practicality_pass_rate` | 务实度通过率 | practicality≥4 占比 | `tests\artifacts\thinking_quality_metrics.json` | 80%+ | ≥ 80% |
+| `avg_thinking_tokens` | 思维链平均 token | thinking_content token 均值 | `tests\artifacts\thinking_quality_metrics.json` | ~40 | 监控项 |
+
+裁判模型 `gpt-5.6-terra`（temperature=0），主模型 `gpt-5.4-mini`。四维均值：务实度 4.5+、问题导向 4.6+、简洁度 5.0、第一性原理 4.0+。
+
+固定命令:
+
+```powershell
+python tests\thinking_quality_eval.py
+```
+
+> ★ 裁判驱动的 prompt 优化：第④层裁判发现 first_principles 短板 → 优化 Repair Plan 协议（加根因推导引导）；第①层发现变化检测选错工具 → 优化工具使用规则（遥感工具直连路径）。两处优化均通过全评估回归确认无破坏。详见 [capability-four-layers.md §6.5](capability-four-layers.md)。

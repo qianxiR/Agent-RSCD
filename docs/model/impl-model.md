@@ -1,6 +1,6 @@
 # 模型层实施文档（认知 + 专业技能融合）
 
-> 本文是 [architecture.md](./architecture.md) 的**实施配套**，聚焦"通用地学大模型 + 专业技能模型"如何融合落地。
+> 本文是 [architecture.md](../architecture.md) 的**实施配套**，聚焦"通用地学大模型 + 专业技能模型"如何融合落地。
 > 模型层是系统的智能中枢，向上为智能体层提供推理能力，向下通过工具操作数据层。
 
 ---
@@ -67,7 +67,7 @@ graph TB
 
 ## 二、核心部件 1：LLM 客户端
 
-**关键文件**：[`backend/model/llm_client.py`](../backend/model/llm_client.py)
+**关键文件**：[`backend/model/llm_client.py`](../../backend/model/llm_client.py)
 
 ### 2.1 实现方法
 
@@ -117,9 +117,9 @@ stream_usage=settings.enable_context_cache
 ## 三、核心部件 2：工具系统（47 工具 / 10 大类）
 
 **关键文件**：
-- [`backend/model/tools/tool_registry.py`](../backend/model/tools/tool_registry.py) — 注册表
-- [`backend/model/tools/*.py`](../backend/model/tools/) — 10 个工具模块
-- [`backend/model/tools/_result.py`](../backend/model/tools/_result.py) — 统一 schema
+- [`backend/model/tools/tool_registry.py`](../../backend/model/tools/tool_registry.py) — 注册表
+- [`backend/model/tools/*.py`](../../backend/model/tools/) — 10 个工具模块
+- [`backend/model/tools/_result.py`](../../backend/model/tools/_result.py) — 统一 schema
 
 ### 3.1 注册机制（装饰器顺序是关键）
 
@@ -238,10 +238,10 @@ build_render_image_action(params, ...)               # frontend_action 的 rende
 ## 四、核心部件 3：SamSeg 遥感推理
 
 **关键文件**：
-- [`backend/model/SamSeg/runner.py`](../backend/model/SamSeg/runner.py) — 推理核心
-- [`backend/model/SamSeg/geoio.py`](../backend/model/SamSeg/geoio.py) — 地理 IO
-- [`backend/model/SamSeg/visualize.py`](../backend/model/SamSeg/visualize.py) — 可视化
-- [`backend/model/tools/samseg_tools.py`](../backend/model/tools/samseg_tools.py) — 工具封装
+- [`backend/model/SamSeg/runner.py`](../../backend/model/SamSeg/runner.py) — 推理核心
+- [`backend/model/SamSeg/geoio.py`](../../backend/model/SamSeg/geoio.py) — 地理 IO
+- [`backend/model/SamSeg/visualize.py`](../../backend/model/SamSeg/visualize.py) — 可视化
+- [`backend/model/tools/samseg_tools.py`](../../backend/model/tools/samseg_tools.py) — 工具封装
 
 > 详细架构见 [architecture-samseg.md](./architecture-samseg.md)。本文聚焦实施方法。
 
@@ -340,8 +340,8 @@ _get_upload_root()  → samseg/send/{conv}/
 ## 五、核心部件 4：技能编排（长任务）
 
 **关键文件**：
-- [`backend/model/skills/loader.py`](../backend/model/skills/loader.py) — 加载与检索
-- [`backend/model/skills/*.md`](../backend/model/skills/) — 技能方案文档
+- [`backend/model/skills/loader.py`](../../backend/model/skills/loader.py) — 加载与检索
+- [`backend/model/skills/*.md`](../../backend/model/skills/) — 技能方案文档
 
 ### 5.1 实现方法
 
@@ -436,4 +436,4 @@ if result["status"] == "success":
 6. **自动登记闭环**：上传类工具成功后自动写元数据，GeoServer 发布 ↔ 业务库元数据保持同步。
 7. **技能文档即配置**：Markdown 方案无需改代码，文件扫描 + 关键词检索，启动自动加载。
 
-> 智能体层如何调度这些模型能力（ReAct 推理 + 记忆编排）详见 [impl-agent.md](./impl-agent.md)。
+> 智能体层如何调度这些模型能力（ReAct 推理 + 记忆编排）详见 [impl-agent.md](../agent/core/impl-agent.md)。

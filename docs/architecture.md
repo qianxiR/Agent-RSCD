@@ -1,7 +1,7 @@
 # Agent-Flow-Study 架构文档
 
 > 本文档按 **10 大功能模块** 组织，完整梳理项目的架构、接口与流程。
-> 通信机制（WebSocket 事件 + 前端执行层）详见 [communication.md](./communication.md)。
+> 通信机制（WebSocket 事件 + 前端执行层）详见 [communication.md](platform/communication.md)。
 > 所有图表使用 Mermaid 语法，可在 GitHub / VSCode Mermaid 插件 / Typora 直接渲染。
 
 ---
@@ -32,10 +32,10 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 
 | 子文档 | 覆盖内容 | 章节 |
 |--------|---------|------|
-| [architecture-agent.md](./architecture-agent.md) | Agent 内核：会话管理 / ReAct 推理 / 三层记忆 / System Prompt / WebSocket | §1 §2 §4 §5 §6 |
-| [architecture-tools.md](./architecture-tools.md) | 工具系统：注册机制 / 10 大分类 47 工具 / 统一 Tool Result Schema | §3 |
-| [architecture-samseg.md](./architecture-samseg.md) | SamSeg 遥感分析：分割/变化检测/矢量化/VLM 判读（runner·geoio·visualize 三层） | §10 |
-| [architecture-platform.md](./architecture-platform.md) | 平台层：前端指令执行(OpenLayers 地图容器) / GeoServer 数据集成 / 技能编排 / 视觉设计 | §7 §8 §9 §11 附 |
+| [architecture-agent.md](agent/core/architecture-agent.md) | Agent 内核：会话管理 / ReAct 推理 / 三层记忆 / System Prompt / WebSocket | §1 §2 §4 §5 §6 |
+| [architecture-tools.md](model/architecture-tools.md) | 工具系统：注册机制 / 10 大分类 47 工具 / 统一 Tool Result Schema | §3 |
+| [architecture-samseg.md](model/architecture-samseg.md) | SamSeg 遥感分析：分割/变化检测/矢量化/VLM 判读（runner·geoio·visualize 三层） | §10 |
+| [architecture-platform.md](platform/architecture-platform.md) | 平台层：前端指令执行(OpenLayers 地图容器) / GeoServer 数据集成 / 技能编排 / 视觉设计 | §7 §8 §9 §11 附 |
 
 ---
 
@@ -135,7 +135,7 @@ graph LR
 | agent 内部自洽 | memory ↔ agent_db ↔ memory_tools 均在 agent 层 ✅ |
 | model → data | 工具调业务库/GeoServer ✅ |
 | data → 无上层 | 仅读 config ✅ |
-| platform ↔ agent | 通过 WebSocket 双向交互（见 [communication.md](./communication.md)） |
+| platform ↔ agent | 通过 WebSocket 双向交互（见 [communication.md](platform/communication.md)） |
 
 ---
 

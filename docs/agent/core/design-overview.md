@@ -1,8 +1,10 @@
 # Agent 内核设计概览
 
-> 聚焦 **Agent 内核机制**（上下文 / 记忆 / 执行策略 / Token 消耗），讲"这些部件如何协同驱动一次推理"。系统部件详见 [architecture.md](./architecture.md)。
+> 聚焦 **Agent 内核机制**（上下文 / 记忆 / 执行策略 / Token 消耗），讲"这些部件如何协同驱动一次推理"。系统部件详见 [architecture.md](../../architecture.md)。
 
 > **★ 2026-06-24（阶段 14-22）**：46 工具 10 大类（含 delete_geoserver_layer 补齐图层删除 + overlay_edge_on_image 边缘算子叠加★阶段21后仅手动调用）；3 个工作流方案（分割/变化检测/GeoServer 上传）；记忆多级压缩（v2.5）；消息分支 DAG（v2.5）；统一 Tool Result schema（v2.5）；**OpenLayers 地图容器（阶段21，替代卡片墙）**；`agent-files/{来源}/{项目}/{会话}/` 统一目录。
+>
+> **★ 2026-07（执行闭环与团队）**：ReAct 循环外叠加确定性执行闭环——计划状态机（`task_state.py`，plan/step/completion_gate，复用 ai_task 不新增表）+ 确定性 `verification_agent`（不调 LLM）+ `repair_policy` 13 类 failure_type 修复策略 + 完成门拦截未验证收尾 + 受控 worker（验证/报告）+ 技能编排（3 个 workflow 契约 → plan 步骤）+ 可观测性审计（decision_audit/repair_success）。详见 [architecture-agent.md §3](architecture-agent.md)。
 
 ---
 
@@ -16,7 +18,7 @@
     ★ v2.5: fold_tool_messages 折叠旧工具结果 (Level 0.5, 可逆)
     → trim_messages 裁剪到 16000 token
    ▼
-[2] Agent 推理循环 (最多 15 轮)
+[2] Agent 推理循环 (无轮次上限, 用户停止兜底)
     LLM 决策 → 有 tool_calls?
       是 → 执行工具 → ToolMessage 追加 → 继续循环
       否 → 输出最终回复 → 跳出
@@ -71,6 +73,7 @@
 - **工具异常不中断**：捕获为 error ToolMessage 回流给 LLM 重试
 - **反伪装成功三层防御**：工具层（verification）/ Prompt 层（规则约束）/ 传输层（chat_service 兜底校验）
 - **统一 Tool Result Schema**（v2.5）：`_result.py` 提供 helper，`instruction.type==action` 保证一致
+- **执行闭环**（2026-07）：每个工具调用进入 plan step → 确定性 verification_agent 校验 → 失败按 failure_type 生成 repair_plan → completion_gate 拦截未验证收尾。主控 Agent 是唯一决策中心，受控 worker（验证/报告）按白名单分工
 
 ---
 

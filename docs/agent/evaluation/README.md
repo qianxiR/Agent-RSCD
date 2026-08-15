@@ -45,10 +45,15 @@ docs\agent-evaluation\
 | 修正结果层 | 遵循修正策略后, 下一次工具结果是否通过验证 | 已建立第一版 | `tests\agent_repair_success_eval.py`、`logs\agent-repair-success.jsonl` |
 | 工程护栏层 | retry、上下文优先级和参数级修正是否稳定 | 已建立基线 | `tests\agent_guardrail_eval.py` |
 | 端到端工具层 | GeoServer 图层读取、报告生成和产物校验是否闭环 | 已建立第一版 | `tests\e2e_geoserver_report_eval.py` |
+| **①任务规划层** | **多步任务首步工具选择与参数完整性** | **已建立基线** | `tests\task_planning_eval.py` |
+| **③失败探索层** | **失败后探索方向是否合理（非盲目重试）** | **已建立基线** | `tests\exploration_eval.py` |
+| **④思维链质量层** | **务实度/问题导向/简洁/第一性原理（LLM-as-judge）** | **已建立基线** | `tests\thinking_quality_eval.py`（裁判 `gpt-5.6-terra`） |
 | 上下文层 | 动态上下文冲突时是否选择最新证据 | 已建立基础护栏 | `backend\agent\context\context_priority.py` |
 | 反思层 | 成功修复是否沉淀为高质量 lesson | 未建立 | 后续 `lesson_policy` 测试和记忆写入 trace |
 | 技能层 | 高频流程是否能稳定复用 skill | 未建立 | 后续 `skill_selector` 和技能执行 trace |
 | worker 层 | 专业 worker 是否按协议执行和汇报 | 已建立第一版 | `tests\segment_auto_report_test.py`, 后续补 `rs_agent` / `publish_agent` 测试 |
+
+> ★ 四层能力评估（①任务规划/②抑制幻觉/③失败探索/④思维链质量）设计见 [capability-four-layers.md](capability-four-layers.md)。现有 1-6 层测 harness 约束有效性（"刹车灵不灵"），四层测 Agent 完整能力（"会不会开车"）。
 
 ## 3. 当前基线
 
@@ -80,6 +85,14 @@ python tests\segment_auto_report_test.py
 conda run -n sam3 python tests\e2e_geoserver_report_eval.py
 ```
 
+四层能力评估命令（①任务规划/③失败探索/④思维链质量，②复用行为评估）:
+
+```powershell
+python tests\task_planning_eval.py
+python tests\exploration_eval.py
+python tests\thinking_quality_eval.py
+```
+
 该命令会输出当前可量化指标, 并写入:
 
 ```text
@@ -89,8 +102,14 @@ tests\artifacts\agent_behavior_metrics.json
 tests\artifacts\agent_repair_success_metrics.json
 tests\artifacts\e2e_geoserver_report_metrics.json
 tests\artifacts\e2e_segment_auto_report_metrics.json
+tests\artifacts\task_planning_metrics.json
+tests\artifacts\exploration_metrics.json
+tests\artifacts\thinking_quality_metrics.json
 logs\agent-trace.jsonl
 logs\agent-repair-success.jsonl
+logs\exploration-trace.jsonl
+logs\judge-trace.jsonl
+logs\task-planning-trace.jsonl
 ```
 
 分层验证命令:

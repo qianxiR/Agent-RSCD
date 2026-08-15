@@ -24,16 +24,16 @@
 
 | # | 模块 | 一句话职责 | 主文档 |
 |---|------|-----------|--------|
-| 1 | [**会话与项目管理**](./docs/architecture-agent.md#1-会话与项目管理) | 项目/会话/消息的 REST CRUD + 状态机 | `architecture-agent.md` |
-| 2 | [**Agent ReAct 推理引擎**](./docs/architecture-agent.md#2-agent-react-推理引擎) | 流式 thinking、工具调度循环、停止回滚 | `architecture-agent.md` |
-| 3 | [**工具系统**](./docs/architecture-tools.md#3-工具系统) | `@register_tool` 注册、统一 Schema 与暴露边界 | `architecture-tools.md` |
-| 4 | [**记忆与计划系统**](./docs/architecture-agent.md#4-三层记忆系统) | 工作记忆、会话摘要、长期记忆、plan state 与 lesson 准入 | `architecture-agent.md` |
-| 5 | [**System Prompt 与上下文缓存**](./docs/architecture-agent.md#5-system-prompt-与上下文缓存) | 洋葱式三层结构（成功条件/ReAct/能力边界）+ 显式缓存块 | `architecture-agent.md` |
-| 6 | [**WebSocket 双向通信**](./docs/architecture-agent.md#6-websocket-双向通信) | `request_id` 配对、阻塞等待、多对话并行 | `architecture-agent.md` |
-| 7 | [**前端指令执行层**](./docs/architecture-platform.md#7-前端指令执行层) | OpenLayers 地图容器 + `event_type` 路由 → 渲染函数 → 回执回传 | `architecture-platform.md` |
-| 8 | [**GeoServer 与数据集成**](./docs/architecture-platform.md#8-geoserver-与数据集成) | WMS/REST/WFS 客户端 + 业务库 CRUD + 知识库骨架 | `architecture-platform.md` |
-| 9 | [**技能编排（长任务）**](./docs/architecture-platform.md#9-技能编排长任务) | 契约校验、确定性单技能选择、计划检查点与失败回退 | `architecture-platform.md` |
-| 10 | [**SamSeg 遥感分析**](./docs/architecture-samseg.md#10-samseg-遥感分析) | 分割/变化检测/矢量化（runner·geoio·visualize 三层） | `architecture-samseg.md` |
+| 1 | [**会话与项目管理**](./docs/agent/core/architecture-agent.md#1-会话与项目管理) | 项目/会话/消息的 REST CRUD + 状态机 | `architecture-agent.md` |
+| 2 | [**Agent ReAct 推理引擎**](./docs/agent/core/architecture-agent.md#2-agent-react-推理引擎) | 流式 thinking、工具调度循环、停止回滚 | `architecture-agent.md` |
+| 3 | [**工具系统**](./docs/model/architecture-tools.md#3-工具系统) | `@register_tool` 注册、统一 Schema 与暴露边界 | `architecture-tools.md` |
+| 4 | [**记忆与计划系统**](./docs/agent/core/architecture-agent.md#4-三层记忆系统) | 工作记忆、会话摘要、长期记忆、plan state 与 lesson 准入 | `architecture-agent.md` |
+| 5 | [**System Prompt 与上下文缓存**](./docs/agent/core/architecture-agent.md#5-system-prompt-与上下文缓存) | 洋葱式三层结构（成功条件/ReAct/能力边界）+ 显式缓存块 | `architecture-agent.md` |
+| 6 | [**WebSocket 双向通信**](./docs/agent/core/architecture-agent.md#6-websocket-双向通信) | `request_id` 配对、阻塞等待、多对话并行 | `architecture-agent.md` |
+| 7 | [**前端指令执行层**](./docs/platform/architecture-platform.md#7-前端指令执行层) | OpenLayers 地图容器 + `event_type` 路由 → 渲染函数 → 回执回传 | `architecture-platform.md` |
+| 8 | [**GeoServer 与数据集成**](./docs/platform/architecture-platform.md#8-geoserver-与数据集成) | WMS/REST/WFS 客户端 + 业务库 CRUD + 知识库骨架 | `architecture-platform.md` |
+| 9 | [**技能编排（长任务）**](./docs/platform/architecture-platform.md#9-技能编排长任务) | 契约校验、确定性单技能选择、计划检查点与失败回退 | `architecture-platform.md` |
+| 10 | [**SamSeg 遥感分析**](./docs/model/architecture-samseg.md#10-samseg-遥感分析) | 分割/变化检测/矢量化（runner·geoio·visualize 三层） | `architecture-samseg.md` |
 
 ### Agent 执行边界
 
@@ -78,18 +78,20 @@ Agent-RSCD/
 ├── frontend-vue/               # 🖥️ 当前 Vue 3 + Vite + Element Plus + OpenLayers 前端
 │   ├── src/                     #   页面、组件、状态与 WebSocket 逻辑
 │   └── public/                  #   静态资源
+├── agent.md                     # 后端 Agent 架构说明 (按当前代码整理)
 ├── docs/
 │   ├── architecture.md          #   架构总纲 (总述+架构图+索引到子文档)
-│   ├── architecture-agent.md    #   Agent 内核 (会话/ReAct/记忆/Prompt/WS)
-│   ├── architecture-tools.md    #   工具系统 (统一注册与 Schema)
-│   ├── architecture-samseg.md   #   SamSeg 遥感分析 (runner/geoio/visualize 三层)
-│   ├── architecture-platform.md #   平台层 (前端/GeoServer/技能/视觉设计)
-│   ├── agent-goal.md            #   Agent 当前目标与固定边界
-│   ├── agent-progress.md        #   阶段 1-8 状态与验证证据
-│   ├── agent-implementation-plan.md # 阶段 6-8 实施记录与统一验收
-│   └── communication.md         #   前后端通信机制 (WS 协议 + 前端执行层)
-└── scripts/
-    └── migrate_agent_db.py      # 记忆库迁移脚本
+│   ├── PROGRESS.md              #   项目总体进度文档
+│   ├── agent/                   #   Agent 建设文档
+│   │   ├── core/                #     architecture-agent / design-overview / impl-agent
+│   │   ├── evaluation/          #     评估集 / 基线报告 / 指标与命令
+│   │   ├── method/              #     harness 方法论
+│   │   └── roadmap.md           #     建设路线
+│   ├── model/                   #   architecture-tools / architecture-samseg / impl-model
+│   ├── platform/                #   architecture-platform / communication / playwright-usage
+│   ├── data/                    #   impl-data
+│   └── archive/                 #   归档的历史设计文档
+└── scripts/                     # 记忆库维护 / 迁移 / 清理脚本
 ```
 
 ---
@@ -225,12 +227,11 @@ npm --prefix frontend-vue run dev
 
 ## 相关文档
 
-- 📄 [**docs/architecture.md**](./docs/architecture.md) — 架构总纲（总述 + 总架构图 + 索引到 4 个子文档：agent/tools/samseg/platform）
-- 📄 [**docs/communication.md**](./docs/communication.md) — 前后端通信机制（WS 协议 + 前端执行层 + `request_id` 闭环）
+- 📄 [**docs/architecture.md**](./docs/architecture.md) — 架构总纲（总述 + 总架构图 + 索引到子文档：agent/core、model、platform）
+- 📄 [**docs/platform/communication.md**](./docs/platform/communication.md) — 前后端通信机制（WS 协议 + 前端执行层 + `request_id` 闭环）
 - 📄 [**docs/PROGRESS.md**](./docs/PROGRESS.md) — 项目总体进度文档
-- 📄 [**docs/agent-goal.md**](./docs/agent-goal.md) — Agent 当前目标、固定决策和架构边界
-- 📄 [**docs/agent-progress.md**](./docs/agent-progress.md) — Agent 阶段 1-8 状态、测试结果和 Playwright 证据
-- 📄 [**docs/agent-implementation-plan.md**](./docs/agent-implementation-plan.md) — 阶段 6-8 实施记录与统一验收命令
+- 📄 [**agent.md**](./agent.md) — 后端 Agent 架构说明（上下文、记忆、工具、技能设计，按当前代码整理）
+- 📄 [**docs/agent/roadmap.md**](./docs/agent/roadmap.md) — Agent 建设路线；评估方法与基线报告见 `docs/agent/evaluation/`
 
 ---
 
@@ -238,6 +239,7 @@ npm --prefix frontend-vue run dev
 
 | 版本 | 日期 | 主要内容 |
 |---|---|---|
+| v2.8 | 2026-08-16 | docs 按模块重组（agent/core·evaluation·method、model、platform、data、archive），README 链接与目录树同步更新 |
 | v2.7 | 2026-07-18 | 阶段 5-8 收口：同步自然资源监测报告、显式 plan state、证据准入 lesson、技能契约与选择器 |
 | v2.6 | 2026-06-24 | OpenLayers 地图容器、矢量原生渲染与端到端测试 |
 | v2.5 | 2026-06 | verification、反伪装成功防御、连通域分析与空间产物增强 |

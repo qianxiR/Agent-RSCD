@@ -1,7 +1,7 @@
 > 🗄️ **已归档 · 2026-07-09**：本文针对原生 JS `frontend/map/`，该前端已被 `frontend-vue/` 取代。
 > - 现行地图实现以 `frontend-vue/src/composables/useMap.js` 为准。
 > - 「GeoServer → UI 加载流程」整体思路仍可参考，但代码示例对应已停用的旧前端。
-> - 平台层架构以 [`architecture-platform.md`](../architecture-platform.md) 为准。
+> - 平台层架构以 [`architecture-platform.md`](../platform/architecture-platform.md) 为准。
 > - 本文档仅作历史方案留存。
 
 # 前端 map/ 模块拆分方案 + GeoServer → UI 加载流程

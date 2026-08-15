@@ -1,7 +1,7 @@
 > 🗄️ **已归档 · 2026-07-09**：本升级设计方案已完成历史使命，不再作为活跃规划。
 > - 第一阶段 `verification_agent` 已落地，§3 目标架构被实际代码超越（额外落地 `repair_policy` / `report_worker` / `validation_stage`）。
-> - §9 第一阶段验收标准已全部满足；后续阶段（rs/publish/report worker）由 [`agent-implementation-plan.md`](../agent-implementation-plan.md) 接管为执行包。
-> - 范式与决策以 [`agent-goal.md`](../agent-goal.md) 为准，进度以 [`agent-progress.md`](../agent-progress.md) 为准。
+> - §9 第一阶段验收标准已全部满足；当前能力、边界与后续建设路线统一见 [`agent.md`](../agent/roadmap.md)。
+> - 本文只保留历史方案，不再作为当前实施依据。
 > - 本文档仅作历史方案留存。
 
 # 多 Agent 后端升级设计

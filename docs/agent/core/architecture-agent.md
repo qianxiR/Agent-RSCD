@@ -1,6 +1,6 @@
 # Agent 核心架构（会话 / ReAct 推理 / 记忆 / Prompt / WebSocket）
 
-> 本文是 [architecture.md](./architecture.md) 的子文档，聚焦 Agent 内核机制。系统总览见总纲。
+> 本文是 [architecture.md](../../architecture.md) 的子文档，聚焦 Agent 内核机制。系统总览见总纲。
 
 ---
 
@@ -9,8 +9,8 @@
 > **一句话**：项目 → 会话 → 消息的三级组织，通过 HTTP REST 管理元数据，通过 `conversation_id` 贯通前后端多轮对话。
 
 **关键文件**：
-- [`backend/main.py`](../backend/main.py) — HTTP 端点
-- [`backend/agent/memory/agent_db.py`](../backend/agent/memory/agent_db.py) — `project` / `conversation` CRUD
+- [`backend/main.py`](../../../backend/main.py) — HTTP 端点
+- [`backend/agent/memory/agent_db.py`](../../../backend/agent/memory/agent_db.py) — `project` / `conversation` CRUD
 
 ### 1.1 数据模型
 
@@ -77,9 +77,9 @@ flowchart LR
 
 ## 2. Agent ReAct 推理引擎
 
-> **一句话**：LLM 驱动的 ReAct 循环——流式输出思考 → 检测工具调用 → 执行工具 → 结果回灌 LLM → 直到给出最终回复或达迭代上限。
+> **一句话**：LLM 驱动的 ReAct 循环——流式输出思考 → 检测工具调用 → 执行工具 → 结果回灌 LLM → 直到给出最终回复；**不设工具调用轮次上限**，由用户手动停止兜底。
 
-**关键文件**：[`backend/agent/chat_service.py`](../backend/agent/chat_service.py)
+**关键文件**：[`backend/agent/chat_service.py`](../../../backend/agent/chat_service.py)
 
 ### 2.1 推理循环流程图
 
@@ -93,7 +93,7 @@ flowchart TB
         P3["build_context_messages()<br/>加载三层记忆 + trim"]
     end
 
-    LOOP{"迭代 N<br/>(max=15)"}
+    LOOP{"迭代 N<br/>(无硬上限, 用户停止兜底)"}
 
     subgraph THINK["🧠 思考阶段"]
         T1["llm.astream(messages)<br/>逐 chunk 推送 thinking"]
@@ -195,6 +195,211 @@ sequenceDiagram
 
 ---
 
+## 3. 执行闭环与团队（计划 / 验证 / 修复 / 完成门 / 技能 / Worker）
+
+> **一句话**：在 ReAct 循环外叠加一层**确定性执行闭环**——每个工具调用都进入计划步骤 → 确定性 verification_agent 校验 → 失败生成 repair_plan → 完成门拦截未验证收尾；受控 worker（验证 / 报告）按白名单分工，主控 Agent 始终是唯一决策中心。
+
+**关键文件**：
+- [`backend/agent/memory/task_state.py`](../../../backend/agent/memory/task_state.py) — 计划状态机（plan / step / completion_gate）
+- [`backend/agent/runtime/observation_builder.py`](../../../backend/agent/runtime/observation_builder.py) — Observation 增强（验证注入 + repair_plan）
+- [`backend/agent/team/verification_worker.py`](../../../backend/agent/team/verification_worker.py) — 确定性验证 worker（不调 LLM）
+- [`backend/agent/team/repair_policy.py`](../../../backend/agent/team/repair_policy.py) — failure_type → repair_plan 规则表
+- [`backend/agent/team/validation_stage.py`](../../../backend/agent/team/validation_stage.py) — 验证阶段编排
+- [`backend/agent/runtime/skill_execution.py`](../../../backend/agent/runtime/skill_execution.py) — 技能契约 → plan 步骤
+- [`backend/agent/team/agent_roles.py`](../../../backend/agent/team/agent_roles.py) — worker 角色白名单
+
+### 3.1 执行闭环总览
+
+```mermaid
+flowchart TB
+    TC["LLM 发起 tool_call"]
+    STS["start_tool_step<br/>激活/追加 plan step (running)"]
+    EXEC["执行工具"]
+    OBS["observation_builder<br/>build_observation_tool_message"]
+    VAL["validation_stage<br/>run_validation_stage"]
+    VW{"verification_agent<br/>(确定性, 不调 LLM)"}
+
+    PASSED["passed<br/>step → completed"]
+    FAILED["failed/warning<br/>step → blocked<br/>写入 repair_plan"]
+    UNVERIFIED["unverified<br/>step → failed"]
+
+    APPLY["apply_step_observation<br/>更新 step 状态 + evidence"]
+    GATE{"completion_gate<br/>_refresh_completion_gate"}
+
+    TC --> STS --> EXEC --> OBS --> VAL --> VW
+    VW -->|"工具成功 + 产物校验通过"| PASSED
+    VW -->|"工具 error / 校验失败"| FAILED
+    VW -->|"无验证信号"| UNVERIFIED
+    PASSED --> APPLY
+    FAILED --> APPLY
+    UNVERIFIED --> APPLY
+    APPLY --> GATE
+    GATE -.->|"禁止收尾<br/>追加 SystemMessage 拦截"| TC
+
+    classDef ok fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    classDef bad fill:#fce4ec,stroke:#c62828,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    class PASSED ok
+    class FAILED,UNVERIFIED bad
+    class VW,GATE decision
+```
+
+### 3.2 计划状态机（task_state.py）
+
+**核心设计**：计划是**内存中的 dict**，持久化时复用一条 `task_type='agent_plan'` 的 `ai_task`（首次写 `input`，后续写 `output`），**不新增数据库表**（`task_state.py:270`、`agent_db.py:1808`）。
+
+**plan 结构**（`create_plan_state`，`task_state.py:39`）：
+
+```python
+{
+  "plan_id": "plan_{conv_id}_{uuid10}",
+  "conversation_id": "...",
+  "goal": "当前用户目标",
+  "status": "running",              # running / blocked / completed
+  "steps": [...],                   # 见下
+  "current_step_id": None,
+  "completion_gate": {"allowed": False, "reason": "..."},
+  "selected_skill": None,           # 技能编排写入
+  "skill_fallback_rule": None,
+  "created_at": "...", "updated_at": "..."
+}
+```
+
+**step 结构**（`append_plan_step`，`task_state.py:64`）：
+
+| 字段 | 说明 |
+|---|---|
+| `step_id` / `goal` / `executor` | 步骤标识 / 目标 / 执行者（`main_agent`/`tool`/`verification_agent`/`report_agent`，`task_state.py:22`） |
+| `status` | `pending`/`running`/`blocked`/`completed`/`failed`/`cancelled`（`task_state.py:23`） |
+| `required` | 是否属于完成门必需步骤（默认 True） |
+| `tool_name` / `inputs` / `expected_outputs` | 工具名 / 入参 / 期望产物 |
+| `evidence` | 证据列表，每次 observation 追加一条（`task_state.py:171`） |
+| `repair_plan` | 验证失败时由 validation_stage 写入 |
+
+**步骤生命周期**：
+
+| 函数（task_state.py） | 触发时机 | 状态转换 |
+|---|---|---|
+| `append_plan_step` (:64) | 技能契约展开 / 计划初始化 | → `pending` |
+| `start_tool_step` (:107) | LLM 发起 tool_call（`chat_service.py:1161`） | `pending/blocked/failed` → `running` |
+| `apply_step_observation` (:148) | 工具执行 + 验证完成后（`chat_service.py:1339`） | 按 validation.status 转换（见下） |
+
+### 3.3 完成门（completion_gate）
+
+**核心函数** `_refresh_completion_gate`（`task_state.py:197`）：
+
+- **必需步骤**（`required=True`）全部 `completed` → `allowed=True`，plan.status → `completed`
+- 任一必需步骤处于开放状态（`pending/running/blocked/failed`）→ `allowed=False`，返回具体阻塞原因
+
+**完成门拦截机制**（`chat_service.py:1085-1106`）：
+
+```python
+# 当 LLM 想给最终回复（无 tool_calls），但 completion_gate.allowed=False 时
+if not plan_allowed and not waiting_for_user:
+    # 追加 SystemMessage 拦截收尾，强制继续执行
+    all_messages.append(SystemMessage(
+        content=f"完成门禁止：{reason}。必须继续执行 next_action 或 repair_plan，不得宣告任务完成。"
+    ))
+    continue  # 回到推理循环
+```
+
+> **关键**：这保证未通过验证的步骤不能被跳过，防止 LLM 把"未验证"说成"已完成"。普通问答（无 plan）不受完成门约束（`can_finalize_plan` 对 `plan=None` 返回 `(True, ...)`，`task_state.py:233`）。
+
+### 3.4 验证 Agent 与修复链
+
+**设计原则**（`roadmap.md` 确认）：确定性规则优先，不调 LLM。
+
+**verification_agent**（`team/verification_worker.py:102` `run_verification`）：
+
+```python
+def run_verification(payload) -> dict:
+    # 纯规则校验链:
+    # 1. 检查工具 result.get("error")           → verification_worker.py:125
+    # 2. 读取工具自带的 result.get("verification") → verification_worker.py:138
+    # 3. 对产物路径调 verify_by_path (文件/矢量/报告校验) → verification_worker.py:143
+    #    verify_by_path 实现在 model/tools/_verification.py
+    # 返回 {status: passed/failed/warning, checks: [...], repair_plan: {...}}
+```
+
+**修复策略表**（`repair_policy.py:156` `plans`）：支持 13 类 failure_type，每类映射一套修复策略：
+
+```
+tool_error / missing_input_file / missing_sandbox_file /
+missing_vector_artifact / missing_artifact / empty_or_tiny_artifact /
+empty_vector / incomplete_shapefile_zip / unreadable_artifact /
+permission_or_path_error / invalid_arguments /
+insufficient_evidence / unknown_failure
+```
+
+每个 repair_plan 含：`failure_type` / `root_cause_hint` / `next_action` / `recommended_tool` / `parameter_changes` / `fallback_tools` / `stop_condition` / `recommendation`。
+
+**验证阶段编排**（`validation_stage.py`）：
+
+| 函数 | 职责 |
+|---|---|
+| `should_run_validation_stage` (:14) | 判断是否需验证（error / 有 verification / data 含产物路径） |
+| `run_validation_stage` (:34) | 调 verification_worker |
+| `apply_validation_to_tool_result` (:159) | 把结果写回 `tool_result.agent_validation`，生成 `repair_execution_card` (:93) |
+
+> 验证结果通过 `build_observation_tool_message`（`observation_builder.py:52`）在 ToolMessage 构造前统一注入，LLM 在下一轮能看到 `agent_validation.status` 和 `repair_plan`。
+
+### 3.5 技能编排（skill）
+
+技能定义在 `backend/model/skills/`（model 层），是 markdown 契约文件；agent 层通过 `runtime/skill_execution.py` 把契约转为 plan 步骤。
+
+**已注册技能**（3 个工作流）：
+- `wf1-segment-visualize-report.md` — 分割 + 可视化 + 报告
+- `wf2-change-detection-visualize-report.md` — 变化检测 + 可视化 + 报告
+- `wf4-upload-geoserver-display.md` — 上传 GeoServer + 显示
+
+**技能选择**：`model/tools/skill_tools.py:32` `lookup_skill` 工具（分类 `skill`），由 LLM 调用。
+
+**契约 → plan 映射**（`skill_execution.py:9` `apply_skill_selection_to_plan`）：
+
+```python
+def apply_skill_selection_to_plan(plan, skill_contract):
+    # 1. 再次校验契约质量门 (validate_skill_contract) → skill_execution.py:32
+    # 2. 把 contract.steps 逐个追加为 plan pending 步骤 → skill_execution.py:43
+    # 3. 写回 plan.selected_skill / skill_fallback_rule / skill_verification_rules → :52-54
+```
+
+**触发点**：`chat_service.py:1345`，当 `tool_name == "lookup_skill"` 时调用，并把 accepted_lessons 注入（`chat_service.py:1213`）。
+
+> 技能步骤直接映射为 plan step（executor=`tool`），不引入独立的 `stage` / `skill_step` 类。
+
+### 3.6 团队 Worker（受控多智能体）
+
+**设计原则**：主控 Agent 是唯一决策中心，worker 仅按白名单执行受限任务，不是开放式多智能体协作。
+
+**角色白名单**（`agent_roles.py:15`）：当前仅 2 个固定 worker：
+
+| Worker | 职责 | 工具绑定 | 调用方式 |
+|---|---|---|---|
+| `verification_agent` | 确定性产物校验 | 空（不调 LLM，不绑工具，`agent_roles.py:16`） | **同步内嵌调用**（`observation_builder.py:75`） |
+| `report_agent` | 回读已验证 Evidence + Artifact 生成报告 | 受限（`report_worker.py`） | 异步派发（`chat_service.py:1322`） |
+
+**Worker 派发**（`task_manager.py`）：
+
+| 函数 | 职责 |
+|---|---|
+| `assign_agent_task` (:81) | 创建 ai_task + 起 asyncio worker |
+| `_run_worker_task` (:22) | 路由到 `run_verification` 或 `run_report_worker` |
+| 主控查询 | `query_agent_task` 工具（`team_tools.py:85`） |
+
+**统一输出契约**（`result_contract.py:45` `build_worker_result`）：12 字段，含 `artifacts` / `evidence` / `status` / `quality` 等。
+
+> Worker **不拥有**以下权限：修改总目标、删除计划、绕过 completion gate、宣告任务完成、读取无关项目数据。复杂 worker_assignment 权限模型暂未建设（见 [engineering-gap-analysis.md](engineering-gap-analysis.md) §2.3）。
+
+### 3.7 可观测性（observability）
+
+| 模块（`backend/agent/observability/`） | 职责 |
+|---|---|
+| `decision_audit.py` | repair_plan 遵循审计（JSONL 落盘） |
+| `parameter_repair.py` | 参数级修正验证 |
+| `repair_success.py` | 修正成功率观测 |
+
+> 注：`runtime/retry_guard.py:29` 的 `build_retry_signature`（防机械重试）**已定义但未被调用**，当前防重复失败实际靠 plan step status + repair_plan。详见 [engineering-gap-analysis.md](engineering-gap-analysis.md) §2.2 关于 failure_fingerprint 命名统一与 retry_guard 激活的建议。
+
 ---
 
 ## 4. 三层记忆系统
@@ -202,11 +407,11 @@ sequenceDiagram
 > **一句话**：工作记忆（近期消息）/ 短期记忆（会话摘要）/ 长期记忆（**只沉淀错误案例+解决方案**，偏好/事实提取默认关闭）三层协同，自动 trim 裁剪、阈值摘要、**犯错自纠自动沉淀为全局教训**（融入长期记忆）。
 
 **关键文件**：
-- [`backend/agent/memory/memory_context.py`](../backend/agent/memory/memory_context.py) — 编排
-- [`backend/agent/memory/agent_db.py`](../backend/agent/memory/agent_db.py) — 记忆数据库 CRUD
-- [`backend/agent/memory/self_correction.py`](../backend/agent/memory/self_correction.py) — **自纠捕捉器（阶段 13 新增）**
-- [`backend/agent/memory/task_state.py`](../backend/agent/memory/task_state.py) — 工作记忆状态卡
-- [`backend/agent/memory/pattern_tracker.py`](../backend/agent/memory/pattern_tracker.py) — 重复操作偏好识别
+- [`backend/agent/memory/memory_context.py`](../../../backend/agent/memory/memory_context.py) — 编排
+- [`backend/agent/memory/agent_db.py`](../../../backend/agent/memory/agent_db.py) — 记忆数据库 CRUD
+- [`backend/agent/memory/self_correction.py`](../../../backend/agent/memory/self_correction.py) — **自纠捕捉器（阶段 13 新增）**
+- [`backend/agent/memory/task_state.py`](../../../backend/agent/memory/task_state.py) — 工作记忆状态卡
+- [`backend/agent/memory/pattern_tracker.py`](../../../backend/agent/memory/pattern_tracker.py) — 重复操作偏好识别
 
 ### 4.1 三层记忆对照
 
@@ -230,7 +435,7 @@ AIMessage(tool_calls=[X]) → ToolMessage(error)
   → AIMessage(tool_calls=[X' 或相关工具]) → ToolMessage(success)
 ```
 
-**关键函数**（[`self_correction.py`](../backend/agent/memory/self_correction.py)）：
+**关键函数**（[`self_correction.py`](../../../backend/agent/memory/self_correction.py)）：
 
 ```python
 # 检测自纠事件 (规则, 零 LLM, O(n))
@@ -495,7 +700,7 @@ conv_id=A
 
 > **一句话**：动态生成工具目录（与 `bind_tools` 实时同步）+ CoT 4 步工作流 + 快捷按钮映射，拆成「静态块 + 半稳定块」做显式缓存降本。
 
-**关键文件**：[`backend/agent/prompt/system_prompt.py`](../backend/agent/prompt/system_prompt.py)
+**关键文件**：[`backend/agent/prompt/system_prompt.py`](../../../backend/agent/prompt/system_prompt.py)
 
 ### 5.1 Prompt 组成
 
@@ -559,10 +764,10 @@ def build_system_prompt_blocks(conversation_summary, user_profile) -> list:
 > **一句话**：全双工通道，`request_id` 配对实现「后端发指令 → 前端执行 → 回传结果」闭环；支持同连接多对话并行。
 
 **关键文件**：
-- [`backend/agent/ws_manager.py`](../backend/agent/ws_manager.py) — 连接/任务管理 + 阻塞等待
-- [`frontend/core/ws-chat.js`](../frontend/core/ws-chat.js) — 事件分发 + 多对话路由
+- [`backend/agent/ws_manager.py`](../../../backend/agent/ws_manager.py) — 连接/任务管理 + 阻塞等待
+- [`frontend/core/ws-chat.js`](../../../frontend/core/ws-chat.js) — 事件分发 + 多对话路由
 
-> 完整协议表、时序图、三层架构详见 [communication.md](./communication.md)。
+> 完整协议表、时序图、三层架构详见 [communication.md](../../platform/communication.md)。
 
 ### 6.1 核心机制：`request_id` 配对
 

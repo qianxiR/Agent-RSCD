@@ -1,14 +1,14 @@
 > 🗄️ **已归档 · 2026-07-09**：Vue3 改造方案已落地完成，不再作为活跃规划。
 > - P0–P5 + §7.1–7.6 全部落地，`frontend-vue/` 为现役前端（原生 `frontend/` 已停用）。
 > - §7.7 待办中「P6 后端挂载切换」不适用——`main.py` 无前端静态挂载，前后端本就分离部署。
-> - 现行前端实现以 `frontend-vue/src` 代码为准，平台层架构见 [`architecture-platform.md`](../architecture-platform.md)。
+> - 现行前端实现以 `frontend-vue/src` 代码为准，平台层架构见 [`architecture-platform.md`](../platform/architecture-platform.md)。
 > - 本文档仅作改造历程留存。
 
 # 前端 Vue3 改造方案（frontend-vue）
 
 > 本文记录从原生 JS 前端（`frontend/`）迁移到 **Vue3 + Vite + Pinia + Element Plus** 的工程级改造方案。
 >
-> 关联文档：原生前端总纲 [architecture.md](../architecture.md)、`map/` 模块拆分 [frontend-map-geoserver.md](./frontend-map-geoserver.md)、Agent 内核 [design-overview.md](../design-overview.md)。
+> 关联文档：原生前端总纲 [architecture.md](../architecture.md)、`map/` 模块拆分 [frontend-map-geoserver.md](./frontend-map-geoserver.md)、Agent 内核 [design-overview.md](../agent/core/design-overview.md)。
 
 ---
 

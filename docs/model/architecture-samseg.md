@@ -1,6 +1,6 @@
 # SamSeg 遥感分析（分割 / 变化检测 / 矢量化 / VLM 判读）
 
-> 本文是 [architecture.md](./architecture.md) 的子文档。系统总览见总纲。
+> 本文是 [architecture.md](../architecture.md) 的子文档。系统总览见总纲。
 
 ---
 
@@ -9,12 +9,12 @@
 > **一句话**：SegEarth-OV3（基于 SAM 3 的训练免开放词汇遥感分割/变化检测）封装为 4 个工具（分割/变化检测/视觉理解/渔网切片），用户上传图片后 Agent 自动推理，结果含彩色分割 PNG + 矢量 GeoJSON 图斑 + 类别图注 + 连通域统计 + **业务变化类型 VLM 判读**。
 
 **关键文件**（SamSeg 包按职责拆为三层，阶段 23 重构）：
-- [`backend/model/SamSeg/runner.py`](../backend/model/SamSeg/runner.py) — **推理核心层**：模型缓存 + 分割/变化检测 + 连通域统计 + VLM 业务判读（~770 行，纯算法，不含可视化/落盘）
-- [`backend/model/SamSeg/visualize.py`](../backend/model/SamSeg/visualize.py) — **可视化层**：`save_color_mask_png`（PNG 上色落盘）+ `build_legend`（颜色图注）。轻量依赖（仅 PIL/numpy）
-- [`backend/model/SamSeg/geoio.py`](../backend/model/SamSeg/geoio.py) — **GeoIO 层**：`save_geotiff_mask`（带 CRS 掩膜）+ `vectorize_mask_to_geojson`（矢量 GeoJSON + Shapefile）+ `export_shp_from_gdf`。依赖 rasterio/geopandas
-- [`backend/model/SamSeg/edge_utils.py`](../backend/model/SamSeg/edge_utils.py) — 边缘算子（distance/canny/sobel），供 `overlay_edge_on_image` 手动工具用
-- [`backend/model/tools/samseg_tools.py`](../backend/model/tools/samseg_tools.py) — `segment_image` / `detect_change` / `understand_image` / `prepare_cd_dataset_by_fishnet` 工具（通过 `runner.xxx()` 调用，re-export 保证契约不破）
-- [`backend/main.py`](../backend/main.py) — `/api/v1/samseg/upload`（上传）、`/api/v1/upload/{filepath}`（原图）、`/api/v1/download/{filepath}`（结果）、`/api/v1/vector/shp-to-geojson`（Shapefile→GeoJSON）
+- [`backend/model/SamSeg/runner.py`](../../backend/model/SamSeg/runner.py) — **推理核心层**：模型缓存 + 分割/变化检测 + 连通域统计 + VLM 业务判读（~770 行，纯算法，不含可视化/落盘）
+- [`backend/model/SamSeg/visualize.py`](../../backend/model/SamSeg/visualize.py) — **可视化层**：`save_color_mask_png`（PNG 上色落盘）+ `build_legend`（颜色图注）。轻量依赖（仅 PIL/numpy）
+- [`backend/model/SamSeg/geoio.py`](../../backend/model/SamSeg/geoio.py) — **GeoIO 层**：`save_geotiff_mask`（带 CRS 掩膜）+ `vectorize_mask_to_geojson`（矢量 GeoJSON + Shapefile）+ `export_shp_from_gdf`。依赖 rasterio/geopandas
+- [`backend/model/SamSeg/edge_utils.py`](../../backend/model/SamSeg/edge_utils.py) — 边缘算子（distance/canny/sobel），供 `overlay_edge_on_image` 手动工具用
+- [`backend/model/tools/samseg_tools.py`](../../backend/model/tools/samseg_tools.py) — `segment_image` / `detect_change` / `understand_image` / `prepare_cd_dataset_by_fishnet` 工具（通过 `runner.xxx()` 调用，re-export 保证契约不破）
+- [`backend/main.py`](../../backend/main.py) — `/api/v1/samseg/upload`（上传）、`/api/v1/upload/{filepath}`（原图）、`/api/v1/download/{filepath}`（结果）、`/api/v1/vector/shp-to-geojson`（Shapefile→GeoJSON）
 
 > ★ **职责拆分原则**：推理核心（runner）只关心模型与算法；可视化（visualize）只关心"渲染外观"（PNG/图注）；GeoIO（geoio）只关心"地理坐标 + 产物落盘"。三层解耦，无循环依赖（geoio/visualize 不反向依赖 runner）。
 
@@ -160,9 +160,9 @@ flowchart TB
 | `prob`（runner 默认） | runner | 0.1 | **0.6** |
 | `max_passes` | runner | 10 | 10（不变） |
 
-> 完整诊断与改动细节见 [PROGRESS.md 阶段 7](./PROGRESS.md)。下一步若仍不够：P1 方案 B（prompt-based CD，T2 用 T1 实例作 SAM3 prompt，两期一致性由模型保证）。
+> 完整诊断与改动细节见 [PROGRESS.md 阶段 7](../PROGRESS.md)。下一步若仍不够：P1 方案 B（prompt-based CD，T2 用 T1 实例作 SAM3 prompt，两期一致性由模型保证）。
 
-> 详细实现过程（阶段 2-7 的改动）见 [PROGRESS.md](./PROGRESS.md)。
+> 详细实现过程（阶段 2-7 的改动）见 [PROGRESS.md](../PROGRESS.md)。
 
 ### 10.8 栅格→矢量（阶段 12，#6 图斑提取）
 

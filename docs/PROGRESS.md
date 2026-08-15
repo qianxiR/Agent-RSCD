@@ -285,7 +285,7 @@ detect_change  → 变化结果图 → 叠加图 → GeoJSON 变化图斑可视�
 
 **问题**：自纠捕捉器产出的 lesson 记忆是**纯规则拼接的流水账**——把 `error_msg + LLM 原始 thinking + 修复动作` 缝成一段，混着 markdown 符号、原始 JSON、报错原文。注入 system prompt 后是一坨，AI 无法直接照做复用。规则能记录"发生了什么"，提炼不出"正确做法是什么"。
 
-**改动**（3 文件 + 数据清理，详见 [architecture-agent.md](./architecture-agent.md) §4.1.3）：
+**改动**（3 文件 + 数据清理，详见 [architecture-agent.md](agent/core/architecture-agent.md) §4.1.3）：
 
 | 文件 | 改动 |
 |------|------|
@@ -447,6 +447,48 @@ cd H:\西藏遥感Agent\Agent\frontend-vue; npm run build
 - 工具结果仍在工具调用内部，不生成独立工具结果气泡。
 - 浏览器检查工具结果摘要完整显示，长摘要无省略号截断。
 - 地图模块运行无前端 console error，WFS 客户端矢量点击路径已补齐。
+
+---
+
+## 十二、阶段 24：四层能力评估体系 + 裁判驱动 prompt 优化（2026-07-25）
+
+### 12.1 背景
+
+现有评估体系（规则层/护栏/行为/修正/e2e）测的是 harness 约束有效性（"刹车灵不灵"）——单轮修复决策。缺少对 Agent 完整能力（规划/探索/表达）的评估维度。本次新增四层能力评估，并用 LLM-as-judge（`gpt-5.6-terra`）驱动 prompt 优化闭环。
+
+### 12.2 四层评估设计与实现
+
+| 层 | 能力维度 | 脚本 | 判定方式 | 基线 |
+|---|---|---|---|---|
+| ① 任务规划 | 多步任务首步工具选择 | `tests\task_planning_eval.py` | 期望工具集对比 + 参数完整性 | 3/3 (100%) ✅ |
+| ② 抑制幻觉 | 失败时谎报完成 | `tests\agent_behavior_harness_eval.py`（现有） | false_success_rate | 0/10 ✅ |
+| ③ 失败探索 | 失败后探索方向合理性 | `tests\exploration_eval.py` | acceptable_paths 归属 + 盲目重试检测 | 方向 83% / 盲目 17% ✅ |
+| ④ 思维链质量 | 务实/导向/简洁/第一性原理 | `tests\thinking_quality_eval.py` | LLM-as-judge 四维打分 | 90.5/100 ✅ |
+
+方法论详见 `docs\agent\evaluation\capability-four-layers.md`。
+
+### 12.3 裁判驱动的 prompt 优化（核心成果）
+
+四层评估不仅是测试，更是 prompt 优化的驱动闭环——裁判/评估发现短板 → 定位 prompt 问题 → 优化 → 验证 → 确保不回归。已落地两处优化：
+
+1. **根因优先引导**（第④层裁判发现 first_principles 短板）：Repair Plan 协议开头加"先从证据推导根因再查表执行"，Reflection 强化因果链要求。first_principles 维度从 3.2 提升到 4.0+。
+2. **遥感工具直连路径**（第①层 P3 发现变化检测选错工具）：工具使用规则明确"segment_image/detect_change 直接接受 agent-files 路径，无需 import_file_to_sandbox"。P3 工具选择从错误修复为正确。
+
+两处优化均通过全评估回归确认无破坏：规则 11/11+5/5+6/6、护栏 10/10、行为 100/100。
+
+### 12.4 验证命令
+
+```powershell
+python tests\task_planning_eval.py
+python tests\exploration_eval.py
+python tests\thinking_quality_eval.py
+```
+
+### 12.5 涉及文件
+
+- 新增：`tests\task_planning_eval.py`、`tests\exploration_eval.py`、`tests\thinking_quality_eval.py`
+- 优化：`backend\agent\prompt\static_template.py`（根因优先 + 遥感工具直连两处规则）
+- 文档：`docs\agent\evaluation\capability-four-layers.md`（新建方法论）、`metrics.md`、`README.md`（补充四层指标与命令）
 
 ---
 

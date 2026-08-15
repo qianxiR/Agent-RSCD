@@ -1,6 +1,6 @@
 # 前后端通信机制文档
 
-> 核心模式：**WebSocket 事件驱动 + 回调注入 + `request_id` 闭环**。架构总览见 [architecture.md](./architecture.md)。
+> 核心模式：**WebSocket 事件驱动 + 回调注入 + `request_id` 闭环**。架构总览见 [architecture.md](../architecture.md)。
 
 ---
 

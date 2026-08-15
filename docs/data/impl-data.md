@@ -1,6 +1,6 @@
 # 数据层实施文档（数据管理）
 
-> 本文是 [architecture.md](./architecture.md) 的**实施配套**，按「核心部件 → 实现方法」组织，回答"怎么把数据层搭起来、接进系统"。
+> 本文是 [architecture.md](../architecture.md) 的**实施配套**，按「核心部件 → 实现方法」组织，回答"怎么把数据层搭起来、接进系统"。
 > 数据层是整个系统的底座，向上为模型层工具提供可检索、可操作的数据资源。
 
 ---
@@ -55,13 +55,13 @@ graph TB
 | **文件存储** | 本地磁盘 `agent-files/` | `backend/model/tools/_paths.py` | 上传原图 + 各类产物落盘 | `项目根/agent-files/` |
 | **知识库** | 骨架（未实现） | `backend/data/knowledge/knowledge_store.py` | RAG 检索占位 | — |
 
-> ★ **架构归属说明**：`agent_db.py` 代码物理位于 `backend/agent/memory/`（记忆是智能体自身状态，归 agent 层），但其**数据库实例**是数据层的组成部分。本文从"数据底座"视角梳理记忆库的表结构，运行机制详见 [impl-agent.md](./impl-agent.md)。
+> ★ **架构归属说明**：`agent_db.py` 代码物理位于 `backend/agent/memory/`（记忆是智能体自身状态，归 agent 层），但其**数据库实例**是数据层的组成部分。本文从"数据底座"视角梳理记忆库的表结构，运行机制详见 [impl-agent.md](../agent/core/impl-agent.md)。
 
 ---
 
 ## 二、核心部件 1：业务数据库（cd 库）
 
-**关键文件**：[`backend/data/business_db.py`](../backend/data/business_db.py)
+**关键文件**：[`backend/data/business_db.py`](../../backend/data/business_db.py)
 
 ### 2.1 实现方法
 
@@ -189,7 +189,7 @@ list_image_metadata(limit=100) / list_vector_layers(kind=None, limit=100)
 
 ## 三、核心部件 2：Agent 记忆库（Agent_study 库）
 
-**关键文件**：[`backend/agent/memory/agent_db.py`](../backend/agent/memory/agent_db.py)
+**关键文件**：[`backend/agent/memory/agent_db.py`](../../backend/agent/memory/agent_db.py)
 
 ### 3.1 实现方法（与业务库同构，但完全隔离）
 
@@ -332,7 +332,7 @@ erDiagram
 
 ## 四、核心部件 3：GeoServer 客户端
 
-**关键文件**：[`backend/data/geoserver_client.py`](../backend/data/geoserver_client.py)
+**关键文件**：[`backend/data/geoserver_client.py`](../../backend/data/geoserver_client.py)
 
 ### 4.1 实现方法
 
@@ -413,7 +413,7 @@ def _get_datastore_published_name(workspace, store_name) -> Optional[str]:
 
 ## 五、核心部件 4：文件存储（agent-files/）
 
-**关键文件**：[`backend/config.py`](../backend/config.py) + [`backend/model/tools/_paths.py`](../backend/model/tools/_paths.py)
+**关键文件**：[`backend/config.py`](../../backend/config.py) + [`backend/model/tools/_paths.py`](../../backend/model/tools/_paths.py)
 
 ### 5.1 实现方法：统一目录约定（v2.4）
 
@@ -453,7 +453,7 @@ sandbox_workspace_dir = ".../agent-files/sandbox/workspace"
 
 ## 六、核心部件 5：知识库（骨架）
 
-**关键文件**：[`backend/data/knowledge/knowledge_store.py`](../backend/data/knowledge/knowledge_store.py)
+**关键文件**：[`backend/data/knowledge/knowledge_store.py`](../../backend/data/knowledge/knowledge_store.py)
 
 ### 6.1 当前状态
 
@@ -555,4 +555,4 @@ agent_db.init_schema()                  # 建 7 张记忆表 + 历史迁移
 6. **UPSERT 语义**：元数据登记 `ON CONFLICT DO UPDATE`，重复执行幂等。
 7. **工作空间不绑定**：默认 `geoserver_workspace=""`，裸名自动搜索，降低部署耦合。
 
-> 运行机制与调用方（模型层工具）详见 [impl-model.md](./impl-model.md)；记忆库的读写编排（三层记忆）详见 [impl-agent.md](./impl-agent.md)。
+> 运行机制与调用方（模型层工具）详见 [impl-model.md](../model/impl-model.md)；记忆库的读写编排（三层记忆）详见 [impl-agent.md](../agent/core/impl-agent.md)。

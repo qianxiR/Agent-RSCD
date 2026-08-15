@@ -1,6 +1,6 @@
 # 工具系统（注册 / 分类 / 47 工具 / 统一 Schema）
 
-> 本文是 [architecture.md](./architecture.md) 的子文档。系统总览见总纲。
+> 本文是 [architecture.md](../architecture.md) 的子文档。系统总览见总纲。
 
 ---
 
@@ -9,14 +9,14 @@
 > **一句话**：47 个工具 + 装饰器注册机制，LLM 通过 `bind_tools()` 调用，工具返回 `frontend_action` 指令或普通数据结果。
 
 **关键文件**：
-- [`backend/model/tools/tool_registry.py`](../backend/model/tools/tool_registry.py) — 注册表
-- [`backend/model/tools/data_tools.py`](../backend/model/tools/data_tools.py) — GeoServer + 数据库工具
-- [`backend/model/tools/layer_tools.py`](../backend/model/tools/layer_tools.py) — 图层控制工具
-- [`backend/model/tools/analysis_tools.py`](../backend/model/tools/analysis_tools.py) — GeoServer 下载工具
-- [`backend/model/tools/samseg_tools.py`](../backend/model/tools/samseg_tools.py) — 🛰️ SamSeg 遥感分析工具（语义分割/变化检测）
-- [`backend/model/tools/vector_tools.py`](../backend/model/tools/vector_tools.py) — GeoJSON 矢量可视化工具（矢量图斑 PNG 渲染 + Shapefile 导出）
-- [`backend/model/tools/skill_tools.py`](../backend/model/tools/skill_tools.py) — 技能检索工具
-- [`backend/agent/tools/memory_tools.py`](../backend/agent/tools/memory_tools.py) — 记忆工具（agent 层）
+- [`backend/model/tools/tool_registry.py`](../../backend/model/tools/tool_registry.py) — 注册表
+- [`backend/model/tools/data_tools.py`](../../backend/model/tools/data_tools.py) — GeoServer + 数据库工具
+- [`backend/model/tools/layer_tools.py`](../../backend/model/tools/layer_tools.py) — 图层控制工具
+- [`backend/model/tools/analysis_tools.py`](../../backend/model/tools/analysis_tools.py) — GeoServer 下载工具
+- [`backend/model/tools/samseg_tools.py`](../../backend/model/tools/samseg_tools.py) — 🛰️ SamSeg 遥感分析工具（语义分割/变化检测）
+- [`backend/model/tools/vector_tools.py`](../../backend/model/tools/vector_tools.py) — GeoJSON 矢量可视化工具（矢量图斑 PNG 渲染 + Shapefile 导出）
+- [`backend/model/tools/skill_tools.py`](../../backend/model/tools/skill_tools.py) — 技能检索工具
+- [`backend/agent/tools/memory_tools.py`](../../backend/agent/tools/memory_tools.py) — 记忆工具（agent 层）
 
 ### 3.1 注册机制
 
@@ -40,11 +40,11 @@ get_tool_by_name(name) -> Optional[Callable] # 按名查
 get_tool_category_map() -> Dict[str, str]    # 名 → 分类（供 prompt 分组）
 ```
 
-**自动注册**：[`backend/model/tools/__init__.py`](../backend/model/tools/__init__.py) 通配导入 5 个工具模块（`samseg_tools` 用 try/except 包裹，torch 缺失时跳过），`main.py` 只需 `import backend.model.tools` 即触发全部注册。记忆工具在 agent 层单独导入（避免 model→agent 反向依赖）。
+**自动注册**：[`backend/model/tools/__init__.py`](../../backend/model/tools/__init__.py) 通配导入 5 个工具模块（`samseg_tools` 用 try/except 包裹，torch 缺失时跳过），`main.py` 只需 `import backend.model.tools` 即触发全部注册。记忆工具在 agent 层单独导入（避免 model→agent 反向依赖）。
 
 ### 3.2 工具分类与标签
 
-System Prompt 中工具目录按以下分类展示（[`system_prompt.py::_TOOL_CATEGORY_LABELS`](../backend/agent/prompt/system_prompt.py)）：
+System Prompt 中工具目录按以下分类展示（[`system_prompt.py::_TOOL_CATEGORY_LABELS`](../../backend/agent/prompt/system_prompt.py)）：
 
 | category | 中文标签 | 说明 |
 |----------|---------|------|

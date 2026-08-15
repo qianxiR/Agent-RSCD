@@ -1,13 +1,13 @@
-# 智能体层实施文档（ReAct 推理 + 三层记忆 + WebSocket）
+# 智能体层实施文档（ReAct 推理 + 三层记忆 + 执行闭环 + WebSocket）
 
-> 本文是 [architecture.md](./architecture.md) 的**实施配套**，聚焦"模型能力如何转化为可执行、可回滚的业务流程"。
+> 本文是 [architecture.md](../../architecture.md) 的**实施配套**，聚焦"模型能力如何转化为可执行、可回滚的业务流程"。
 > 智能体层是系统的应用承载，采用 ReAct 推理 + 工具编排，将大模型的"单次问答"升级为"持续推理、自主决策、长程协作"。
 
 ---
 
 ## 一、智能体层全景
 
-智能体层由 **5 个核心部件** 构成，形成"推理 → 记忆 → 通信 → Prompt"的完整闭环：
+智能体层由 **8 个核心部件** 构成，形成"推理 → 记忆 → 通信 → Prompt → 执行闭环"的完整闭环（正文 §二-§九 按部件 1-8 顺序展开）：
 
 ```mermaid
 graph TB
@@ -22,7 +22,7 @@ graph TB
             MCTX["memory/memory_context.py<br/>上下文构建·记忆编排"]
             MDB["memory/agent_db.py<br/>记忆数据库 CRUD"]
             MSC["memory/self_correction.py<br/>自纠捕捉器"]
-            MTS["memory/task_state.py<br/>工作记忆状态卡"]
+            MTS["memory/task_state.py<br/>工作记忆状态卡 + 计划状态机"]
             MPT["memory/pattern_tracker.py<br/>重复操作偏好识别"]
         end
 
@@ -34,12 +34,31 @@ graph TB
             WSM["ws_manager.py<br/>连接·任务·阻塞等待"]
         end
 
-        subgraph RT["⑤ 运行时隔离"]
+        subgraph RT["⑧ 运行时隔离"]
             CV["runtime/context_vars.py<br/>ContextVar 多对话隔离"]
+        end
+
+        subgraph LOOP["⑤ 执行闭环与验证"]
+            OBS["runtime/observation_builder.py<br/>Observation 增强"]
+            VW["team/verification_worker.py<br/>确定性验证 (不调 LLM)"]
+            VS["team/validation_stage.py<br/>验证阶段编排"]
+            RP["team/repair_policy.py<br/>failure_type → repair_plan"]
+            TM["team/task_manager.py<br/>worker 派发"]
+            RW["team/report_worker.py<br/>报告 worker"]
+        end
+
+        subgraph SKILL["⑥ 技能编排"]
+            SE["runtime/skill_execution.py<br/>技能契约 → plan 步骤"]
+        end
+
+        subgraph OBSERV["⑦ 可观测性"]
+            DA["observability/decision_audit.py<br/>repair_plan 遵循审计"]
+            PR["observability/parameter_repair.py<br/>参数级修正验证"]
+            RS["observability/repair_success.py<br/>修正成功率观测"]
         end
     end
 
-    MODEL["模型层 (LLM + 47 工具)"]
+    MODEL["模型层 (LLM + 54 注册工具 / 33 暴露给 LLM)"]
     PLATFORM["平台层 (前端)"]
 
     SVC -->|"build_context"| MCTX
@@ -50,34 +69,52 @@ graph TB
     SVC -->|"set_runtime_context"| CV
     SVC <-->|"send_to_session / wait"| WSM
     WSM <-->|"WebSocket"| PLATFORM
+    SVC -->|"tool_call"| OBS
+    OBS -->|"注入验证"| VS
+    VS -->|"调用"| VW
+    VW -->|"失败"| RP
+    SVC -->|"lookup_skill"| SE
+    SE -->|"写 plan steps"| MTS
+    SVC -->|"收尾审计"| DA
+    DA --> PR
+    DA --> RS
 
     classDef engine fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     classDef mem fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef prompt fill:#fce4ec,stroke:#c62828,stroke-width:2px
     classDef ws fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
     classDef rt fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef loop fill:#e0f7fa,stroke:#00838f,stroke-width:2px
+    classDef skill fill:#f1f8e9,stroke:#558b2f,stroke-width:2px
+    classDef observ fill:#faf5ff,stroke:#6b21a8,stroke-width:2px
     class SVC engine
     class MCTX,MDB,MSC,MTS,MPT mem
     class SP prompt
     class WSM ws
     class CV rt
+    class OBS,VW,VS,RP,TM,RW loop
+    class SE skill
+    class DA,PR,RS observ
 ```
 
 | 部件 | 关键文件 | 职责 |
 |------|---------|------|
 | ① ReAct 推理引擎 | `chat_service.py` | 流式 thinking + 工具调度循环 + 停止回滚 |
-| ② 三层记忆系统 | `memory_context.py` + `agent_db.py` + `self_correction.py` | 工作/短期/长期记忆编排 + 自纠学习 |
+| ② 三层记忆系统 | `memory_context.py` + `agent_db.py` + `self_correction.py` + `task_state.py` | 工作/短期/长期记忆编排 + 自纠学习 + 计划状态机 |
 | ③ System Prompt | `prompt/system_prompt.py` | 动态工具目录 + CoT + 显式缓存 |
 | ④ WebSocket 管理 | `ws_manager.py` | 连接/任务管理 + 阻塞等待 + 多对话并行 |
-| ⑤ 运行时隔离 | `runtime/context_vars.py` | ContextVar 多对话隔离 |
+| ⑤ 执行闭环与验证 | `team/` + `runtime/observation_builder.py` | 计划步骤 + 确定性验证 + repair_plan + worker 派发 |
+| ⑥ 技能编排 | `runtime/skill_execution.py` + `model/skills/` | 技能契约选择 → plan 步骤映射 |
+| ⑦ 可观测性 | `observability/` | repair_plan 遵循审计 + 参数修正 + 修复成功率 |
+| ⑧ 运行时隔离 | `runtime/context_vars.py` | ContextVar 多对话隔离 |
 
 ---
 
 ## 二、核心部件 1：ReAct 推理引擎
 
-**关键文件**：[`backend/agent/chat_service.py`](../backend/agent/chat_service.py)
+**关键文件**：[`backend/agent/chat_service.py`](../../../backend/agent/chat_service.py)
 
-### 2.1 实现方法：推理循环（最多 15 轮）
+### 2.1 实现方法：推理循环（无轮次上限）
 
 ```python
 async def tool_chat_ws(req: ToolChatRequest, session_id: str,
@@ -91,8 +128,10 @@ async def tool_chat_ws(req: ToolChatRequest, session_id: str,
         conv_id, req.prompt, llm, user_id
     )
 
-    # 🔁 推理循环 (max=15)
-    for iteration in range(max_iterations):
+    # 🔁 推理循环 (while True, 不设轮次上限; iteration 仅日志计数)
+    iteration = 0
+    while True:
+        iteration += 1
         ai_msg = await _stream_llm_thinking_ws(              # 流式输出 thinking
             llm, all_messages, session_id, conv_id, ws_manager
         )
@@ -173,15 +212,16 @@ sequenceDiagram
 | **反伪装成功三层防御** | 工具层 verification + Prompt 规则 + chat_service 兜底校验 | 防止 LLM 把失败说成成功 |
 | **重工具持久化** | `HEAVY_TOOL_CATEGORIES` 触发 `ai_task` 记录 | 追踪状态/进度/IO，支持断点续算 |
 | **停止不崩其他对话** | 按 `conversation_id` 精确取消，不 raise 传播 | 同 session 多对话并行安全 |
+| **完成门拦截收尾** | `completion_gate.allowed=False` 时追加 SystemMessage 强制继续（`chat_service.py:1085`） | 未通过验证的步骤不能跳过 |
 
 ---
 
 ## 三、核心部件 2：三层记忆系统
 
 **关键文件**：
-- [`backend/agent/memory/memory_context.py`](../backend/agent/memory/memory_context.py) — 编排
-- [`backend/agent/memory/agent_db.py`](../backend/agent/memory/agent_db.py) — 数据库 CRUD（数据结构见 [impl-data.md](./impl-data.md) §3）
-- [`backend/agent/memory/self_correction.py`](../backend/agent/memory/self_correction.py) — 自纠捕捉器
+- [`backend/agent/memory/memory_context.py`](../../../backend/agent/memory/memory_context.py) — 编排
+- [`backend/agent/memory/agent_db.py`](../../../backend/agent/memory/agent_db.py) — 数据库 CRUD（数据结构见 [impl-data.md](../../data/impl-data.md) §3）
+- [`backend/agent/memory/self_correction.py`](../../../backend/agent/memory/self_correction.py) — 自纠捕捉器
 
 ### 3.1 三层记忆对照
 
@@ -308,7 +348,7 @@ async def scan_and_save_corrections(messages, user_id) -> List[saved]:
 
 ## 四、核心部件 3：System Prompt 与上下文缓存
 
-**关键文件**：[`backend/agent/prompt/system_prompt.py`](../backend/agent/prompt/system_prompt.py)
+**关键文件**：[`backend/agent/prompt/system_prompt.py`](../../../backend/agent/prompt/system_prompt.py)
 
 ### 4.1 Prompt 组成（拆成两块做显式缓存）
 
@@ -381,7 +421,7 @@ def build_system_prompt_blocks(conversation_summary, user_profile) -> list:
 
 ## 五、核心部件 4：WebSocket 任务管理
 
-**关键文件**：[`backend/agent/ws_manager.py`](../backend/agent/ws_manager.py)
+**关键文件**：[`backend/agent/ws_manager.py`](../../../backend/agent/ws_manager.py)
 
 ### 5.1 实现方法：连接/任务/阻塞等待
 
@@ -442,9 +482,175 @@ def get_active_conversations(self, session_id) -> List[str]:
 
 ---
 
-## 六、核心部件 5：运行时隔离（ContextVar）
+## 六、核心部件 5：执行闭环与验证
 
-**关键文件**：[`backend/agent/runtime/context_vars.py`](../backend/agent/runtime/context_vars.py)
+> 架构原理详见 [architecture-agent.md §3 执行闭环与团队](architecture-agent.md)。本节聚焦实施方法。
+
+**关键文件**：
+- [`backend/agent/memory/task_state.py`](../../../backend/agent/memory/task_state.py) — 计划状态机
+- [`backend/agent/runtime/observation_builder.py`](../../../backend/agent/runtime/observation_builder.py) — Observation 增强
+- [`backend/agent/team/verification_worker.py`](../../../backend/agent/team/verification_worker.py) — 确定性验证
+- [`backend/agent/team/repair_policy.py`](../../../backend/agent/team/repair_policy.py) — 修复策略表
+- [`backend/agent/team/validation_stage.py`](../../../backend/agent/team/validation_stage.py) — 验证编排
+
+### 6.1 实现方法：计划状态机（task_state.py）
+
+**核心设计**：plan 是内存 dict，持久化复用 `task_type='agent_plan'` 的 ai_task（不新增表）。
+
+```python
+def create_plan_state(conversation_id, goal) -> dict:
+    """创建无步骤的计划, 完成门默认关闭
+    入参: conversation_id, goal
+    出参: {plan_id, status:'running', steps:[], completion_gate:{allowed:False}, ...}
+    """
+
+def append_plan_step(plan, goal, executor, inputs=None,
+                     expected_outputs=None, required=True, tool_name="") -> dict:
+    """追加 pending 步骤并刷新完成门
+    入参: executor ∈ {main_agent, tool, verification_agent, report_agent}
+    出参: 新增的 step 对象 (含 step_id, evidence:[], repair_plan:{})
+    """
+
+def start_tool_step(plan, tool_name, tool_args=None) -> dict:
+    """LLM 发起 tool_call 时调用 (chat_service.py:1161)
+    方法: 优先激活技能预置的同名 pending/blocked 步骤; 无匹配则追加
+    出参: 进入 running 状态的步骤
+    """
+
+def apply_step_observation(plan, step_id, tool_name, tool_result) -> dict:
+    """工具执行+验证完成后调用 (chat_service.py:1339)
+    方法: 按 agent_validation.status 转换 step 状态
+      passed   → completed
+      failed/warning → blocked (保存 repair_plan)
+      unverified → failed
+    出参: 更新后的步骤 (含追加的 evidence 记录)
+    """
+
+def can_finalize_plan(plan) -> Tuple[bool, str]:
+    """完成门查询: 必需步骤全部 completed 才允许收尾
+    入参: plan=None 时返回 (True, ...) (普通问答不受约束)
+    """
+```
+
+### 6.2 实现方法：验证注入（observation_builder + validation_stage）
+
+```python
+def build_observation_tool_message(tool_call, tool_result, conversation_id) -> ToolMessage:
+    """构造 ToolMessage 前统一增强 (observation_builder.py:52)
+    方法:
+      1. 若 should_run_validation_stage(tool_result) → run_validation_stage
+      2. apply_validation_to_tool_result → 写回 tool_result.agent_validation
+      3. 拼装验证摘要 + repair_plan 进 ToolMessage.content
+    出参: 含 agent_validation 字段的 ToolMessage
+    """
+
+# validation_stage.py
+def should_run_validation_stage(tool_result) -> bool:
+    """判断是否需验证: 有 error / 有 verification / data 含产物路径"""
+
+def run_validation_stage(tool_result) -> dict:
+    """调 verification_agent.run_verification, 返回 {status, checks, repair_plan}"""
+```
+
+### 6.3 实现方法：确定性验证（verification_worker.py）
+
+```python
+def run_verification(payload) -> dict:
+    """纯规则验证, 不调 LLM (verification_worker.py:102)
+    方法 (校验链):
+      1. 检查 result.get('error')                      → :125
+      2. 读取 result.get('verification') (工具自带)     → :138
+      3. 对产物路径调 verify_by_path                    → :143
+         (文件存在/矢量有效/报告页数, 实现在 _verification.py)
+    出参: {status: passed|failed|warning, repair_plan: {...}}
+    """
+```
+
+### 6.4 实现方法：修复策略（repair_policy.py）
+
+```python
+def build_repair_plan(failure_type, context=None) -> dict:
+    """failure_type → 修复策略查表 (repair_policy.py:115)
+    支持的 failure_type (13 类):
+      tool_error, missing_input_file, missing_sandbox_file,
+      missing_vector_artifact, missing_artifact, empty_or_tiny_artifact,
+      empty_vector, incomplete_shapefile_zip, unreadable_artifact,
+      permission_or_path_error, invalid_arguments,
+      insufficient_evidence, unknown_failure
+    出参: {failure_type, root_cause_hint, next_action, recommended_tool,
+           parameter_changes, fallback_tools, stop_condition, recommendation}
+    """
+```
+
+### 6.5 实现方法：完成门拦截（chat_service.py）
+
+```python
+# chat_service.py:1085-1106
+# 当 LLM 想给最终回复 (无 tool_calls), 但 completion_gate 禁止时
+plan_allowed, reason = can_finalize_plan(plan)
+if not plan_allowed and not waiting_for_user:
+    all_messages.append(SystemMessage(
+        content=f"完成门禁止: {reason}。必须继续执行 next_action 或 repair_plan。"
+    ))
+    continue  # 强制回到推理循环
+```
+
+---
+
+## 七、核心部件 6：技能编排
+
+**关键文件**：
+- [`backend/agent/runtime/skill_execution.py`](../../../backend/agent/runtime/skill_execution.py) — 契约 → plan 映射
+- [`backend/model/skills/`](../../../backend/model/skills/) — 技能定义（markdown 契约）
+- [`backend/model/tools/skill_tools.py`](../../../backend/model/tools/skill_tools.py) — `lookup_skill` 工具
+
+### 7.1 实现方法：技能契约映射（skill_execution.py）
+
+```python
+def apply_skill_selection_to_plan(plan, skill_contract) -> dict:
+    """把技能契约转为 plan 步骤 (skill_execution.py:9)
+    方法:
+      1. validate_skill_contract 契约质量门 (→ :32)
+      2. 把 contract.steps 逐个 append_plan_step (executor='tool') (→ :43)
+      3. 写回 plan.selected_skill / skill_fallback_rule / skill_verification_rules (→ :52)
+    出参: 更新后的 plan
+    """
+```
+
+**触发点**（`chat_service.py:1345`）：当 `tool_name == "lookup_skill"` 时调用，并把 accepted_lessons 注入（`chat_service.py:1213`）。
+
+**已注册技能**（3 个，定义在 `backend/model/skills/`）：
+- `wf1-segment-visualize-report.md` — 分割 + 可视化 + 报告
+- `wf2-change-detection-visualize-report.md` — 变化检测 + 可视化 + 报告
+- `wf4-upload-geoserver-display.md` — 上传 GeoServer + 显示
+
+> 技能步骤直接映射为 plan step（executor=`tool`），不引入独立的 stage / skill_step 类。
+
+---
+
+## 八、核心部件 7：可观测性
+
+**关键文件**：
+- [`backend/agent/observability/decision_audit.py`](../../../backend/agent/observability/decision_audit.py) — repair_plan 遵循审计
+- [`backend/agent/observability/parameter_repair.py`](../../../backend/agent/observability/parameter_repair.py) — 参数级修正验证
+- [`backend/agent/observability/repair_success.py`](../../../backend/agent/observability/repair_success.py) — 修正成功率
+
+### 8.1 实现方法：决策审计（decision_audit.py）
+
+```python
+# decision_audit.py — repair_plan 遵循审计
+def record_decision(trace) -> None:
+    """把 (输入上下文, 期望决策, 实际工具调用, 实际 observation, 是否遵循 repair_plan)
+    写入 JSONL 审计日志, 供离线评估 llm_follow_rate"""
+```
+
+> 注：`runtime/retry_guard.py:29` `build_retry_signature`（防机械重试）已定义但**未被调用**，当前防重复失败靠 plan step status + repair_plan。命名统一与激活建议见 [engineering-gap-analysis.md](engineering-gap-analysis.md) §2.2。
+
+---
+
+## 九、核心部件 8：运行时隔离（ContextVar）
+
+**关键文件**：[`backend/agent/runtime/context_vars.py`](../../../backend/agent/runtime/context_vars.py)
 
 ### 6.1 实现方法
 
@@ -468,9 +674,9 @@ def set_runtime_context(conversation_id, user_id, session_id=None):
 
 ---
 
-## 七、HTTP 端点（会话/项目管理）
+## 十、HTTP 端点（会话/项目管理）
 
-**关键文件**：[`backend/main.py`](../backend/main.py)
+**关键文件**：[`backend/main.py`](../../../backend/main.py)
 
 智能体层的状态管理通过 HTTP REST 暴露（推理本身走 WebSocket）：
 
@@ -520,9 +726,9 @@ flowchart LR
 
 ---
 
-## 八、关键设计原则总结
+## 十一、关键设计原则总结
 
-1. **ReAct 循环**：LLM 驱动的推理循环（max 15 轮），流式 thinking + 工具调度，直到给出最终回复。
+1. **ReAct 循环**：LLM 驱动的推理循环（`while True`，不设轮次上限，由用户手动停止兜底），流式 thinking + 工具调度，直到给出最终回复。
 2. **三层记忆协同**：工作（近期消息）/ 短期（摘要）/ 长期（教训）三层，自动 trim + 阈值摘要 + 自纠学习沉淀。
 3. **多级上下文压缩**（v2.5）：Level 0.5 fold（可逆）→ Level 1 drop（可逆）→ Level 2 LLM 摘要（不可逆），精细化降 token。
 4. **消息分支 DAG**（v2.5）：Git-like node_id/parent_id/is_active，支持"回到第 N 轮重新问"，旧分支软删除保留。
@@ -530,5 +736,6 @@ flowchart LR
 6. **WebSocket 全双工**：request_id 配对实现"后端发指令→前端执行→回传结果"闭环，SSE 无法替代。
 7. **多对话并行**：同连接多对话，按 conversation_id 精确取消，ContextVar 隔离运行时上下文。
 8. **显式上下文缓存**：system prompt 拆静态/半稳定两块，第 2 轮起按 10% 计费，命中率 40-60%。
+9. **执行闭环**（部件 6-8）：计划步骤 → 确定性 verification_agent 校验 → failure_type 映射 repair_plan → 完成门拦截未验证收尾；受控 worker（验证/报告）按白名单分工，主控 Agent 始终是唯一决策中心。
 
-> 平台层（前端指令执行 + OpenLayers 地图容器）详见 [impl-platform.md](./impl-platform.md)。
+> 平台层（前端指令执行 + OpenLayers 地图容器）详见 [impl-platform.md](../../platform/impl-platform.md)。
