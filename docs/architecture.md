@@ -8,6 +8,17 @@
 
 ## 系统总述（数据-模型-智能体-服务平台 四板块）
 
+> ★ 双服务架构 (2026-10): 后端拆为 **Java 业务服务 (backend-java/, Spring Boot 3, 8081)** 与
+> **Python AI 服务 (backend/, FastAPI, 8020)** 两个进程。分工与规则:
+> - Java 直管: 项目 CRUD (自有库 `rsiis_business`)、登录认证 (JWT)、工作区文件夹浏览。
+> - 数据归属: 会话/消息/记忆/任务表全部留在 Python (`agent_db`), Java 的会话与任务端点
+>   是纯代理, 经 `/internal/*` 内部接口 (`X-Internal-Token` 静态令牌) 转发, 响应体原样透传。
+> - 依赖单向 Java → Python; 删项目时 Java 调 `/internal/conversations/detach-project`
+>   完成会话解绑 (替代原库内外键的 ON DELETE SET NULL)。
+> - 入口分流: 开发期 `frontend-vue/vite.config.js` proxy, 生产 `deploy/nginx.conf` —
+>   `auth/projects/workspace/conversations/tasks` → Java, 其余 `/api` 与推理 WS → Python。
+> - 认证三档: `SECURITY_MODE = off (迁移期默认) / observe / enforce`, 详见 `backend-java/README.md`。
+
 Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主线，通过数据层、模型层、智能体层、服务平台四大板块的分层解耦与协同联动，形成从底层数据资源组织、核心智能能力构建到上层自然语言交互的完整闭环。
 
 - **数据层**是基础资源层，为系统提供高质量的空间与业务语料：通过 GeoServer 统一发布 WMS/WFS/WCS 栅格与矢量图层服务，PostgreSQL 业务库以「表名作参数」的通用 CRUD 承载业务数据，并预留知识库骨架（pgvector/向量服务可选），为上层的认知与推理提供可检索、可操作的数据底座。

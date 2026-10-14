@@ -11,6 +11,19 @@ from typing import Any, Dict, List
 
 EMPTY_VALUES = {"", "[]", "{}", "null", "none", "None"}
 BUILDING_TERMS = {"建筑", "建筑物", "房屋", "楼房", "building", "buildings"}
+
+# 已知的可选参数白名单: 这些参数留空是合理的 (工具有默认值, 非必填)。
+# 空参数检查只针对不在白名单的参数, 避免 LLM 合理留空可选参数被误判为修正失败。
+OPTIONAL_PARAM_NAMES = {
+    "referring_expression",    # segment_image 指代分割 (可选, 留空表示全图分割)
+    "output_dir",              # export_mask_to_shapefile 输出目录 (可选, 有默认)
+    "source_image_path",       # export_mask_to_shapefile 原图 (可选, 用于坐标)
+    "min_area_m2",             # 矢量最小面积 (可选, 有默认 0=不过滤)
+    "simplify_tolerance",      # 矢量简化容差 (可选, 有默认 0=不简化)
+    "min_area",                # 连通域最小面积 (可选)
+    "description",             # 工具结果描述 (可选)
+    "wait_for_result",         # frontend_action 是否阻塞 (可选)
+}
 EVIDENCE_TERMS = {
     "证据",
     "产物",
@@ -28,6 +41,17 @@ EVIDENCE_TERMS = {
     "os.path",
     "pdf",
     "report",
+}
+
+# 证据收集工具白名单: insufficient_evidence 后, 调用这些工具本身就是证据收集动作,
+# 不应只看参数文本关键词判定。调用任一即视为在做客观证据检查。
+EVIDENCE_COLLECT_TOOLS = {
+    "query_agent_task",         # 查任务状态/日志/产物 (含 include_logs 时尤其明确)
+    "list_geoserver_services",  # 查已发布的图层产物
+    "locate_to_layer_bounds",   # 定位图层范围 (确认图层真实存在)
+    "list_database_tables",     # 查数据资产
+    "list_image_metadata",      # 查影像元数据
+    "list_vector_layers",       # 查矢量图层产物
 }
 
 
@@ -216,8 +240,13 @@ def validate_parameter_repair(
 
     for call in tool_calls:
         args = call.get("args") or {}
-        if any(_is_empty_value(value) for value in args.values()):
-            return {"passed": False, "reason": "工具调用仍包含空参数。", "details": args}
+        # 只检查必填参数 (排除可选参数白名单); 可选参数留空是合理的 (工具有默认值)。
+        required_args = {
+            key: value for key, value in args.items()
+            if key not in OPTIONAL_PARAM_NAMES
+        }
+        if any(_is_empty_value(value) for value in required_args.values()):
+            return {"passed": False, "reason": "工具调用必填参数仍为空。", "details": args}
 
     text = _args_text(tool_calls)
 
@@ -226,8 +255,12 @@ def validate_parameter_repair(
         return {"passed": ok, "reason": "Shapefile 重导策略通过。" if ok else "未体现 Shapefile 重导或格式切换。", "details": text}
 
     if failure_type == "insufficient_evidence":
-        ok = _uses_evidence_check(text, final_response)
-        return {"passed": ok, "reason": "证据检查策略通过。" if ok else "未体现产物证据检查。", "details": text}
+        # ★ 调用证据收集工具本身就是客观证据检查动作 (不只看参数关键词)
+        names = {str(call.get("name") or "").lower() for call in tool_calls}
+        uses_evidence_tool = bool(names & EVIDENCE_COLLECT_TOOLS)
+        ok = uses_evidence_tool or _uses_evidence_check(text, final_response)
+        reason = "证据检查策略通过。" if ok else "未体现产物证据检查。"
+        return {"passed": ok, "reason": reason, "details": text}
 
     if expected_terms and not _semantic_terms_match(text, expected_terms):
         return {"passed": False, "reason": "参数未体现期望语义修正。", "details": text}

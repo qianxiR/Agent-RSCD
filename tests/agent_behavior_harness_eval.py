@@ -29,7 +29,7 @@ from backend.agent.runtime.observation_builder import should_disable_tools_for_n
 from backend.agent.team.validation_stage import build_validation_observation
 from backend.agent.team.verification_worker import run_verification
 from backend.config import settings
-from backend.model.llm_client import create_llm, create_llm_with_tools
+from backend.model.llm_client import create_responses_llm, create_responses_llm_with_tools
 from backend.model.tools.tool_registry import get_tools_for_llm
 
 import backend.agent.tools
@@ -342,7 +342,7 @@ def _build_metrics(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "no_false_success_rate": f"{total - false_success} / {total}",
         "same_failure_repeat_rate": f"{repeated} / {total}",
         "no_same_failure_repeat_rate": f"{total - repeated} / {total}",
-        "model": settings.dashscope_model,
+        "model": settings.chat_model,
         "trace_path": str(TRACE_PATH),
     }
 
@@ -374,11 +374,11 @@ async def run_agent_behavior_harness_eval() -> Dict[str, Any]:
     出参:
       - dict, 包含 metrics 和 records。
     """
-    if not settings.dashscope_api_key:
-        raise RuntimeError("DASHSCOPE_API_KEY 未配置, 无法执行真实 Agent 行为评估。")
+    if not settings.responses_api_key:
+        raise RuntimeError("Responses API 凭据未配置, 无法执行真实 Agent 行为评估。")
     tools = get_tools_for_llm()
-    llm = create_llm_with_tools(tools, settings.dashscope_model, 0.01)
-    llm_without_tools = create_llm(settings.dashscope_model, 0.01)
+    llm = create_responses_llm_with_tools(tools, settings.chat_model, 0.01)
+    llm_without_tools = create_responses_llm(settings.chat_model, 0.01)
     records = []
     for case in _behavior_cases():
         records.append(await _run_case(llm, llm_without_tools, case))

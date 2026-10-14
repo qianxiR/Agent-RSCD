@@ -1,8 +1,9 @@
 """
 专业 worker 编排层 (Agent 层)
 
-本包承载“主控 Agent + 专业 worker”的第一阶段实现。
-当前仅开放 verification_agent, 用于把工具执行与客观验收分离。
+本包承载"主控 Agent + 专业 worker"的实现:
+  - verification_agent: 确定性规则验收, 同步内联在 validation_stage 中 (每次工具结果都走)。
+  - report_agent: 异步后台 worker, 由 chat_service 在分割成功后代码派发 (不走 LLM 决策)。
 """
 
 from backend.agent.team.agent_roles import VERIFICATION_AGENT, is_supported_agent_role

@@ -453,7 +453,10 @@ def run_change_detection(
     """
     import numpy as np
     from PIL import Image
+    import time as _time
     Image.MAX_IMAGE_PIXELS = None
+    # ★ 工程化 A4: performance 埋点 (对齐 run_segment, 供成本采集)
+    _cd_started = _time.perf_counter()
 
     infer = _ensure_imports()
     processor, dev = _get_processor(
@@ -495,6 +498,8 @@ def run_change_detection(
         t1_mask, t2_mask, num_cls, iou_threshold=iou_threshold, min_area=max(min_area, 4),
     )
     change_mask = infer.postprocess(change_pred, num_cls, min_area=min_area)
+    # ★ 工程化 A4: 推理耗时 (两期分割 + 变化对比, 不含后处理)
+    _cd_inference_done = _time.perf_counter()
 
     # 上色存 PNG (★ 可视化逻辑收敛到 visualize.save_color_mask_png)
     cls_name_map = {idx: [s.strip() for s in line.split(",")] for idx, line in enumerate(class_lines)}
@@ -504,10 +509,19 @@ def run_change_detection(
 
     # ★ 连通域分析: 统计各类别变化区域的数量与面积
     stats = _analyze_change_stats(change_mask, num_cls, class_lines)
+    # ★ 工程化 S6: 类别转移矩阵 (T1类→T2类像素流向), 供业务判读 (耕地→建筑等)
+    #   t1_mask/t2_mask 已 resize 对齐, 可直接逐像素统计 from→to 转移
+    transition = _compute_transition_matrix(t1_mask, t2_mask, class_lines)
     # ★ 图注: 颜色→类别 (直接复用上色用的 palette, 保证与 PNG 颜色严格一致)
     legend = _build_legend(palette, class_lines)
 
-    result = {"output_path": output_path, "stats": stats, "legend": legend}
+    result = {"output_path": output_path, "stats": stats, "transition": transition, "legend": legend}
+
+    # ★ 工程化 A4: performance 耗时 (对齐 run_segment, 供成本采集)
+    result["performance"] = {
+        "inference_seconds": round(_cd_inference_done - _cd_started, 3),
+        "total_seconds": round(_time.perf_counter() - _cd_started, 3),
+    }
 
     # ★ GeoTIFF 带 CRS 掩膜 (坐标系从 T1 影像读, T1/T2 同区域)
     mask_tif_path = output_path.rsplit(".", 1)[0] + ".tif"
@@ -574,11 +588,16 @@ _RULE_FALLBACK_ORDER = [
 ]
 
 
-def classify_change_type_by_rule(present_classes: list, stats: dict) -> dict:
+def classify_change_type_by_rule(
+    present_classes: list, stats: dict, transition: dict = None
+) -> dict:
     """
     规则映射兜底: 基于 stats.per_class 的类别分布推断业务类型.
     - present_classes: 出现在变化结果里的类别英文标准名列表
     - stats: runner._analyze_change_stats 的输出
+    - transition: runner._compute_transition_matrix 的输出 (可选)
+      ★ 工程化 S7: 有转移矩阵时, 业务事件带 from→to 面积支撑, 判定更准;
+        无矩阵时回退到主导类别共现的旧逻辑 (向后兼容)。
 
     出参: {change_type, confidence, reason}
       change_type ∈ {新增建筑, 建筑消失, 耕地转林地, 推土, 水体变化, 其他}
@@ -586,8 +605,16 @@ def classify_change_type_by_rule(present_classes: list, stats: dict) -> dict:
     if not present_classes:
         return {"change_type": "其他", "confidence": 0.3, "reason": "无有效变化类别"}
 
+    # ★ S7: 优先用转移矩阵量化业务事件 (from→to 面积支撑)
+    transitions = (transition or {}).get("transitions") or []
+    if transitions:
+        top = _interpret_top_transition(transitions)
+        if top:
+            return top
+
     # 找面积最大的主导类别
     per_class = stats.get("per_class", []) if stats else []
+    dominant = {}  # 防御: per_class 为空时后续 dominant.get() 不致 UnboundLocalError
     if per_class:
         dominant = max(per_class, key=lambda c: c.get("area_px", 0))
         dom_name = dominant.get("name", "")
@@ -620,6 +647,54 @@ def classify_change_type_by_rule(present_classes: list, stats: dict) -> dict:
             "reason": f"主导类别 {dom_name}, 无明确业务类型对应"}
 
 
+def _interpret_top_transition(transitions: list):
+    """
+    从转移矩阵中识别主导业务事件 (耕地→建筑/林地→耕地等)。
+    入参:
+      - transitions: _compute_transition_matrix 的 transitions 列表 (已按面积降序)。
+    方法:
+      - 跳过 background 作为 from/to 的转移 (background↔class 是分割范围波动, 非业务事件)。
+      - 取首个有明确业务语义的 from→to, 映射为业务类型。
+      - 业务语义映射表覆盖自然资源常见转移 (耕地占用/毁林/水体萎缩等)。
+    出参:
+      - {change_type, confidence, reason} 或 None (无可解释的转移)。
+    """
+    if not transitions:
+        return None
+    for item in transitions:
+        src = (item.get("from_class") or "").lower()
+        dst = (item.get("to_class") or "").lower()
+        pct = item.get("percent", 0)
+        # 跳过背景相关转移 (分割范围波动, 非真实地类转换)
+        if "background" in src or "background" in dst:
+            continue
+        key = f"{src}->{dst}"
+        # 业务语义映射 (from→to: 业务类型, 置信度)
+        mapping = {
+            "farmland->building": ("耕地占用", 0.82),
+            "farmland->bareland": ("耕地推土", 0.78),
+            "vegetation->building": ("植被占用", 0.78),
+            "vegetation->bareland": ("植被推土", 0.72),
+            "farmland->vegetation": ("耕地转林草", 0.7),
+            "vegetation->farmland": ("退耕/复垦", 0.68),
+            "water->bareland": ("水体萎缩", 0.75),
+            "water->building": ("水体填占", 0.78),
+            "building->bareland": ("建筑拆除", 0.72),
+            "bareland->building": ("新增建筑", 0.8),
+            "bareland->vegetation": ("复绿", 0.7),
+            "building->vegetation": ("建筑转绿", 0.65),
+        }
+        if key in mapping:
+            ct, conf = mapping[key]
+            return {
+                "change_type": ct,
+                "confidence": conf,
+                "reason": f"{item.get('from_class')}→{item.get('to_class')} "
+                          f"转移占 {pct}% (转移矩阵主导项)",
+            }
+    return None
+
+
 def classify_change_type_by_vlm(
     t1_path: str,
     t2_path: str,
@@ -646,16 +721,16 @@ def classify_change_type_by_vlm(
     """
     try:
         from backend.config import settings
-        from backend.model.llm_client import create_llm
+        from backend.model.llm_client import create_llm, response_text
         from langchain_core.messages import HumanMessage, SystemMessage
         import base64
     except Exception as e:
         logger.warning(f"[VLM-Classify] 依赖缺失, 跳过 VLM 判读: {e}")
         return None
 
-    # 检查 DashScope key
-    if not settings.dashscope_api_key:
-        logger.info("[VLM-Classify] 未配置 DASHSCOPE_API_KEY, 跳过 VLM 判读")
+    # 检查 Responses API 凭据
+    if not settings.responses_api_key:
+        logger.info("[VLM-Classify] 未配置 Responses API 凭据, 跳过 VLM 判读")
         return None
 
     def _img_to_data_uri(path: str) -> Optional[str]:
@@ -713,8 +788,7 @@ def classify_change_type_by_vlm(
     try:
         vlm = create_llm(model=settings.vision_model, temperature=0.2)
         resp = vlm.invoke([sys_msg, user_msg])
-        text = resp.content if hasattr(resp, "content") else str(resp)
-        text = text.strip()
+        text = response_text(resp)
         # 抽取 JSON (容忍 ```json 代码块包裹)
         import json as _json
         import re as _re
@@ -821,3 +895,57 @@ def _analyze_change_stats(change_mask, num_cls, class_lines):
         "total_regions": int(all_regions),
         "per_class": class_stats,
     }
+
+
+def _compute_transition_matrix(t1_mask, t2_mask, class_lines):
+    """
+    计算双时相类别转移矩阵 (from-class × to-class 像素计数)。
+    入参:
+      - t1_mask / t2_mask: 同尺寸 (H, W) int64 类别索引图, 两期已对齐。
+      - class_lines: 类别行列表 (含 background), 索引 0 通常为背景。
+    方法:
+      - 对每个 (t1类, t2类) 像素对计数, 形成 num_cls×num_cls 矩阵。
+      - 只保留发生了类别转移的项 (from != to), 因为无变化项无业务意义且占绝对多数。
+      - 按面积降序排列, 让主导转移排在最前, 供业务判读直接消费。
+    出参:
+      - {total_pixels, transitions: [{from_class, to_class, pixel_count, percent}, ...]}
+      - 转移列表按 pixel_count 降序; 无转移返回空列表。
+    """
+    import numpy as np
+
+    cls_names = [line.split(",")[0].strip() for line in class_lines]
+    num_cls = len(cls_names)
+
+    def _name(cid):
+        return cls_names[cid] if cid < num_cls else f"class_{cid}"
+
+    t1 = np.asarray(t1_mask).ravel().astype(np.int64)
+    t2 = np.asarray(t2_mask).ravel().astype(np.int64)
+    # 尺寸不一致时按较小的截断 (防御: 正常情况两期已 resize 对齐)
+    n = min(t1.shape[0], t2.shape[0])
+    t1, t2 = t1[:n], t2[:n]
+    total = int(n)
+
+    # 只统计发生类别转移的像素 (from != to)
+    changed = t1 != t2
+    if not changed.any():
+        return {"total_pixels": total, "transitions": []}
+
+    from_cls = t1[changed]
+    to_cls = t2[changed]
+    # 用一维复合键计数 (from * num_cls + to), 避免构造稠密矩阵爆内存
+    composite = from_cls.astype(np.int64) * (num_cls + 1) + to_cls
+    unique_keys, counts = np.unique(composite, return_counts=True)
+
+    transitions = []
+    for key, cnt in zip(unique_keys, counts):
+        from_id = int(key) // (num_cls + 1)
+        to_id = int(key) % (num_cls + 1)
+        transitions.append({
+            "from_class": _name(from_id),
+            "to_class": _name(to_id),
+            "pixel_count": int(cnt),
+            "percent": round(100.0 * cnt / total, 4),
+        })
+    transitions.sort(key=lambda x: x["pixel_count"], reverse=True)
+    return {"total_pixels": total, "transitions": transitions}

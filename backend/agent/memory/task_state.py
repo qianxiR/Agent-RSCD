@@ -56,6 +56,9 @@ def create_plan_state(conversation_id: str, goal: str) -> Dict[str, Any]:
         "steps": [],
         "current_step_id": None,
         "completion_gate": {"allowed": False, "reason": "计划尚无已验证步骤"},
+        "plan_version": 1,           # ★ 工程化 A2: 版本链, 首版为 1
+        "parent_plan_id": None,      # ★ 工程化 A2: 父版本 plan_id, 重规划时指向旧版
+        "revision_reason": "",       # ★ 工程化 A2: 本次重规划原因 (首版为空)
         "created_at": now,
         "updated_at": now,
     }
@@ -255,6 +258,16 @@ def build_plan_context_text(plan: Optional[Dict[str, Any]]) -> str:
     if plan.get("selected_skill"):
         lines.append(f"- 选中技能: {plan['selected_skill']}")
         lines.append(f"- 技能回退: {_clip_text(plan.get('skill_fallback_rule') or '', 140)}")
+    # ★ 工程化 A5: 注入结构化任务规格 (延迟 import 避免循环依赖)
+    task_spec = plan.get("task_spec")
+    if isinstance(task_spec, dict) and task_spec.get("task_type"):
+        try:
+            from backend.agent.runtime.task_spec import task_spec_context_text
+            spec_text = task_spec_context_text(task_spec)
+            if spec_text:
+                lines.append(spec_text)
+        except Exception:
+            pass
     for step in plan.get("steps", []):
         if step.get("required", True) and step.get("status") != "completed":
             lines.append(
@@ -322,6 +335,68 @@ def load_plan_state(conversation_id: str) -> Tuple[Optional[Dict[str, Any]], Opt
     input_data = task.get("input") if isinstance(task.get("input"), dict) else {}
     plan = output.get("plan") or input_data.get("plan")
     return (plan if isinstance(plan, dict) else None), task.get("id")
+
+
+def create_plan_revision(
+    old_plan: Dict[str, Any],
+    trigger: str,
+    conversation_id: str,
+    preserve_step_ids: Optional[List[str]] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """
+    ★ 工程化 A2: 基于旧计划创建新版本, 保留旧版可追溯。
+    入参:
+      - old_plan: 触发重规划的旧计划。
+      - trigger: 重规划触发原因 (如 verification_failed / IMAGE_RESOLUTION_MISMATCH)。
+      - conversation_id: 当前会话。
+      - preserve_step_ids: 要从旧计划保留的 step_id 列表 (已完成步骤通常保留)。
+    方法:
+      - 新计划 plan_version = 旧版 + 1, parent_plan_id 指向旧版 plan_id。
+      - 保留旧计划中 completed 步骤 (或显式 preserve 的步骤), 丢弃其余。
+      - 新计划 status 重置为 running, completion_gate 重新计算。
+      - 旧计划快照由调用方在重规划前 persist (写入旧 task output), 此处只产内存对象。
+    出参:
+      - (new_plan, dropped_step_ids): 新版本计划 + 被丢弃的旧步骤 ID 列表。
+    """
+    if not isinstance(old_plan, dict):
+        old_plan = {}
+    old_version = int(old_plan.get("plan_version") or 1)
+    old_plan_id = old_plan.get("plan_id")
+    old_steps = old_plan.get("steps") if isinstance(old_plan.get("steps"), list) else []
+
+    # 决定保留哪些步骤: 默认保留 completed, 显式 preserve 也会保留
+    keep_ids = set(preserve_step_ids or [])
+    kept_steps = []
+    dropped_ids = []
+    for step in old_steps:
+        sid = step.get("step_id")
+        if step.get("status") == "completed" or sid in keep_ids:
+            kept_steps.append(step)
+        elif sid:
+            dropped_ids.append(sid)
+
+    now = _now_iso()
+    new_plan = {
+        "plan_id": f"plan_{conversation_id}_{uuid.uuid4().hex[:10]}",
+        "conversation_id": conversation_id,
+        "goal": old_plan.get("goal") or "",
+        "status": "running",
+        "steps": kept_steps,
+        "current_step_id": None,
+        "completion_gate": {"allowed": False, "reason": "重规划后待重新验证"},
+        "plan_version": old_version + 1,
+        "parent_plan_id": old_plan_id,
+        "revision_reason": (trigger or "").strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    # 继承旧计划的技能选择 (技能不变, 只重排步骤)
+    if old_plan.get("selected_skill"):
+        new_plan["selected_skill"] = old_plan["selected_skill"]
+    if old_plan.get("skill_fallback_rule"):
+        new_plan["skill_fallback_rule"] = old_plan["skill_fallback_rule"]
+    _refresh_completion_gate(new_plan)
+    return new_plan, dropped_ids
 
 
 def _clip_text(text: str, limit: int = 120) -> str:

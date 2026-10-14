@@ -39,3 +39,15 @@ tests/artifacts/
 
 # Playwright CLI debugging snapshots
 .playwright-cli/
+
+# Java 业务服务构建产物
+backend-java/target/
+
+# 运行时日志与审计 (logs/ 目录含 jsonl)
+logs/
+
+# ZCode 会话产物
+.zcode/
+
+# 参考资料 (非本项目源码)
+GeoCD-Agent/

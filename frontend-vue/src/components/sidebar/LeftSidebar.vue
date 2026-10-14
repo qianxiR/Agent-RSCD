@@ -1,8 +1,10 @@
 <script setup>
-// ==================== 左栏容器：对话列表 / 图层管理 ====================
+// ==================== 左栏容器：对话列表 / 图层管理 / 技能库 / MCP ====================
 import { ref } from 'vue'
 import ConvSidebar from '@/components/sidebar/ConvSidebar.vue'
 import LayerPanel from '@/components/map/LayerPanel.vue'
+import SkillsPanel from '@/components/sidebar/SkillsPanel.vue'
+import McpPanel from '@/components/sidebar/McpPanel.vue'
 
 const activeTab = ref('conv')
 
@@ -13,9 +15,17 @@ function openLayerPanel() {
   activeTab.value = 'layer'
 }
 
+function openSkillsPanel() {
+  activeTab.value = 'skills'
+}
+
+function openMcpPanel() {
+  activeTab.value = 'mcp'
+}
+
 function openConversationPanel() {
   // 入参: 无
-  // 方法: 从图层管理返回对话列表
+  // 方法: 从其他面板返回对话列表
   // 出参: 无
   activeTab.value = 'conv'
 }
@@ -24,10 +34,20 @@ function openConversationPanel() {
 <template>
   <div class="left-sidebar shell-fade-in">
     <div v-show="activeTab === 'conv'" class="sidebar-pane">
-      <ConvSidebar @open-layer="openLayerPanel" />
+      <ConvSidebar
+        @open-layer="openLayerPanel"
+        @open-skills="openSkillsPanel"
+        @open-mcp="openMcpPanel"
+      />
     </div>
     <div v-show="activeTab === 'layer'" class="sidebar-pane">
       <LayerPanel @back="openConversationPanel" />
+    </div>
+    <div v-show="activeTab === 'skills'" class="sidebar-pane">
+      <SkillsPanel @back="openConversationPanel" />
+    </div>
+    <div v-show="activeTab === 'mcp'" class="sidebar-pane">
+      <McpPanel @back="openConversationPanel" />
     </div>
   </div>
 </template>

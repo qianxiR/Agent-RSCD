@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple
 import torch
 
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class Sam3DualViTDetNeck(nn.Module):
@@ -20,9 +21,9 @@ class Sam3DualViTDetNeck(nn.Module):
         add_sam2_neck: bool = False,
     ):
         """
-        SimpleFPN neck a la ViTDet
-        (From detectron2, very lightly adapted)
-        It supports a "dual neck" setting, where we have two identical necks (for SAM3 and SAM2), with different weights
+        The semantic multi-scale neck for the SAM3 ViT intermediate features.
+        It supports a "dual neck" setting, where we have two identical necks
+        (for SAM3 and SAM2), with different weights.
 
         :param trunk: the backbone
         :param position_encoding: the positional encoding to use
@@ -31,66 +32,11 @@ class Sam3DualViTDetNeck(nn.Module):
         super().__init__()
         self.trunk = trunk
         self.position_encoding = position_encoding
-        self.convs = nn.ModuleList()
-
-        self.scale_factors = scale_factors
-        use_bias = True
-        dim: int = self.trunk.channel_list[-1]
-
-        for _, scale in enumerate(scale_factors):
-            current = nn.Sequential()
-
-            if scale == 4.0:
-                current.add_module(
-                    "dconv_2x2_0",
-                    nn.ConvTranspose2d(dim, dim // 2, kernel_size=2, stride=2),
-                )
-                current.add_module(
-                    "gelu",
-                    nn.GELU(),
-                )
-                current.add_module(
-                    "dconv_2x2_1",
-                    nn.ConvTranspose2d(dim // 2, dim // 4, kernel_size=2, stride=2),
-                )
-                out_dim = dim // 4
-            elif scale == 2.0:
-                current.add_module(
-                    "dconv_2x2",
-                    nn.ConvTranspose2d(dim, dim // 2, kernel_size=2, stride=2),
-                )
-                out_dim = dim // 2
-            elif scale == 1.0:
-                out_dim = dim
-            elif scale == 0.5:
-                current.add_module(
-                    "maxpool_2x2",
-                    nn.MaxPool2d(kernel_size=2, stride=2),
-                )
-                out_dim = dim
-            else:
-                raise NotImplementedError(f"scale_factor={scale} is not supported yet.")
-
-            current.add_module(
-                "conv_1x1",
-                nn.Conv2d(
-                    in_channels=out_dim,
-                    out_channels=d_model,
-                    kernel_size=1,
-                    bias=use_bias,
-                ),
-            )
-            current.add_module(
-                "conv_3x3",
-                nn.Conv2d(
-                    in_channels=d_model,
-                    out_channels=d_model,
-                    kernel_size=3,
-                    padding=1,
-                    bias=use_bias,
-                ),
-            )
-            self.convs.append(current)
+        self.scale_factors = tuple(scale_factors)
+        self.convs = nn.ModuleList(
+            nn.Conv2d(self.trunk.channel_list[i], d_model, kernel_size=1)
+            for i in range(len(self.scale_factors))
+        )
 
         self.sam2_convs = None
         if add_sam2_neck:
@@ -106,19 +52,40 @@ class Sam3DualViTDetNeck(nn.Module):
         Optional[List[torch.Tensor]],
     ]:
         xs = self.trunk(tensor_list)
+        if len(xs) != len(self.convs):
+            raise ValueError(
+                f"Expected {len(self.convs)} intermediate ViT features, got {len(xs)}."
+            )
         sam3_out, sam3_pos = [], []
         sam2_out, sam2_pos = None, None
         if self.sam2_convs is not None:
             sam2_out, sam2_pos = [], []
-        x = xs[-1]  # simpleFPN
-        for i in range(len(self.convs)):
+        for i, (x, scale) in enumerate(zip(xs, self.scale_factors)):
             sam3_x_out = self.convs[i](x)
+            if scale != 1.0:
+                output_size = (
+                    round(sam3_x_out.shape[-2] * scale),
+                    round(sam3_x_out.shape[-1] * scale),
+                )
+                sam3_x_out = F.interpolate(
+                    sam3_x_out,
+                    size=output_size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
             sam3_pos_out = self.position_encoding(sam3_x_out).to(sam3_x_out.dtype)
             sam3_out.append(sam3_x_out)
             sam3_pos.append(sam3_pos_out)
 
             if self.sam2_convs is not None:
                 sam2_x_out = self.sam2_convs[i](x)
+                if scale != 1.0:
+                    sam2_x_out = F.interpolate(
+                        sam2_x_out,
+                        size=output_size,
+                        mode="bilinear",
+                        align_corners=False,
+                    )
                 sam2_pos_out = self.position_encoding(sam2_x_out).to(sam2_x_out.dtype)
                 sam2_out.append(sam2_x_out)
                 sam2_pos.append(sam2_pos_out)

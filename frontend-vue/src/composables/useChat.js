@@ -64,8 +64,11 @@ async function ensureHistoryLoaded(convId) {
 function send({ prompt, projectId = null, images = [], selectedLayers = [] }) {
   // 入参: prompt、项目、影像和图层上下文。
   // 方法: 先确认 WebSocket 可发送，再创建本地消息状态，避免断线时产生悬空回复。
+  //   project_id 取调用方显式传入或当前激活项目（新对话据此归属项目分组；
+  //   续接已有会话时后端忽略该字段，仅建会话时使用）。
   // 出参: boolean；连接不可用或会话正在发送时返回 false，且不修改消息列表。
   const store = useConversationStore()
+  const projectStore = useProjectStore()
   const ws = useWebSocket()
 
   if (!ws.isConnected()) return false
@@ -77,9 +80,10 @@ function send({ prompt, projectId = null, images = [], selectedLayers = [] }) {
   const st = store.getConv(convId)
   if (st.isSending) return false
 
+  const pid = projectId || projectStore.activeProjectId
   store.appendUser(convId, { content: prompt, images, selectedLayers })
   store.beginAssistant(convId)
-  return ws.sendChat({ prompt, conversation_id: convId, project_id: projectId, images, selected_layers: selectedLayers })
+  return ws.sendChat({ prompt, conversation_id: convId, project_id: pid, images, selected_layers: selectedLayers })
 }
 
 // 停止当前激活对话

@@ -255,7 +255,10 @@ function connect() {
   store.setWsStatus('connecting')
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const url = `${proto}//${location.host}${WS_PATH}`
+  // ★ 已登录时附带 JWT (Python 侧一阶段仅解码 payload 取 user_id, 不验签)
+  const token = localStorage.getItem('rsiis_token')
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
+  const url = `${proto}//${location.host}${WS_PATH}${tokenQuery}`
   const socket = new WebSocket(url)
   _ws = socket
 
@@ -298,20 +301,23 @@ function isConnected() {
 
 // 入参: { prompt, conversation_id, project_id, model, temperature, images, selected_layers }
 // 方法: 组装 chat_request payload（格式与原生一致）并发送
+//   model 缺省不传 → 后端按当前 LLM 端点路由取默认模型
+//   （避免前端硬编码模型名与后端端点不匹配, 如 DashScope 回退场景）
 // 出参: boolean 是否发送成功
-function sendChat({ prompt, conversation_id, project_id = null, model = 'qwen-plus', temperature = 0.7, images = [], selected_layers = [] }) {
-  return sendRaw({
+function sendChat({ prompt, conversation_id, project_id = null, model = null, temperature = 0.7, images = [], selected_layers = [] }) {
+  const payload = {
     type: 'chat_request',
     prompt,
     images,
     selected_layers,
-    model,
     temperature,
     conversation_id,
     project_id,
     user_id: 'study_user',
     multi_round: true,
-  })
+  }
+  if (model) payload.model = model
+  return sendRaw(payload)
 }
 
 // 入参: conversation_id（可选，不传则停止全部）

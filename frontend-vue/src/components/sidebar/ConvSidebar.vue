@@ -5,18 +5,18 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { ChatLineRound, Search, Delete, EditPen, Folder, Connection } from '@element-plus/icons-vue'
+import { ChatLineRound, Search, Delete, EditPen, Folder, Connection, Check, Plus, MagicStick, Box } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useConversationStore } from '@/stores/conversation'
 import { useChat } from '@/composables/useChat'
-import { deleteConversation, patchConversation, createProject } from '@/services/api'
+import { deleteConversation, patchConversation, createProject, patchProject, deleteProject } from '@/services/api'
 
 const projectStore = useProjectStore()
 const convStore = useConversationStore()
 const { projects, grouped, activeProjectId } = storeToRefs(projectStore)
 const { activeConvId } = storeToRefs(convStore)
 const { newConversation, switchTo } = useChat()
-const emit = defineEmits(['open-layer'])
+const emit = defineEmits(['open-layer', 'open-skills', 'open-mcp'])
 const searchOpen = ref(false)
 const searchInputRef = ref(null)
 const searchQuery = ref('')
@@ -34,8 +34,99 @@ onMounted(() => {
   projectStore.loadAll()
 })
 
-async function onNewConv() {
+// ==================== 新对话 → 项目选择浮层 ====================
+// ★ 交互对齐 Claude Desktop: 点「新对话」先选项目 (含「不在项目中工作」),
+//   选定后新对话自然归属该项目分组, 首条消息经 chat_request.project_id 落库。
+const projectPickOpen = ref(false)
+const projectPickQuery = ref('')
+
+// 按浮层内搜索词过滤的项目列表
+const filteredProjects = computed(() => {
+  const kw = projectPickQuery.value.trim().toLowerCase()
+  if (!kw) return projects.value
+  return projects.value.filter((p) => (p.name || '').toLowerCase().includes(kw))
+})
+
+function onNewConv() {
+  // 先选项目再建对话; 项目列表为空时直接进入无项目新对话
+  if (!projects.value.length) {
+    projectStore.setActiveProject(null)
+    newConversation()
+    return
+  }
+  projectPickQuery.value = ''
+  projectPickOpen.value = true
+}
+
+// 入参: pid 项目 id 或 null (null = 不在项目中工作)
+// 方法: 设为激活项目 → 新建对话 (newConversation 按 activeProjectId 归组) → 关浮层
+// 出参: 无
+function pickProject(pid) {
+  projectStore.setActiveProject(pid)
+  projectPickOpen.value = false
   newConversation()
+}
+
+function closeProjectPick() {
+  projectPickOpen.value = false
+}
+
+// 入参: g 项目对象
+// 方法: 在该项目下直接新建对话 (设为激活项目 → 新对话自然归属, 不弹选择浮层)
+// 出参: 无
+function onNewTaskInProject(g) {
+  projectStore.setActiveProject(g.id)
+  newConversation()
+}
+
+// 入参: g 项目对象
+// 方法: prompt 输入新名称 → PATCH 后端 → 刷新列表
+// 出参: 无; 用户取消或名称未变时直接返回
+async function onRenameProject(g) {
+  const { value } = await ElMessageBox.prompt('请输入新项目名称', '重命名项目', {
+    inputValue: g.name || '',
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+    inputPattern: /.+/,
+    inputErrorMessage: '名称不能为空',
+  })
+  const name = value.trim()
+  if (!name || name === g.name) return
+  try {
+    const data = await patchProject(g.id, { name })
+    if (data.status !== 'success') throw new Error(data.msg || '后端返回失败')
+    await projectStore.loadAll()
+    ElMessage.success('项目已重命名')
+  } catch (e) {
+    ElMessage.error('项目重命名失败: ' + e.message)
+  }
+}
+
+// 入参: g 项目对象
+// 方法: 危险操作确认 (明确「会话不删除, 自动移回未分组」语义) → DELETE 后端
+//   (Java 侧删除前会调 Python 解绑该项目全部会话) → 刷新列表;
+//   删除的是当前激活项目时同步清空激活项目
+// 出参: 无; 用户取消时直接返回
+async function onDeleteProject(g) {
+  await ElMessageBox.confirm(
+    `删除项目「${g.name}」后，组内对话不会被删除，将自动移到未分组。`,
+    '删除项目',
+    {
+      type: 'warning',
+      customClass: 'conversation-delete-dialog',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    },
+  )
+  try {
+    const data = await deleteProject(g.id)
+    if (data.status !== 'success') throw new Error(data.msg || '后端返回失败')
+    if (projectStore.activeProjectId === g.id) projectStore.setActiveProject(null)
+    await projectStore.loadAll()
+    ElMessage.success('项目已删除')
+  } catch (e) {
+    ElMessage.error('项目删除失败: ' + e.message)
+  }
 }
 
 function openSearch() {
@@ -182,6 +273,14 @@ function fmtTime(t) {
         <el-icon><Connection /></el-icon>
         <span>图层管理</span>
       </button>
+      <button type="button" class="sidebar-action" @click="emit('open-skills')">
+        <el-icon><MagicStick /></el-icon>
+        <span>技能库</span>
+      </button>
+      <button type="button" class="sidebar-action" @click="emit('open-mcp')">
+        <el-icon><Box /></el-icon>
+        <span>MCP 工具</span>
+      </button>
     </div>
 
     <div class="conv-list">
@@ -194,6 +293,12 @@ function fmtTime(t) {
         >
           <el-icon class="project-row-icon"><Folder /></el-icon>
           <span class="project-row-title">{{ g.name }}</span>
+          <!-- 项目操作 (hover 显示): 新建任务 / 重命名 / 删除 -->
+          <span class="project-row-ops">
+            <el-icon class="project-row-add" title="在此项目新建任务" @click.stop="onNewTaskInProject(g)"><Plus /></el-icon>
+            <el-icon class="project-row-add" title="重命名项目" @click.stop="onRenameProject(g)"><EditPen /></el-icon>
+            <el-icon class="project-row-add danger" title="删除项目" @click.stop="onDeleteProject(g)"><Delete /></el-icon>
+          </span>
         </div>
         <div v-show="!projectStore.isGroupCollapsed(g.id)" class="conv-group-items">
           <div
@@ -270,6 +375,40 @@ function fmtTime(t) {
               <span class="search-result-time">{{ fmtTime(c.updated_at) }}</span>
             </button>
             <div v-if="!searchResults.length" class="search-result-empty">没有匹配的对话</div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ★ 新对话 → 项目选择浮层 (交互对齐 Claude Desktop 项目切换器) -->
+    <Teleport to="body">
+      <div v-if="projectPickOpen" class="search-overlay" @click.self="closeProjectPick" @keydown.esc="closeProjectPick">
+        <div class="search-modal project-pick-modal" role="dialog" aria-modal="true" aria-label="选择项目">
+          <div class="search-modal-head">
+            <el-icon><Folder /></el-icon>
+            <input
+              v-model="projectPickQuery"
+              class="search-modal-input"
+              placeholder="搜索项目"
+            />
+          </div>
+          <div class="search-results">
+            <button
+              v-for="p in filteredProjects"
+              :key="p.id"
+              type="button"
+              class="search-result-row"
+              @click="pickProject(p.id)"
+            >
+              <el-icon class="project-pick-icon"><Folder /></el-icon>
+              <span class="search-result-title">{{ p.name }}</span>
+              <el-icon v-if="activeProjectId === p.id" class="project-pick-check"><Check /></el-icon>
+            </button>
+            <button type="button" class="search-result-row" @click="pickProject(null)">
+              <span class="search-result-title project-pick-none">不在项目中工作</span>
+              <el-icon v-if="!activeProjectId" class="project-pick-check"><Check /></el-icon>
+            </button>
+            <div v-if="!filteredProjects.length" class="search-result-empty">没有匹配的项目</div>
           </div>
         </div>
       </div>
@@ -508,6 +647,30 @@ function fmtTime(t) {
   text-overflow: ellipsis;
 }
 
+/* 项目操作组 (新建/重命名/删除): 默认隐藏, 项目行 hover 时出现 */
+.project-row-ops {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-right: 2px;
+  opacity: 0;
+  transition: opacity var(--t-base) var(--ease-out);
+}
+.project-row:hover .project-row-ops {
+  opacity: 1;
+}
+.project-row-add {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.project-row-add:hover {
+  color: var(--accent);
+}
+.project-row-add.danger:hover {
+  color: var(--accent-red, #d03050);
+}
+
 .conv-group-items {
   padding: 1px 0 7px 24px;
 }
@@ -598,5 +761,22 @@ function fmtTime(t) {
 .new-project-inline:hover {
   background: var(--bg-hover);
   border-style: solid;
+}
+
+/* ===== 新对话 → 项目选择浮层 ===== */
+.project-pick-modal {
+  width: 380px;
+}
+.project-pick-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.project-pick-check {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.project-pick-none {
+  color: var(--text-secondary);
 }
 </style>

@@ -61,6 +61,9 @@ def build_success(
     data: Optional[Dict[str, Any]] = None,
     verification: Optional[Dict[str, Any]] = None,
     description: str = "",
+    artifacts: Optional[list] = None,
+    evidence: Optional[list] = None,
+    quality: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     构造标准 success 结果 (纯数据/文本类工具, 不触发前端动作).
@@ -73,8 +76,12 @@ def build_success(
         - data: 结构化数据 (路径/统计/计数等, 可选)
         - verification: 成功契约校验 (产物型工具推荐带, 由 _verification.py 生成)
         - description: 给前端进度提示 (可选, 一般 success 不需要)
+        - artifacts: 工具产出的结构化产物清单 (工程化), 每项 {artifact_type, path, format, crs}
+        - evidence: 结构化证据清单 (工程化), 每项 {evidence_type, target, value}
+        - quality: 质量评估 (工程化), {confidence, warnings, uncertainty}
 
-    出参: {"type": "success", "summary", "data", "verification"(可选), "description"(可选)}
+    出参: {"type": "success", "summary", "data", "verification"(可选), "description"(可选),
+           "artifacts"(可选), "evidence"(可选), "quality"(可选)}
     """
     result: Dict[str, Any] = {"type": TYPE_SUCCESS, "summary": summary}
     if data is not None:
@@ -83,6 +90,12 @@ def build_success(
         result["verification"] = verification
     if description:
         result["description"] = description
+    if artifacts:
+        result["artifacts"] = artifacts
+    if evidence:
+        result["evidence"] = evidence
+    if quality is not None:
+        result["quality"] = quality
     return result
 
 
@@ -91,6 +104,7 @@ def build_error(
     data: Optional[Dict[str, Any]] = None,
     summary: str = "",
     verification: Optional[Dict[str, Any]] = None,
+    evidence: Optional[list] = None,
 ) -> Dict[str, Any]:
     """
     构造标准 error 结果 (所有工具的错误路径统一用此).
@@ -100,14 +114,18 @@ def build_error(
         - data: 附加数据 (可选, 如部分产出/已完成的步骤)
         - summary: 错误摘要 (可选, 默认等于 msg)
         - verification: 校验详情 (可选, 校验失败时带, 含 reason 字段)
+        - evidence: 结构化证据清单 (工程化), 失败原因的客观证据
 
-    出参: {"type": "error", "msg", "summary"(=msg if 空), "data"(可选), "verification"(可选)}
+    出参: {"type": "error", "msg", "summary"(=msg if 空), "data"(可选), "verification"(可选),
+           "evidence"(可选)}
     """
     result: Dict[str, Any] = {"type": TYPE_ERROR, "msg": msg, "summary": summary or msg}
     if data is not None:
         result["data"] = data
     if verification is not None:
         result["verification"] = verification
+    if evidence:
+        result["evidence"] = evidence
     return result
 
 
@@ -119,6 +137,9 @@ def build_frontend_action(
     wait_for_result: bool = False,
     data: Optional[Dict[str, Any]] = None,
     verification: Optional[Dict[str, Any]] = None,
+    artifacts: Optional[list] = None,
+    evidence: Optional[list] = None,
+    quality: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     构造标准 frontend_action 结果 (触发前端渲染/下载/图层控制等动作).
@@ -138,6 +159,9 @@ def build_frontend_action(
         - wait_for_result: 是否阻塞等前端回执 (图层类 True, 渲染/下载类 False)
         - data: 结构化数据 (路径/统计等, 给 LLM 看)
         - verification: 成功契约校验 (产物型工具推荐带)
+        - artifacts: 工具产出的结构化产物清单 (工程化), 每项 {artifact_type, path, format, crs}
+        - evidence: 结构化证据清单 (工程化), 每项 {evidence_type, target, value}
+        - quality: 质量评估 (工程化), {confidence, warnings, uncertainty}
 
     出参: 完整的 frontend_action dict
     """
@@ -157,6 +181,12 @@ def build_frontend_action(
         result["data"] = data
     if verification is not None:
         result["verification"] = verification
+    if artifacts:
+        result["artifacts"] = artifacts
+    if evidence:
+        result["evidence"] = evidence
+    if quality is not None:
+        result["quality"] = quality
     return result
 
 

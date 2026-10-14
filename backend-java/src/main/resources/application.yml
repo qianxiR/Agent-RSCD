@@ -1,0 +1,43 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: rsiis-business
+  # 字段名对齐原 Python 接口 (snake_case), 前端零改动
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    url: jdbc:postgresql://${RSIIS_DB_HOST:localhost}:${RSIIS_DB_PORT:5432}/${RSIIS_DB_NAME:rsiis_business}
+    username: ${RSIIS_DB_USER:postgres}
+    password: ${RSIIS_DB_PASSWORD:001117}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 5000
+  # schema.sql 幂等 (IF NOT EXISTS), 每次启动执行兜底建表
+  sql:
+    init:
+      mode: always
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+app:
+  # Python AI 服务地址 (内部代理调用目标)
+  python-base-url: ${PYTHON_BASE_URL:http://127.0.0.1:8020}
+  # 服务间静态令牌, 需与 Python 侧 INTERNAL_API_TOKEN 一致
+  internal-token: ${INTERNAL_API_TOKEN:rsiis-dev-internal-token}
+  security:
+    # off: 全放行 (迁移期默认, 不破坏现有 E2E)
+    # observe: 解析 token 填充认证上下文, 不拦截无效请求
+    # enforce: 除 /api/v1/auth/login 外均需有效 JWT
+    mode: ${SECURITY_MODE:off}
+    jwt-secret: ${JWT_SECRET:rsiis-dev-jwt-secret-key-please-change-it-32b}
+    jwt-ttl-hours: 24
+
+logging:
+  level:
+    com.rsiis: INFO

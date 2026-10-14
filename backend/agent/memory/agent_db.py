@@ -108,6 +108,18 @@ def get_conn():
             pool.putconn(conn)
 
 
+def close_pool() -> None:
+    """关闭连接池 (应用停止时调用, best-effort)。"""
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.closeall()
+        except Exception as e:
+            logger.warning(f"agent_db 连接池关闭异常: {e}")
+        finally:
+            _pool = None
+
+
 def agent_db_available() -> bool:
     """检查 agent_db 是否可用 (含建表前的连通性测试)"""
     pool = _get_pool()
@@ -138,34 +150,20 @@ def init_schema() -> bool:
             return False
         try:
             with conn.cursor() as cur:
-                # ★ 项目表 (新增)
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS project (
-                        id          TEXT PRIMARY KEY,
-                        user_id     TEXT NOT NULL,
-                        name        TEXT NOT NULL,
-                        description TEXT DEFAULT '',
-                        created_at  TIMESTAMPTZ DEFAULT now(),
-                        updated_at  TIMESTAMPTZ DEFAULT now()
-                    )
-                """)
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_project_user
-                    ON project(user_id)
-                """)
-                # ★ v2.4 工作区改造: project 表加 folder_path (本地文件夹关联)
-                cur.execute("ALTER TABLE project ADD COLUMN IF NOT EXISTS folder_path TEXT")
-                cur.execute("""
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_folder_path
-                    ON project(folder_path) WHERE folder_path IS NOT NULL
-                """)
+                # ★ 双服务架构 (2026-10): project 表已迁 Java 服务 (rsiis_business 库),
+                #   本库不再建 project 表; conversation.project_id 保留为纯字符串关联
+                #   (删项目时由 Java 调 /internal/conversations/detach-project 解绑)。
+                #   存量库若残留旧外键, 启动时幂等清理。
+                cur.execute(
+                    "ALTER TABLE conversation DROP CONSTRAINT IF EXISTS conversation_project_id_fkey"
+                )
 
-                # 会话表 (新增 project_id 外键)
+                # 会话表 (project_id 为无外键的字符串关联)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS conversation (
                         id               TEXT PRIMARY KEY,
                         user_id          TEXT NOT NULL,
-                        project_id       TEXT REFERENCES project(id) ON DELETE SET NULL,
+                        project_id       TEXT,
                         title            TEXT,
                         trace_event_logs JSONB DEFAULT '[]'::jsonb,
                         trace_prompt_logs JSONB DEFAULT '[]'::jsonb,
@@ -177,8 +175,7 @@ def init_schema() -> bool:
                 # ★ 兼容旧表: 若 conversation 表已存在但无 project_id / trace 列, 尝试添加
                 try:
                     cur.execute("""
-                        ALTER TABLE conversation ADD COLUMN IF NOT EXISTS
-                        project_id TEXT REFERENCES project(id) ON DELETE SET NULL
+                        ALTER TABLE conversation ADD COLUMN IF NOT EXISTS project_id TEXT
                     """)
                     cur.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS trace_event_logs JSONB DEFAULT '[]'::jsonb")
                     cur.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS trace_prompt_logs JSONB DEFAULT '[]'::jsonb")
@@ -308,8 +305,65 @@ def init_schema() -> bool:
                     CREATE INDEX IF NOT EXISTS idx_task_log_task
                     ON task_log(task_id, id)
                 """)
+
+                # ★ 工程化: 产物血缘表 (artifact)
+                #   把工具产出的 PNG/SHP/GeoJSON/TIF/PDF 从孤立字符串路径升级为可追溯产物。
+                #   task_id 关联 ai_task (重工具执行记录), conversation_id 关联会话, 建立血缘链。
+                #   外键策略: task ON DELETE SET NULL (删任务保留产物记录, 文件仍在磁盘),
+                #             conversation ON DELETE CASCADE (删会话清产物, 与 message 表一致)。
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS artifact (
+                        id              BIGSERIAL PRIMARY KEY,
+                        artifact_id     UUID NOT NULL DEFAULT gen_random_uuid(),
+                        task_id         BIGINT REFERENCES ai_task(id) ON DELETE SET NULL,
+                        conversation_id TEXT REFERENCES conversation(id) ON DELETE CASCADE,
+                        artifact_type   TEXT NOT NULL,
+                        name            TEXT,
+                        storage_uri     TEXT NOT NULL,
+                        format          TEXT,
+                        crs             TEXT,
+                        spatial_jsonb   JSONB,
+                        temporal_jsonb  JSONB,
+                        business_jsonb  JSONB,
+                        lineage_jsonb   JSONB,
+                        quality_jsonb   JSONB,
+                        checksum        TEXT,
+                        created_at      TIMESTAMPTZ DEFAULT now()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_artifact_task ON artifact(task_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_artifact_type ON artifact(artifact_type, created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_artifact_conv ON artifact(conversation_id, id)")
+
+                # ★ 工程化: ai_task 加列 (收敛分散信号 + plan 版本链 + 成本采集)
+                #   evidence/quality/resource: JSONB, 收敛 step.evidence/verification/性能信号到任务记录。
+                #   failure_signature: 统一命名 (与 lesson_policy 一致), 防重复失败。
+                #   plan_version/parent_plan_id: plan 版本链, 重规划保留历史。
+                #   ★ 不改 get_task/get_latest_plan_task/list_tasks 的 SELECT, 新列暂不返回 (避免破坏前端)。
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS evidence_jsonb JSONB")
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS quality_jsonb JSONB")
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS resource_jsonb JSONB")
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS failure_signature TEXT")
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS plan_version INT DEFAULT 1")
+                cur.execute("ALTER TABLE ai_task ADD COLUMN IF NOT EXISTS parent_plan_id BIGINT REFERENCES ai_task(id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_ai_task_plan_chain ON ai_task(conversation_id, plan_version)")
+
+                # ★ MCP 服务器配置表 (2026-10): 前端 MCP 管理面板的持久化,
+                #   协议客户端接入推理链路前作为配置管理数据源。
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS mcp_server (
+                        id          TEXT PRIMARY KEY,
+                        name        TEXT NOT NULL,
+                        transport   TEXT NOT NULL DEFAULT 'sse',
+                        url         TEXT,
+                        command     TEXT,
+                        description TEXT DEFAULT '',
+                        enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at  TIMESTAMPTZ DEFAULT now()
+                    )
+                """)
             conn.commit()
-            logger.info("agent_db schema 初始化完成 (project / conversation[status] / message / conversation_summary / user_memory / ai_task / task_log)")
+            logger.info("agent_db schema 初始化完成 (project / conversation[status] / message / conversation_summary / user_memory / ai_task[+evidence/quality/resource/signature/plan_version] / task_log / artifact)")
             # ★ v2.5 消息分支: 迁移历史数据 (补 node_id/parent_id + 设 active_leaf_node)
             # 幂等: 只处理 node_id IS NULL 或 active_leaf_node IS NULL 的会话
             try:
@@ -526,174 +580,33 @@ def soft_delete_branch_after(conversation_id: str, after_msg_id: int) -> int:
             return 0
 
 
-# ==================== 项目 CRUD (新增) ====================
+# ==================== 项目相关 (项目表已迁 Java 服务) ====================
 
-def create_project(user_id: str, name: str, description: str = "", folder_path: str = None) -> Optional[str]:
+def detach_project_conversations(project_id: str) -> int:
     """
-    创建新项目。
-    - folder_path (可选): 关联的本地文件夹绝对路径。传了则走 UPSERT 语义 (已有同路径则复用)
-    返回: 项目 id (UUID), 失败返回 None
-    """
-    project_id = str(uuid.uuid4())
-    with get_conn() as conn:
-        if conn is None:
-            return None
-        try:
-            with conn.cursor() as cur:
-                # ★ folder_path 已存在 → 复用现有 project (UPSERT 语义)
-                if folder_path:
-                    cur.execute(
-                        "SELECT id FROM project WHERE folder_path = %s",
-                        (folder_path,),
-                    )
-                    existing = cur.fetchone()
-                    if existing:
-                        logger.info(f"[DB] 复用现有 project (folder_path={folder_path}): {existing[0]}")
-                        return existing[0]
-                cur.execute(
-                    """INSERT INTO project (id, user_id, name, description, folder_path)
-                       VALUES (%s, %s, %s, %s, %s)""",
-                    (project_id, user_id, name, description, folder_path),
-                )
-            conn.commit()
-            logger.info(f"项目创建成功: {project_id} name={name} folder={folder_path or '-'}")
-            return project_id
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"创建项目失败 [user={user_id}, folder={folder_path}]: {e}")
-            return None
+    把指定项目下的全部会话 project_id 置 NULL (替代原库内
+    conversation→project 外键的 ON DELETE SET NULL, 外键已随迁移移除)。
 
-
-def get_project_by_folder_path(folder_path: str) -> Optional[Dict[str, Any]]:
-    """按 folder_path 查询 project (不存在返回 None)。"""
-    if not folder_path:
-        return None
-    with get_conn() as conn:
-        if conn is None:
-            return None
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, user_id, name, folder_path FROM project WHERE folder_path = %s",
-                    (folder_path,),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    return None
-                return {"id": row[0], "user_id": row[1], "name": row[2], "folder_path": row[3]}
-        except Exception as e:
-            logger.error(f"按 folder_path 查询项目失败 [{folder_path}]: {e}")
-            return None
-
-
-def list_projects(user_id: str) -> List[Dict[str, Any]]:
-    """
-    列出用户的所有项目 (按更新时间倒序), 含会话数量。
+    入参: project_id (str) Java 侧删除项目前调用
+    出参: 解绑的会话条数; 数据库不可用返回 0
     """
     with get_conn() as conn:
         if conn is None:
-            return []
+            return 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT p.id, p.name, p.description, p.created_at, p.updated_at, p.folder_path,
-                              COUNT(c.id) AS conv_count
-                       FROM project p
-                       LEFT JOIN conversation c ON c.project_id = p.id
-                       WHERE p.user_id = %s
-                       GROUP BY p.id
-                       ORDER BY p.updated_at DESC""",
-                    (user_id,),
-                )
-                rows = cur.fetchall()
-            return [
-                {
-                    "id": r[0],
-                    "name": r[1],
-                    "description": r[2] or "",
-                    "created_at": r[3].isoformat() if r[3] else None,
-                    "updated_at": r[4].isoformat() if r[4] else None,
-                    "folder_path": r[5] or "",
-                    "conversation_count": r[6],
-                }
-                for r in rows
-            ]
-        except Exception as e:
-            logger.error(f"列出项目失败 [user={user_id}]: {e}")
-            return []
-
-
-def get_project(project_id: str) -> Optional[Dict[str, Any]]:
-    """查询单个项目元数据"""
-    with get_conn() as conn:
-        if conn is None:
-            return None
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, user_id, name, description, created_at, updated_at FROM project WHERE id = %s",
+                    "UPDATE conversation SET project_id = NULL, updated_at = now() "
+                    "WHERE project_id = %s",
                     (project_id,),
                 )
-                row = cur.fetchone()
-                if row is None:
-                    return None
-                return {
-                    "id": row[0],
-                    "user_id": row[1],
-                    "name": row[2],
-                    "description": row[3] or "",
-                    "created_at": row[4],
-                    "updated_at": row[5],
-                }
-        except Exception as e:
-            logger.error(f"查询项目失败 [{project_id}]: {e}")
-            return None
-
-
-def update_project(project_id: str, name: str = None, description: str = None) -> bool:
-    """
-    更新项目名称和/或描述。
-    至少传一个字段。
-    """
-    with get_conn() as conn:
-        if conn is None:
-            return False
-        try:
-            with conn.cursor() as cur:
-                if name is not None:
-                    cur.execute(
-                        "UPDATE project SET name = %s, updated_at = now() WHERE id = %s",
-                        (name, project_id),
-                    )
-                if description is not None:
-                    cur.execute(
-                        "UPDATE project SET description = %s, updated_at = now() WHERE id = %s",
-                        (description, project_id),
-                    )
+                count = cur.rowcount
             conn.commit()
-            return True
+            return max(count, 0)
         except Exception as e:
             conn.rollback()
-            logger.error(f"更新项目失败 [{project_id}]: {e}")
-            return False
-
-
-def delete_project(project_id: str) -> bool:
-    """
-    删除项目 (会话的 project_id 会被 SET NULL, 不会级联删除会话)。
-    """
-    with get_conn() as conn:
-        if conn is None:
-            return False
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM project WHERE id = %s", (project_id,))
-            conn.commit()
-            return True
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"删除项目失败 [{project_id}]: {e}")
-            return False
+            logger.error(f"项目会话解绑失败 [{project_id}]: {e}")
+            return 0
 
 
 # ==================== 会话 CRUD ====================
@@ -1660,6 +1573,10 @@ def update_task(
     output: Dict[str, Any] = None,
     error: str = None,
     verification: Dict[str, Any] = None,
+    evidence: Dict[str, Any] = None,
+    quality: Dict[str, Any] = None,
+    resource_usage: Dict[str, Any] = None,
+    failure_signature: str = None,
 ) -> bool:
     """
     更新任务状态/进度/输出/错误/验证结果。
@@ -1670,6 +1587,10 @@ def update_task(
       - output: 任务输出 JSON。
       - error: 失败原因。
       - verification: worker 或工具产物校验结果。
+      - evidence: 结构化证据 (工程化, JSONB), 收敛 step.evidence 等分散信号。
+      - quality: 质量评估 (工程化), {confidence, warnings, uncertainty}。
+      - resource_usage: 资源消耗 (工程化), {duration_ms, input_tokens, gpu_seconds, ...}。
+      - failure_signature: 失败签名 (工程化), 统一防重复失败命名。
     方法:
       - 任一参数为 None 表示不修改该字段。
       - status 切到 running 时自动写 started_at, 切到 done/failed/cancelled 时写 finished_at。
@@ -1700,6 +1621,18 @@ def update_task(
     if verification is not None:
         sets.append("verification = %s")
         params.append(Json(verification))
+    if evidence is not None:
+        sets.append("evidence_jsonb = %s")
+        params.append(Json(evidence))
+    if quality is not None:
+        sets.append("quality_jsonb = %s")
+        params.append(Json(quality))
+    if resource_usage is not None:
+        sets.append("resource_jsonb = %s")
+        params.append(Json(resource_usage))
+    if failure_signature is not None:
+        sets.append("failure_signature = %s")
+        params.append(failure_signature)
     if not sets:
         return False
     params.append(task_id)
@@ -1945,3 +1878,305 @@ def get_task_logs(task_id: int, limit: int = 200) -> List[Dict[str, Any]]:
         except Exception as e:
             logger.error(f"查询任务日志失败 [task={task_id}]: {e}")
             return []
+
+
+# ==================== 产物血缘 (artifact) ====================
+
+# 标准产物类型 (artifact_type 取值), 供登记时校验语义。
+ARTIFACT_TYPES = {
+    "segment_mask",       # 分割彩色掩膜 PNG
+    "segment_vector",     # 分割矢量 SHP/GeoJSON
+    "change_mask",        # 变化检测掩膜
+    "change_vector",      # 变化检测矢量图斑
+    "overlay_png",        # 叠加渲染图
+    "edge_shp",           # 边缘线矢量
+    "base_image",         # 底图影像
+    "report_pdf",         # 监测报告
+    "stats_table",        # 统计表
+}
+
+
+def register_artifact(
+    conversation_id: str,
+    artifact_type: str,
+    storage_uri: str,
+    task_id: int = None,
+    name: str = None,
+    fmt: str = None,
+    crs: str = None,
+    spatial: Dict[str, Any] = None,
+    temporal: Dict[str, Any] = None,
+    business: Dict[str, Any] = None,
+    lineage: Dict[str, Any] = None,
+    quality: Dict[str, Any] = None,
+    checksum: str = None,
+) -> Optional[int]:
+    """
+    登记一条工具产物, 建立产物→任务→会话的血缘链。
+    入参:
+      - conversation_id: 所属会话 (必填, 随会话级联删除)。
+      - artifact_type: 产物类型, 见 ARTIFACT_TYPES。
+      - storage_uri: 产物存储路径 (file:///... 或绝对路径, 必填)。
+      - task_id: 产出该产物的 ai_task 主键 (可空, 删除任务时置 NULL 保留产物记录)。
+      - name: 产物显示名。
+      - fmt: 格式 (geotiff/geojson/shapefile/pdf/png)。用 fmt 别名避免与内置 format 冲突。
+      - crs: 坐标系 (EPSG:4490)。
+      - spatial/temporal/business/lineage/quality: 可选结构化元数据 (JSONB)。
+      - checksum: 文件校验和。
+    方法:
+      - 插入 artifact 表, JSONB 字段用 psycopg2 Json 包装。
+      - 数据库不可用时返回 None, 不影响主流程 (与现有 CRUD 降级风格一致)。
+    出参:
+      - 新记录主键 id; 失败返回 None。
+    """
+    _, _, Json = _get_psycopg2()
+    if Json is None:
+        return None
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO artifact (
+                           conversation_id, artifact_type, storage_uri,
+                           task_id, name, format, crs,
+                           spatial_jsonb, temporal_jsonb, business_jsonb,
+                           lineage_jsonb, quality_jsonb, checksum
+                       )
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       RETURNING id""",
+                    (conversation_id, artifact_type, storage_uri,
+                     task_id, name, fmt, crs,
+                     Json(spatial) if spatial else None,
+                     Json(temporal) if temporal else None,
+                     Json(business) if business else None,
+                     Json(lineage) if lineage else None,
+                     Json(quality) if quality else None,
+                     checksum),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            artifact_pk = row[0] if row else None
+            if artifact_pk:
+                logger.info(f"[Artifact] 登记产物 id={artifact_pk} type={artifact_type} conv={conversation_id}")
+            return artifact_pk
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"登记产物失败 [conv={conversation_id}, type={artifact_type}]: {e}")
+            return None
+
+
+def get_artifact(artifact_id) -> Optional[Dict[str, Any]]:
+    """
+    按主键或 UUID 查询单条产物详情。
+    入参:
+      - artifact_id: BIGINT 主键 或 UUID 字符串。
+    出参:
+      - 产物 dict (含全部字段); 不存在或 DB 不可用返回 None。
+    """
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                col_clause = "id = %s" if isinstance(artifact_id, int) else "artifact_id = %s"
+                cur.execute(
+                    f"""SELECT id, artifact_id, task_id, conversation_id,
+                               artifact_type, name, storage_uri, format, crs,
+                               spatial_jsonb, temporal_jsonb, business_jsonb,
+                               lineage_jsonb, quality_jsonb, checksum, created_at
+                        FROM artifact WHERE {col_clause}""",
+                    (artifact_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+            return _row_to_artifact(row)
+        except Exception as e:
+            logger.error(f"查询产物失败 [id={artifact_id}]: {e}")
+            return None
+
+
+def list_artifacts_by_task(task_id: int) -> List[Dict[str, Any]]:
+    """
+    查询某个 ai_task 产出的全部产物 (任务血缘)。
+    出参: list[dict], 按创建时间正序; 无记录返回 []。
+    """
+    if task_id is None:
+        return []
+    with get_conn() as conn:
+        if conn is None:
+            return []
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, artifact_id, task_id, conversation_id,
+                              artifact_type, name, storage_uri, format, crs,
+                              spatial_jsonb, temporal_jsonb, business_jsonb,
+                              lineage_jsonb, quality_jsonb, checksum, created_at
+                       FROM artifact WHERE task_id = %s
+                       ORDER BY id ASC""",
+                    (task_id,),
+                )
+                rows = cur.fetchall()
+            return [_row_to_artifact(r) for r in rows]
+        except Exception as e:
+            logger.error(f"按任务列出产物失败 [task={task_id}]: {e}")
+            return []
+
+
+def list_artifacts_by_conversation(
+    conversation_id: str, artifact_type: str = None
+) -> List[Dict[str, Any]]:
+    """
+    查询某会话的全部产物, 可按 artifact_type 过滤。
+    出参: list[dict], 按创建时间倒序 (最近产物优先)。
+    """
+    with get_conn() as conn:
+        if conn is None:
+            return []
+        try:
+            with conn.cursor() as cur:
+                if artifact_type:
+                    cur.execute(
+                        """SELECT id, artifact_id, task_id, conversation_id,
+                                  artifact_type, name, storage_uri, format, crs,
+                                  spatial_jsonb, temporal_jsonb, business_jsonb,
+                                  lineage_jsonb, quality_jsonb, checksum, created_at
+                           FROM artifact
+                           WHERE conversation_id = %s AND artifact_type = %s
+                           ORDER BY id DESC""",
+                        (conversation_id, artifact_type),
+                    )
+                else:
+                    cur.execute(
+                        """SELECT id, artifact_id, task_id, conversation_id,
+                                  artifact_type, name, storage_uri, format, crs,
+                                  spatial_jsonb, temporal_jsonb, business_jsonb,
+                                  lineage_jsonb, quality_jsonb, checksum, created_at
+                           FROM artifact WHERE conversation_id = %s
+                           ORDER BY id DESC""",
+                        (conversation_id,),
+                    )
+                rows = cur.fetchall()
+            return [_row_to_artifact(r) for r in rows]
+        except Exception as e:
+            logger.error(f"按会话列出产物失败 [conv={conversation_id}]: {e}")
+            return []
+
+
+def _row_to_artifact(row) -> Dict[str, Any]:
+    """把 artifact 查询行转为 dict (统一时间格式化)。"""
+    return {
+        "id": row[0],
+        "artifact_id": str(row[1]) if row[1] else None,
+        "task_id": row[2],
+        "conversation_id": row[3],
+        "artifact_type": row[4],
+        "name": row[5],
+        "storage_uri": row[6],
+        "format": row[7],
+        "crs": row[8],
+        "spatial": row[9],
+        "temporal": row[10],
+        "business": row[11],
+        "lineage": row[12],
+        "quality": row[13],
+        "checksum": row[14],
+        "created_at": row[15].isoformat() if row[15] else None,
+    }
+
+
+# ==================== MCP 服务器配置 (2026-10) ====================
+
+def list_mcp_servers() -> List[Dict[str, Any]]:
+    """
+    列出全部 MCP 服务器配置 (按创建时间倒序)。
+    出参: [{id, name, transport, url, command, description, enabled, created_at}]
+    """
+    with get_conn() as conn:
+        if conn is None:
+            return []
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name, transport, url, command, description, enabled, created_at "
+                    "FROM mcp_server ORDER BY created_at DESC"
+                )
+                rows = cur.fetchall()
+            return [
+                {
+                    "id": r[0], "name": r[1], "transport": r[2],
+                    "url": r[3] or "", "command": r[4] or "",
+                    "description": r[5] or "", "enabled": r[6],
+                    "created_at": r[7].isoformat() if r[7] else None,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"列出 MCP 服务器失败: {e}")
+            return []
+
+
+def create_mcp_server(name: str, transport: str, url: str = None,
+                      command: str = None, description: str = "") -> Optional[str]:
+    """
+    新增 MCP 服务器配置。
+    - transport: 'sse' 需 url; 'stdio' 需 command (由路由层校验, 此处只存储)
+    返回: 服务器 id, 失败返回 None
+    """
+    server_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO mcp_server (id, name, transport, url, command, description)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (server_id, name, transport, url, command, description),
+                )
+            conn.commit()
+            return server_id
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"新增 MCP 服务器失败 [{name}]: {e}")
+            return None
+
+
+def update_mcp_server_enabled(server_id: str, enabled: bool) -> bool:
+    """切换 MCP 服务器启用状态。"""
+    with get_conn() as conn:
+        if conn is None:
+            return False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE mcp_server SET enabled = %s WHERE id = %s",
+                    (enabled, server_id),
+                )
+                affected = cur.rowcount
+            conn.commit()
+            return affected > 0
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"切换 MCP 服务器状态失败 [{server_id}]: {e}")
+            return False
+
+
+def delete_mcp_server(server_id: str) -> bool:
+    """删除 MCP 服务器配置。"""
+    with get_conn() as conn:
+        if conn is None:
+            return False
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM mcp_server WHERE id = %s", (server_id,))
+                affected = cur.rowcount
+            conn.commit()
+            return affected > 0
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"删除 MCP 服务器失败 [{server_id}]: {e}")
+            return False

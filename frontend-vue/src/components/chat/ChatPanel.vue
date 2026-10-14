@@ -14,6 +14,7 @@ import { useProjectStore } from '@/stores/project'
 import MessageBubble from './MessageBubble.vue'
 import TaskProgressBar from './TaskProgressBar.vue'
 import TaskMonitorDialog from './TaskMonitorDialog.vue'
+import ProjectSelector from './ProjectSelector.vue'
 
 // 任务日志监控弹窗显隐（纯只读查看器，对齐原生 task-monitor.js）
 const taskDialogVisible = ref(false)
@@ -361,6 +362,9 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
         </button>
       </div>
     </div>
+
+    <!-- 会话上下文条: 当前对话的项目归属, 可直接切换 (解决对话与项目割裂) -->
+    <ProjectSelector />
 
     <!-- 消息滚动区（对齐原生 .ai-chat） -->
     <div ref="scrollRef" class="ai-chat">

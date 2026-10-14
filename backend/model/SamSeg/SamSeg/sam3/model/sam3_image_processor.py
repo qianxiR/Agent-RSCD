@@ -19,7 +19,7 @@ class Sam3Processor:
     出参: 为单图、批量图像和文本/几何提示提供可复用的推理状态。
     """
 
-    def __init__(self, model, resolution=1008, device="cuda", confidence_threshold=0.5):
+    def __init__(self, model, resolution=336, device="cuda", confidence_threshold=0.5):
         """
         入参: model 为已加载模型；resolution 为正方形输入边长；device 为 torch 设备。
         方法: 构建确定性的图像预处理，并初始化 grounding 所需的 FindStage。

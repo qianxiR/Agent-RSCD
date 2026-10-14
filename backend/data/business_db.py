@@ -83,6 +83,18 @@ def get_conn():
             pool.putconn(conn)
 
 
+def close_pool() -> None:
+    """关闭连接池 (应用停止时调用, best-effort)。"""
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.closeall()
+        except Exception as e:
+            logger.warning(f"business_db 连接池关闭异常: {e}")
+        finally:
+            _pool = None
+
+
 def db_available() -> bool:
     """检查数据库是否可用"""
     pool = _get_pool()
@@ -389,6 +401,9 @@ def ensure_business_schema() -> bool:
                 cur.execute("ALTER TABLE image_metadata ADD COLUMN IF NOT EXISTS width INTEGER")
                 cur.execute("ALTER TABLE image_metadata ADD COLUMN IF NOT EXISTS height INTEGER")
                 cur.execute("ALTER TABLE image_metadata ADD COLUMN IF NOT EXISTS band_count INTEGER")
+                # ★ 工程化: 影像数据资产稳定标识 (供 artifact.lineage_jsonb 跨 layer_name 引用)
+                cur.execute("ALTER TABLE image_metadata ADD COLUMN IF NOT EXISTS dataset_uid UUID DEFAULT gen_random_uuid()")
+                cur.execute("ALTER TABLE image_metadata ADD COLUMN IF NOT EXISTS checksum TEXT")
                 if has_postgis:
                     try:
                         cur.execute("CREATE EXTENSION IF NOT EXISTS postgis")
@@ -426,6 +441,10 @@ def ensure_business_schema() -> bool:
                 cur.execute("ALTER TABLE vector_layer ADD COLUMN IF NOT EXISTS feature_count INTEGER")
                 cur.execute("ALTER TABLE vector_layer ADD COLUMN IF NOT EXISTS total_area_m2 REAL")
                 cur.execute("ALTER TABLE vector_layer ADD COLUMN IF NOT EXISTS attrs JSONB")
+                # ★ 工程化: 矢量产物关联 artifact 血缘。
+                #   artifact 表在 agent 库 (Agent_study), vector_layer 在业务库 (cd),
+                #   PostgreSQL 不支持跨库外键, 故用普通 BIGINT 列 + 应用层保证一致性。
+                cur.execute("ALTER TABLE vector_layer ADD COLUMN IF NOT EXISTS artifact_id BIGINT")
                 if has_postgis:
                     try:
                         cur.execute("""

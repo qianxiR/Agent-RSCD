@@ -18,9 +18,11 @@
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --ease-emph: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* ---------- ui: 系统界面配色 ---------- */
-  --bg-base: #ffffff; --bg-panel: #f1f7fc; --bg-elevated: #fff; --bg-hover: #e0eef8; --bg-inset: #e9f2f9;
-  --border: #cee0ee; --border-strong: #9dbcd5;
+  /* ---------- ui: 系统界面配色 ----------
+   * ★ 2026-10 主题改造: 背景中性化 (白 + 浅灰), 蓝色仅作强调色
+   *   (按钮/选中态/链接/用户气泡), 不再作为底色。 */
+  --bg-base: #f5f6f8; --bg-panel: #ffffff; --bg-elevated: #ffffff; --bg-hover: #eef0f3; --bg-inset: #f5f6f8;
+  --border: #e4e7ec; --border-strong: #c9cdd4;
   --accent: #2c6fbd; --accent-hover: #205599; --accent-soft: rgba(44, 111, 189, 0.08);
   --accent-green: #3fae5a; --accent-amber: #d68910; --accent-red: #cf4444; --accent-purple: #3949c0;
   --accent-blue: #559ed8;

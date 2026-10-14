@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 def _get_summary_llm():
     """
-    获取用于摘要/长期记忆提取的轻量 LLM (deepseek-v4-flash, 走百炼免费额度)。
+    获取用于摘要/长期记忆提取的 Responses API LLM (gpt-5.4-mini)。
     延迟导入避免循环依赖 (memory ↔ llm_client ↔ memory)。
     """
     from backend.model.llm_client import create_llm
@@ -85,8 +85,8 @@ def _get_long_term_memory_llm():
     return create_llm(model=settings.long_term_memory_model, temperature=0.0)
 
 
-# ==================== Token 计数 (兼容 Qwen/DashScope) ====================
-# trim_messages 官方推荐传 token_counter=llm, 但 ChatOpenAI 对 qwen-plus 这类
+# ==================== Token 计数 (兼容 Responses API) ====================
+# trim_messages 官方推荐传 token_counter=llm, 但 ChatOpenAI 对 provider 代理模型
 # 非 OpenAI 官方模型不支持 get_num_tokens_from_messages() (NotImplementedError)。
 # 解法: 自定义一个基于 tiktoken cl100k_base 的近似计数函数。
 # 中文场景下 cl100k_base 对汉字约 1.5~2 token, 量级足够 trim 决策用。

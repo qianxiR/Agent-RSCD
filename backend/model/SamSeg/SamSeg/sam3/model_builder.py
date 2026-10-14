@@ -69,7 +69,7 @@ def _create_position_encoding(precompute_resolution=None):
 def _create_vit_backbone(compile_mode=None):
     """Create ViT backbone for visual feature extraction."""
     return ViT(
-        img_size=1008,
+        img_size=336,
         pretrain_img_size=336,
         patch_size=14,
         embed_dim=1024,
@@ -90,7 +90,7 @@ def _create_vit_backbone(compile_mode=None):
         retain_cls_token=False,
         ln_pre=True,
         ln_post=False,
-        return_interm_layers=False,
+        return_interm_layers=True,
         bias_patch_embed=False,
         compile_mode=compile_mode,
     )
@@ -109,7 +109,7 @@ def _create_vit_neck(position_encoding, vit_backbone, enable_inst_interactivity=
 
 def _create_vl_backbone(vit_neck, text_encoder):
     """Create visual-language backbone."""
-    return SAM3VLBackbone(visual=vit_neck, text=text_encoder, scalp=1)
+    return SAM3VLBackbone(visual=vit_neck, text=text_encoder, scalp=0)
 
 
 def _create_transformer_encoder() -> TransformerEncoderFusion:
@@ -179,8 +179,8 @@ def _create_transformer_decoder() -> TransformerDecoder:
         frozen=False,
         interaction_layer=None,
         dac_use_selfatt_ln=True,
-        resolution=1008,
-        stride=14,
+        resolution=336,
+        stride=28,
         use_act_checkpoint=True,
         presence_token=True,
     )
@@ -500,7 +500,7 @@ def _create_vision_backbone(
 ) -> Sam3DualViTDetNeck:
     """Create SAM3 visual backbone with ViT and neck."""
     # Position encoding
-    position_encoding = _create_position_encoding(precompute_resolution=1008)
+    position_encoding = _create_position_encoding(precompute_resolution=336)
     # ViT backbone
     vit_backbone: ViT = _create_vit_backbone(compile_mode=compile_mode)
     vit_neck: Sam3DualViTDetNeck = _create_vit_neck(
@@ -678,7 +678,7 @@ def build_sam3_video_model(
     # Build Detector components
     visual_neck = _create_vision_backbone()
     text_encoder = _create_text_encoder(bpe_path)
-    backbone = SAM3VLBackbone(scalp=1, visual=visual_neck, text=text_encoder)
+    backbone = SAM3VLBackbone(scalp=0, visual=visual_neck, text=text_encoder)
     transformer = _create_sam3_transformer(has_presence_token=has_presence_token)
     segmentation_head: UniversalSegmentationHead = _create_segmentation_head()
     input_geometry_encoder = _create_geometry_encoder()

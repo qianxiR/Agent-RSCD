@@ -345,3 +345,193 @@ def verify_by_path(path, *, min_bytes: int = 100) -> dict:
         result["checker"] = "file_exists"
 
     return result
+
+
+# ==================== 工程化 S8: 双时相空间一致性校验 ====================
+
+def _read_raster_geo_metadata(path):
+    """
+    用 rasterio 读影像的空间元数据 (CRS/分辨率/范围), 失败返回 None。
+    入参: path — 影像路径。
+    出参: {crs, width, height, bounds(minx,miny,maxx,maxy), res_x, res_y} 或 None。
+    方法: rasterio 缺失或文件无法读取时返回 None (降级, 不报错)。
+    """
+    try:
+        import rasterio
+        from affine import Affine
+    except ImportError:
+        return None
+    try:
+        with rasterio.open(str(path)) as ds:
+            crs = str(ds.crs) if ds.crs else None
+            bounds = ds.bounds  # (left, bottom, right, top)
+            return {
+                "crs": crs,
+                "width": ds.width,
+                "height": ds.height,
+                "bounds": (bounds.left, bounds.bottom, bounds.right, bounds.top),
+                "res_x": abs(ds.transform.a),
+                "res_y": abs(ds.transform.e),
+            }
+    except Exception:
+        return None
+
+
+def _bounds_overlap_ratio(a, b):
+    """
+    计算两个 (minx,miny,maxx,maxy) 范围框的交集占 a 的面积比。
+    入参: a, b — (minx, miny, maxx, maxy)。
+    出参: 0.0~1.0, 0 表示无重叠。
+    """
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    if area_a <= 0:
+        return 0.0
+    return (ix * iy) / area_a
+
+
+def verify_spatial_consistency(t1_path, t2_path, *, res_tolerance: float = 0.1) -> dict:
+    """
+    双时相空间一致性校验: CRS / 分辨率 / 空间范围重叠。
+    入参:
+      - t1_path / t2_path: 两期影像路径。
+      - res_tolerance: 分辨率容差比例 (默认 0.1 = 10%), 相对差超此值判 warning。
+    方法:
+      - rasterio 读两期元数据, 任一缺失返回降级 (不报错)。
+      - CRS 不一致 → warning (变化检测会先 resize, 但语义上两期不同坐标系)。
+      - 分辨率相对差 > res_tolerance → warning (边缘误检风险)。
+      - 范围重叠率 < 0.5 → warning (两期几乎不重叠, 变化检测无意义)。
+      - 全部一致 → ok=True。
+    出参:
+      {ok, crs_consistent, res_consistent, overlap_ratio, warnings: [...], evidence: str}
+    """
+    meta1 = _read_raster_geo_metadata(t1_path)
+    meta2 = _read_raster_geo_metadata(t2_path)
+    if not meta1 or not meta2:
+        return {
+            "ok": True,
+            "deep_checked": False,
+            "evidence": "rasterio 缺失或影像无法读取, 跳过空间一致性深度校验",
+        }
+
+    warnings = []
+    crs_consistent = bool(meta1["crs"] and meta2["crs"] and meta1["crs"] == meta2["crs"])
+    if not crs_consistent:
+        warnings.append(f"CRS 不一致: T1={meta1['crs']}, T2={meta2['crs']}")
+
+    rx1, ry1 = meta1["res_x"], meta1["res_y"]
+    rx2, ry2 = meta2["res_x"], meta2["res_y"]
+    res_diff = abs(rx1 - rx2) / max(rx1, rx2, 1e-9)
+    res_consistent = res_diff <= res_tolerance
+    if not res_consistent:
+        warnings.append(
+            f"分辨率差异 {res_diff:.1%} 超过 {res_tolerance:.0%} 容差 "
+            f"(T1={rx1:.2f}m, T2={rx2:.2f}m), 边缘误检风险"
+        )
+
+    overlap = _bounds_overlap_ratio(meta1["bounds"], meta2["bounds"])
+    if overlap < 0.5:
+        warnings.append(f"空间范围重叠率仅 {overlap:.1%} (<50%), 两期可能非同区域")
+
+    ok = crs_consistent and res_consistent and overlap >= 0.5
+    evidence = (
+        f"CRS{'一致' if crs_consistent else '不一致'}; "
+        f"分辨率差 {res_diff:.1%}; 范围重叠 {overlap:.1%}"
+    )
+    return {
+        "ok": ok,
+        "deep_checked": True,
+        "crs_consistent": crs_consistent,
+        "res_consistent": res_consistent,
+        "overlap_ratio": round(overlap, 3),
+        "warnings": warnings,
+        "evidence": evidence,
+    }
+
+
+# ==================== 工程化 S9: 矢量几何有效性 + 最小图斑校验 ====================
+
+def verify_geometry_validity(
+    path, *, min_area_m2: float = None, min_features: int = 1, min_bytes: int = 100
+) -> dict:
+    """
+    矢量几何深度校验: 拓扑有效性 + 最小上图面积过滤。
+    入参:
+      - path: 矢量文件路径 (.geojson/.shp/.gpkg)。
+      - min_area_m2: 最小上图面积阈值 (m²), 小于此值的图斑计为碎屑。
+      - min_features: 最少有效要素数。
+    方法:
+      - geopandas 缺失时降级为 verify_vector_features (只做存在性)。
+      - 读回后检查: ① 无效几何数 (自相交/无效环) ② 小于 min_area_m2 的碎屑图斑数。
+      - 无效几何存在 → ok=False (拓扑错误会导致 GIS 分析异常)。
+      - 碎屑图斑占比高 → warning (但不判失败, 因碎屑可后处理过滤)。
+    出参:
+      {ok, size_bytes, feature_count, invalid_geom_count, sliver_count,
+       reason, evidence, deep_checked}
+    """
+    base = verify_file_exists(path, min_bytes=min_bytes)
+    if not base["ok"]:
+        return {**base, "feature_count": 0, "invalid_geom_count": 0, "sliver_count": 0}
+
+    try:
+        import geopandas as gpd
+    except ImportError:
+        return {
+            "ok": True, "size_bytes": base["size_bytes"],
+            "feature_count": -1, "invalid_geom_count": 0, "sliver_count": 0,
+            "deep_checked": False,
+            "evidence": "文件存在 (geopandas 未安装, 未做几何深度校验)",
+        }
+
+    try:
+        gdf = gpd.read_file(str(path))
+    except Exception as e:
+        return {"ok": False, "size_bytes": base["size_bytes"],
+                "feature_count": 0, "invalid_geom_count": 0, "sliver_count": 0,
+                "reason": f"矢量文件无法读取: {e}", "evidence": "文件可能损坏"}
+
+    n = len(gdf)
+    if n < min_features:
+        return {"ok": False, "size_bytes": base["size_bytes"],
+                "feature_count": n, "invalid_geom_count": 0, "sliver_count": 0,
+                "reason": f"要素数 {n} < {min_features}", "evidence": "无有效要素"}
+
+    # 拓扑有效性
+    invalid_count = 0
+    if "geometry" in gdf.columns:
+        try:
+            invalid_count = int((~gdf.geometry.is_valid).sum())
+        except Exception:
+            invalid_count = 0
+
+    # 碎屑图斑 (面积 < min_area_m2)
+    sliver_count = 0
+    if min_area_m2 and "geometry" in gdf.columns:
+        try:
+            areas = gdf.geometry.area
+            sliver_count = int((areas < min_area_m2).sum())
+        except Exception:
+            sliver_count = 0
+
+    evidence_parts = [f"{n} 个要素"]
+    if invalid_count:
+        evidence_parts.append(f"{invalid_count} 个无效几何")
+    if sliver_count:
+        evidence_parts.append(f"{sliver_count} 个碎屑(<{min_area_m2}m²)")
+
+    if invalid_count > 0:
+        return {
+            "ok": False, "size_bytes": base["size_bytes"],
+            "feature_count": n, "invalid_geom_count": invalid_count,
+            "sliver_count": sliver_count, "deep_checked": True,
+            "reason": f"{invalid_count} 个几何无效 (自相交/无效环)",
+            "evidence": "; ".join(evidence_parts),
+        }
+
+    return {
+        "ok": True, "size_bytes": base["size_bytes"],
+        "feature_count": n, "invalid_geom_count": 0,
+        "sliver_count": sliver_count, "deep_checked": True,
+        "evidence": "; ".join(evidence_parts),
+    }

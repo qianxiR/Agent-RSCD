@@ -46,7 +46,10 @@ from langchain_core.messages import (
 )
 
 from backend.config import settings
-from backend.model.llm_client import create_llm, create_llm_with_tools
+from backend.model.llm_client import (
+    create_responses_llm,
+    create_responses_llm_with_tools,
+)
 from backend.model.tools.tool_registry import (
     get_tools_for_llm, get_tool_by_name, get_tool_category_map,
 )
@@ -92,7 +95,7 @@ logger = logging.getLogger(__name__)
 class ToolChatRequest(BaseModel):
     """聊天请求模型"""
     prompt: str
-    model: str = settings.dashscope_model
+    model: str = settings.chat_model
     temperature: float = settings.default_temperature
     stream: bool = True
     conversation_id: Optional[str] = None
@@ -296,6 +299,144 @@ def _summarize_task_output(tool_result: dict) -> dict:
         except ImportError:
             pass
     return summary
+
+
+def _extract_resource_usage(tool_result: dict, elapsed_ms) -> Optional[Dict[str, Any]]:
+    """
+    从工具结果提取资源消耗 (性能耗时), 供 ai_task.resource_jsonb 成本采集。
+    入参:
+      - tool_result: 工具返回 dict (可能含 performance 字段)。
+      - elapsed_ms: chat_service 墙钟计时 (毫秒)。
+    方法:
+      - 优先用 tool_result.performance (模型层埋点, 如 run_segment/run_change_detection)。
+      - 补充 elapsed_ms 作为 wall_clock_ms (含 IO/序列化, 通常大于 inference_seconds)。
+      - 无 performance 时仅返回 wall_clock_ms。
+    出参:
+      - {wall_clock_ms, inference_seconds?, total_seconds?} 或 None。
+    """
+    if not isinstance(tool_result, dict):
+        return None
+    resource = {"wall_clock_ms": int(elapsed_ms) if elapsed_ms else None}
+    perf = tool_result.get("performance")
+    if isinstance(perf, dict):
+        for k in ("inference_seconds", "total_seconds", "model_ready_seconds", "postprocess_seconds"):
+            if k in perf:
+                resource[k] = perf[k]
+    # 至少有 wall_clock_ms 才返回
+    return resource if resource.get("wall_clock_ms") is not None else None
+
+
+def _register_tool_artifacts(
+    tool_name: str,
+    tool_result: dict,
+    task_id,
+    conversation_id: str,
+) -> None:
+    """
+    从工具结果提取产物并登记到 artifact 表, 建立产物→任务→会话血缘。
+    入参:
+      - tool_name: 工具名, 用于推断 artifact_type。
+      - tool_result: 工具返回 dict (含 data / artifacts)。
+      - task_id: ai_task 主键 (可为 None, 此时登记为无任务关联产物)。
+      - conversation_id: 当前会话 ID。
+    方法:
+      - 优先消费 tool_result["artifacts"] 结构化清单 (S5 新增字段)。
+      - 回退到 extract_artifact_path 从 data 抽取单一主产物路径。
+      - 按 tool_name 推断 artifact_type (segment/detect_change/report 等)。
+      - 登记失败只 warning, 不影响主流程 (与 pattern_tracker 降级风格一致)。
+    出参: 无 (副作用: 写入 artifact 表)。
+    """
+    if not isinstance(tool_result, dict):
+        return
+    try:
+        # 产物类型推断: tool_name → artifact_type
+        _type_map = {
+            "segment_image": "segment_mask",
+            "detect_change": "change_mask",
+            "generate_monitor_report": "report_pdf",
+            "export_change_vector": "change_vector",
+        }
+        # 收集待登记产物: 优先结构化清单, 回退到单一路径抽取
+        items = []
+        explicit = tool_result.get("artifacts")
+        if isinstance(explicit, list):
+            for art in explicit:
+                if isinstance(art, dict) and art.get("path"):
+                    items.append(art)
+        if not items:
+            data = tool_result.get("data")
+            try:
+                from backend.model.tools._result import extract_artifact_path
+                path = extract_artifact_path(data) if isinstance(data, dict) else None
+            except ImportError:
+                path = None
+            if path:
+                items.append({"path": path})
+        if not items:
+            return
+        base_type = _type_map.get(tool_name, "overlay_png")
+        for item in items[:8]:  # 上限防异常大批量
+            agent_db.register_artifact(
+                conversation_id=conversation_id,
+                artifact_type=item.get("artifact_type") or base_type,
+                storage_uri=item["path"],
+                task_id=task_id,
+                name=item.get("name"),
+                fmt=item.get("format"),
+                crs=item.get("crs"),
+            )
+    except Exception as e:
+        logger.warning(f"[Artifact] 登记产物失败 (非阻塞) [tool={tool_name}]: {e}")
+
+
+def _maybe_block_repeat_failure(
+    tool_name: str,
+    tool_args: dict,
+    tool_result: dict,
+    turn_failures: list,
+    all_messages: list,
+) -> None:
+    """
+    防机械重复失败: 工具失败后计算失败签名, 同签名重复出现则追加 SystemMessage 强制 replan。
+    入参:
+      - tool_name/tool_args: 本次调用的工具与参数。
+      - tool_result: 工具返回 (含 agent_validation)。
+      - turn_failures: 本轮 ReAct 循环的失败签名累积列表 (原位修改)。
+      - all_messages: 消息列表 (拦截时原位追加 SystemMessage)。
+    方法:
+      - 只在 error / 验证 failed|warning 时触发, passed 不计入。
+      - 用 retry_guard 计算签名, 查 turn_failures 是否已存在同签名。
+      - 首次失败: 记录签名, 不拦截 (允许一次修复尝试)。
+      - 同签名重复: 追加 SystemMessage 强制 replan 或请求用户输入, 避免无限重试。
+    出参: 无 (副作用: 追加 turn_failures / all_messages)。
+    """
+    if not isinstance(tool_result, dict):
+        return
+    # 判定是否为失败: error 或验证 failed/warning
+    is_error = tool_result.get("type") == "error"
+    validation = tool_result.get("agent_validation") if isinstance(tool_result.get("agent_validation"), dict) else {}
+    val_status = validation.get("status")
+    if not is_error and val_status not in {"failed", "warning"}:
+        return  # 成功路径不计入
+    try:
+        from backend.agent.runtime.retry_guard import build_retry_signature
+        failure_type = validation.get("repair_plan", {}).get("failure_type") or (
+            "tool_error" if is_error else "validation_failed"
+        )
+        err_msg = tool_result.get("msg") or validation.get("reason") or ""
+        signature = build_retry_signature(tool_name, tool_args, failure_type, err_msg)
+        if signature in turn_failures:
+            # 同签名已出现过 → 拦截, 强制 replan 或请求用户输入
+            all_messages.append(SystemMessage(content=(
+                f"防重复失败拦截: 工具 {tool_name} 以相同参数和相同失败原因 (signature={signature}) "
+                "已经失败过。禁止再用相同参数重试。必须换工具、换参数, 或向用户请求新的有效输入, "
+                "或调整任务计划。不要复述失败原因, 直接给出新的可行方案。"
+            )))
+            logger.info(f"[RetryGuard] 拦截重复失败 tool={tool_name} signature={signature}")
+        else:
+            turn_failures.append(signature)
+    except Exception as e:
+        logger.warning(f"[RetryGuard] 防重复失败检查异常 (非阻塞): {e}")
 
 
 def _is_report_download_request(prompt: str) -> bool:
@@ -886,8 +1027,8 @@ class AgentChatService:
         try:
             # 获取工具并绑定 LLM
             tools = get_tools_for_llm()
-            llm = create_llm_with_tools(tools, req.model, req.temperature)
-            llm_without_tools = create_llm(req.model, req.temperature)
+            llm = create_responses_llm_with_tools(tools, req.model, req.temperature)
+            llm_without_tools = create_responses_llm(req.model, req.temperature)
             disable_tools_next_turn = False
             pending_repair_audit = None
             pending_repair_attempt = None
@@ -899,6 +1040,9 @@ class AgentChatService:
             )
             # ★ 本轮聊天图片收集: chat_image action 产生的图片, 待最终回复落库时挂到最后一条 assistant 消息
             _turn_images = []
+            # ★ 工程化 A1: 本轮失败签名累积 (retry_guard 防机械重复)
+            #   累积本轮 ReAct 循环中的失败签名, 同签名重复出现即拦截强制 replan。
+            _turn_failures = []
             uploaded_images = _normalize_chat_images(req.images)
             selected_layer_images = await _download_selected_layers_for_chat(
                 req.selected_layers,
@@ -1257,11 +1401,19 @@ class AgentChatService:
                             )
                         else:
                             _out_summary = _summarize_task_output(tool_result)
+                            # ★ 工程化 A4: 提取 performance 到 resource_jsonb (成本采集)
+                            _resource = _extract_resource_usage(tool_result, _elapsed_ms)
                             agent_db.update_task(
-                                _task_id, status="done", progress=100, output=_out_summary,
+                                _task_id, status="done", progress=100,
+                                output=_out_summary, resource_usage=_resource,
                             )
                             agent_db.append_task_log(
                                 _task_id, f"工具执行完成", level="info", elapsed_ms=_elapsed_ms,
+                            )
+                            # ★ 工程化: 重工具成功后登记产物到 artifact 表, 建立血缘
+                            #   失败只 warning 不阻塞主流程; task_id 有效才登记 (挂任务血缘)
+                            _register_tool_artifacts(
+                                tool_name, tool_result, _task_id, conversation_id
                             )
 
                     # ★ 重复操作偏好识别: 工具成功执行后, 同步记录到内存计数器 (O(1), 不阻塞)
@@ -1375,6 +1527,13 @@ class AgentChatService:
                     repair_followup = build_repair_followup_system_message(tool_result)
                     if repair_followup:
                         all_messages.append(repair_followup)
+                    # ★ 工程化 A1: 防机械重复失败 (激活 retry_guard, 原为死代码)
+                    #   工具失败或验证失败后, 计算失败签名查本轮历史; 同签名已出现过则拦截。
+                    #   只累积 error/failed/warning, passed 不计入; 拦截后强制 replan 或请求用户输入。
+                    _maybe_block_repeat_failure(
+                        tool_name, tool_args, tool_result,
+                        _turn_failures, all_messages,
+                    )
                     disable_tools_next_turn = should_disable_tools_for_next_repair_turn(tool_result)
                     validation = tool_result.get("agent_validation") if isinstance(tool_result, dict) else None
                     if isinstance(validation, dict) and validation.get("status") in {"failed", "warning"}:

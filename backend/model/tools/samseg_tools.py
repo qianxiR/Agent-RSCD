@@ -586,6 +586,16 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
         return {"type": "error",
                 "msg": f"无法变化检测：T2 影像无地理坐标(CRS)，系统仅接受带坐标的遥感影像(GeoTIFF/COG)。({reason_t2})"}
 
+    # ★ 工程化 S10: 双时相空间一致性前置门 (CRS/分辨率/范围重叠校验)
+    #   仅产生 warning, 不阻塞执行 (保留 LLM 决策权); 结果写入 data 供 verification 消费。
+    try:
+        from backend.model.tools._verification import verify_spatial_consistency
+        spatial_check = verify_spatial_consistency(t1_path, t2_path)
+    except Exception as _se:
+        spatial_check = {"ok": True, "deep_checked": False,
+                         "evidence": f"空间一致性校验跳过: {_se}"}
+    spatial_warnings = spatial_check.get("warnings") or [] if spatial_check.get("deep_checked") else []
+
     try:
         out_dir = _ensure_output_dir()
         cls_tag = _classes_tag(classes)
@@ -631,7 +641,11 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
 
         # 业务类型判读必须在本地确定性完成，避免外部 VLM 网络请求阻塞检测任务终态。
         present_classes = [item.get("name", "") for item in stats.get("per_class", [])]
-        change_type_info = runner.classify_change_type_by_rule(present_classes, stats)
+        # ★ S7: 把类别转移矩阵传入规则判读, 让业务事件带 from→to 面积支撑
+        transition = result.get("transition")
+        change_type_info = runner.classify_change_type_by_rule(
+            present_classes, stats, transition=transition
+        )
         change_type_info["source"] = "rule"
 
         # ★ 构建详细摘要供 LLM 综合描述
@@ -709,6 +723,12 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             f"请根据以上统计对变化检测结果进行综合描述，"
             f"重点说明变化业务类型及依据、哪些地物类型变化最显著、变化区域的面积占比等。"
         )
+        # ★ S10: 空间一致性 warning 注入 summary (让 LLM 看到双时相质量问题)
+        if spatial_warnings:
+            summary = (
+                "⚠️ 双时相空间一致性预警 (结果可能受影响, 请关注):\n  - "
+                + "\n  - ".join(spatial_warnings) + "\n\n" + summary
+            )
 
         # ★ 工作区布局: T1 原图层 (底图) + 变化面 (GeoServer WMS) + 边缘线 (矢量描边)
         #   面 SHP 与边缘线 SHP 颜色统一为 #2C6FBD (GeoAI Copilot 标题色)。
@@ -760,6 +780,8 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 "classes": cls_desc,
                 "elapsed": round(elapsed, 1),
                 "stats": stats,
+                "transition": transition,
+                "spatial_consistency": spatial_check,
                 "vector_stats": vector_stats,
                 "vector_path": vector_path,
                 "vector_url": vector_url,
@@ -891,7 +913,7 @@ def understand_image(image_path: str, question: str = "请描述这张影像中�
       - 识别地物类型、空间分布、色调纹理、区域用途等
       - 任何需要"看懂"影像内容而非"按类别画掩膜"的问题
     ★ 不适用场景: 明确要求分割/提取/标注地物 → 用 segment_image; 双时相变化对比 → 用 detect_change。
-    ★ 实现: 内部调用 qwen 视觉多模态模型 (settings.vision_model), 把图片以 base64 形式喂给模型,
+    ★ 实现: 内部调用 Responses API 视觉多模态模型 (settings.vision_model), 把图片以 base64 形式喂给模型,
       返回模型对 question 的视觉理解文本。
     ★ 耗时: 通常 5~30 秒 (取决于图片大小和问题复杂度)。
 
@@ -909,7 +931,7 @@ def understand_image(image_path: str, question: str = "请描述这张影像中�
         return {"type": "error", "msg": f"图片无法读取或过大 (>{_VISION_MAX_IMAGE_BYTES//1024//1024}MB): {image_path}"}
 
     # 延迟导入避免循环依赖 (llm_client ↔ tools 链路)
-    from backend.model.llm_client import create_llm
+    from backend.model.llm_client import create_llm, response_text
     from langchain_core.messages import HumanMessage
 
     # 视觉理解系统指令: 引导模型以遥感解译分析师的视角回答
@@ -933,8 +955,7 @@ def understand_image(image_path: str, question: str = "请描述这张影像中�
     logger.info(f"[Vision] understand_image 调用: img={Path(image_path).name} question={question[:40]}")
     try:
         resp = vision_llm.invoke(messages)
-        answer = resp.content if hasattr(resp, "content") else str(resp)
-        answer = answer.strip()
+        answer = response_text(resp)
         logger.info(f"[Vision] understand_image 完成, 回复长度={len(answer)}")
         return {
             "type": "success",

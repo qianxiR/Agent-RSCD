@@ -64,3 +64,37 @@ def build_tools_catalog() -> str:
         blocks.append("\n".join(lines))
 
     return "\n\n".join(blocks)
+
+
+def build_decision_table() -> str:
+    """
+    入参:
+      - 无显式入参, 从 tool_decision_rules.DECISION_RULES 规则源读取。
+    方法:
+      - 遍历规则源, 生成 MANDATORY 任务→工具决策表 (Markdown)。
+      - 表头: 任务类型 / 必用工具 / 禁用主工具 / 关键约束。
+      - required_tools 为空时显示 "—" (如报告下载由系统自动取回)。
+    出参:
+      - str, 可直接拼入 system prompt 的决策表段。
+    约束:
+      - 表内工具名合法性由 validate_rules() + 单元测试守护;
+        本函数不做二次校验, 保持纯生成职责。
+    设计对标:
+      DataFlow Construction Skill 的 MANDATORY 决策表 ——
+      把工具选择从"自由组合"收窄为"按任务类型查表"。
+    """
+    from backend.agent.prompt.tool_decision_rules import DECISION_RULES
+
+    header = (
+        "| 任务类型 | 必用工具 | 禁用主工具 | 关键约束 |\n"
+        "|---|---|---|---|"
+    )
+    rows = []
+    for rule in DECISION_RULES:
+        required = ", ".join(rule.get("required_tools") or []) or "—"
+        forbidden = ", ".join(rule.get("forbidden_tools") or []) or "—"
+        constraint = rule.get("key_constraint") or ""
+        rows.append(
+            f"| {rule['task_pattern']} | {required} | {forbidden} | {constraint} |"
+        )
+    return header + "\n" + "\n".join(rows)

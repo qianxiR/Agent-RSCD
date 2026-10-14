@@ -22,8 +22,8 @@ from backend.model.tools.vector_tools import rasterize_vector_to_png
 ARTIFACT_DIR = ROOT / "tests" / "artifacts" / "e2e_geoserver_report"
 METRICS_PATH = ROOT / "tests" / "artifacts" / "e2e_geoserver_report_metrics.json"
 
-SEG_LAYER = "9ff53e2a__seg_s47d"
-EDGE_LAYER = "9ff53e2a__seg_s47d_edge"
+SEG_LAYER = "auto_seg__seg_elwj"
+EDGE_LAYER = "auto_seg__seg_8359_edge"
 
 
 def _assert_true(condition: bool, label: str) -> None:

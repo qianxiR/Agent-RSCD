@@ -1,17 +1,58 @@
 // ==================== REST 服务层 ====================
 // ★ 对应原生散落在各文件的 fetch 调用，统一收敛
 //   开发期走 Vite proxy（相对路径），生产期前后端同源，路径不变
+//   双服务分流：auth/projects/workspace/conversations/tasks 由 Vite proxy / nginx 转发 Java (8081)
 
 const DEFAULT_USER = 'study_user'
 
+// ==================== 认证状态 (Java 业务服务签发的 JWT) ====================
+// ★ 一阶段 (security.mode=off) 登录仅打通 token 链路；数据查询的 user_id
+//   仍用 DEFAULT_USER 保持连续性，权限语义切换在 enforce 阶段引入。
+const TOKEN_KEY = 'rsiis_token'
+const USER_KEY = 'rsiis_user'
+
+export function getAuthToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function getAuthUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY)) || null
+  } catch {
+    return null
+  }
+}
+
+export function logout() {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+}
+
+// 入参: username, password
+// 方法: 调 Java /api/v1/auth/login，成功则持久化 token 与用户信息
+// 出参: 后端响应 { status, token?, user_id?, username?, role?, msg? }
+export async function login(username, password) {
+  const data = await request('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+  if (data.status === 'success') {
+    localStorage.setItem(TOKEN_KEY, data.token)
+    localStorage.setItem(USER_KEY, JSON.stringify({
+      user_id: data.user_id, username: data.username, role: data.role,
+    }))
+  }
+  return data
+}
+
 // 入参: url, options(fetch 配置)
-// 方法: 统一 fetch 封装，非 2xx 抛错
+// 方法: 统一 fetch 封装，非 2xx 抛错；已登录时自动附带 Bearer token
 // 出参: 解析后的 JSON
 async function request(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
+  const headers = { 'Content-Type': 'application/json' }
+  const token = getAuthToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(url, { headers, ...options })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${url}`)
   }
@@ -75,6 +116,38 @@ export function patchProject(projectId, body) {
 // 删除项目（组内会话自动回未分组）
 export function deleteProject(projectId) {
   return request(`/api/v1/projects/${projectId}`, { method: 'DELETE' })
+}
+
+// ==================== 技能库 / MCP 管理 (Python AI 服务直达) ====================
+
+// 拉取标准技能清单
+// 出参: { status, count, skills: [{name, title, keywords, version, contract_valid, required_inputs}] }
+export function getSkills() {
+  return request('/api/v1/skills')
+}
+
+// 拉取 MCP 服务器配置列表
+export function getMcpServers() {
+  return request('/api/v1/mcp/servers')
+}
+
+// 新增 MCP 服务器
+// body: { name, transport: 'sse'|'stdio', url?, command?, description? }
+export function addMcpServer(body) {
+  return request('/api/v1/mcp/servers', { method: 'POST', body: JSON.stringify(body) })
+}
+
+// 切换 MCP 服务器启用状态
+export function toggleMcpServer(serverId, enabled) {
+  return request(`/api/v1/mcp/servers/${serverId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+// 删除 MCP 服务器
+export function deleteMcpServer(serverId) {
+  return request(`/api/v1/mcp/servers/${serverId}`, { method: 'DELETE' })
 }
 
 // ==================== GeoServer 图层管理 ====================

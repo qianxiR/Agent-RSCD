@@ -9,6 +9,7 @@ import { useResize } from '@/composables/useResize'
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue'
 import MapPanel from '@/components/map/MapPanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
+import LoginDialog from '@/components/auth/LoginDialog.vue'
 
 const store = useConversationStore()
 const { wsStatus, sessionId } = storeToRefs(store)
@@ -46,6 +47,7 @@ function startResize(which, ev) {
         <span class="header-accent">国土智察</span> 自然资源遥感智能监测系统
       </h1>
       <div class="header-status">
+        <LoginDialog />
         <span class="status-dot" :class="wsStatus"></span>
         <span v-if="sessionId" class="session-id">{{ sessionId.slice(0, 8) }}…</span>
       </div>

@@ -3,6 +3,7 @@
 from typing import Any, Dict, List
 
 from backend.agent.memory.task_state import append_plan_step
+from backend.agent.runtime.task_spec import build_task_spec
 from backend.model.skills.selector import validate_skill_contract
 
 
@@ -20,6 +21,8 @@ def apply_skill_selection_to_plan(
       - 再次执行契约质量门, 防止调用边界传入伪造契约。
       - 将每个技能步骤追加为 pending 必需步骤, 不在此处执行任何工具。
       - 同一 plan 只应用一次同名同版本技能。
+      - ★ 工程化 A5: 从 plan.goal + context_inputs + selection 提炼结构化 task_spec,
+        存入 plan.task_spec, 供 completion_gate / verification 共享统一语义输入。
     出参:
       - 新增步骤列表; 无选择、非法或重复时为空。
     """
@@ -52,4 +55,11 @@ def apply_skill_selection_to_plan(
     plan["selected_skill"] = skill_identity
     plan["skill_fallback_rule"] = contract["fallback_rule"]
     plan["skill_verification_rules"] = contract["verification_rules"]
+    # ★ 工程化 A5: 提炼结构化任务规格 (纯规则, 零 LLM), 存入 plan 供后续策略消费
+    plan["task_spec"] = build_task_spec(
+        goal=plan.get("goal") or "",
+        context_inputs=inputs,
+        selection=selection,
+        conversation_id=plan.get("conversation_id") or "",
+    )
     return added

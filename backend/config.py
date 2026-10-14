@@ -17,6 +17,7 @@ _os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import os
 import logging
+import tomllib
 from pathlib import Path
 from dataclasses import dataclass, field
 
@@ -42,27 +43,64 @@ def _env_list(key: str, default: list) -> list:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
+def _responses_api_config() -> tuple[str, str]:
+    """
+    入参: 无。
+    方法: 优先读取 RESPONSES_API_KEY/RESPONSES_BASE_URL，其次读取 OPENAI 对应环境变量，最后复用当前 Codex Responses provider 配置。
+    出参: (api_key, base_url)；缺失凭据时保留空字符串，由调用端在真实请求时报告配置错误。
+    """
+    api_key = os.environ.get("RESPONSES_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+    base_url = os.environ.get("RESPONSES_BASE_URL", "") or os.environ.get("OPENAI_BASE_URL", "")
+    config_path = Path.home() / ".codex" / "config.toml"
+    if api_key and base_url or not config_path.is_file():
+        return api_key, base_url
+    with config_path.open("rb") as stream:
+        config = tomllib.load(stream)
+    provider_name = str(config.get("model_provider", "")).strip()
+    providers = config.get("model_providers", {})
+    provider = providers.get(provider_name, {}) if isinstance(providers, dict) else {}
+    if not isinstance(provider, dict) or provider.get("wire_api") != "responses":
+        return api_key, base_url
+    return (
+        api_key or str(provider.get("experimental_bearer_token", "")).strip(),
+        base_url or str(provider.get("base_url", "")).strip(),
+    )
+
+
 @dataclass
 class Settings:
     # ==================== 服务端口 ====================
     agent_service_port: int = 8020
 
-    # ==================== DashScope / Qwen LLM 配置 ====================
+    # ==================== LLM 配置 ====================
     dashscope_api_key: str = field(default_factory=lambda: _env("DASHSCOPE_API_KEY", ""))
     dashscope_base_url: str = field(default_factory=lambda: _env(
         "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
     ))
-    # ★ 2026-06 主对话改用 qwen3.7-plus (额度全新 1,000,000, 到期 2026/09/01,
-    #   比 qwen3.6-plus-2026-04-02 余量更足、到期更晚). 走 DashScope 兼容 OpenAI 协议.
-    dashscope_model: str = "qwen3.7-plus"
-    # ★ 视觉理解工具 (understand_image) 专用模型: qwen3.7-plus 本身是多模态视觉模型,
-    #   直接复用主对话模型即可; 独立字段方便将来切换专用 vl 模型 (如 qwen-vl-plus).
-    vision_model: str = "qwen3.7-plus"
+    # ==================== GLM (智谱, 2026-10 主线) ====================
+    # OpenAI 兼容端点; key 默认值取自 rscd-atlas 项目 (scripts/glm-lib.mjs)。
+    # Responses 凭据缺失时 llm_client 优先路由到此, GLM_API_KEY 环境变量可覆盖。
+    glm_api_key: str = field(default_factory=lambda: _env(
+        "GLM_API_KEY", "fb4aba69dc8b40f7aeb98e64812bac93.ERswqsj03PLLcZKt"))
+    glm_base_url: str = field(default_factory=lambda: _env(
+        "GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"))
+    responses_api_key: str = field(default_factory=lambda: _responses_api_config()[0])
+    responses_base_url: str = field(default_factory=lambda: _responses_api_config()[1])
+    # ★ 模型字段按「端点-场景」分设 (llm_client._llm_endpoint 路由):
+    #   Responses API (凭据齐全时优先) 用 responses_model;
+    #   GLM 智谱端点 (当前主线) 用 chat_model / vision_model /
+    #   summary_model / long_term_memory_model — 统一 GLM-5.3-Flash
+    #   (文本/工具调用/视觉多模态已验证支持)。
+    responses_model: str = field(default_factory=lambda: _env("RESPONSES_MODEL", "gpt-5.4-mini"))
+    chat_model: str = field(default_factory=lambda: _env("CHAT_MODEL", "GLM-5.3-Flash"))
+    # DashScope 回退模型 (llm_client._llm_endpoint 最后回退时使用)
+    dashscope_model: str = field(default_factory=lambda: _env("DASHSCOPE_MODEL", "qwen3.7-plus"))
+    vision_model: str = field(default_factory=lambda: _env(
+        "VISION_MODEL", "GLM-5.3-Flash"))
 
     # ==================== 百炼可用模型清单 (免费额度, 2026-06 整理) ====================
     # 备选模型字典: {模型名: (适用场景, 免费额度上限, 额度到期日)}
-    # 仅用于查阅/切换参考, 不参与运行时逻辑. 切换模型时改 dashscope_model /
-    # summary_model / long_term_memory_model 对应字段即可.
+    # 仅用于查阅/切换参考，不参与运行时逻辑。
     # 注: 各模型免费额度独立计费, 互不占用; "免费额度用完即停" 未开启计费保护,
     #     超额会按量付费, 切换前留意各模型剩余额度.
     available_models: dict = field(default_factory=lambda: {
@@ -86,18 +124,29 @@ class Settings:
     default_temperature: float = 0.7
     max_tokens: int = 4096
 
+    # ==================== LLM 调用分类重试 (chat_service P0-1) ====================
+    # 单次 LLM 调用失败按错误类别重试: token_exceed 强制压缩历史 / rate_limit 退避 /
+    # 其余立即重试; llm_retry_max 为同一 iteration 内的重试上限。
+    llm_retry_max: int = field(default_factory=lambda: int(_env("LLM_RETRY_MAX", "3")))
+    # 限流 (429) 退避秒数
+    llm_retry_rate_limit_sleep: float = field(default_factory=lambda: float(
+        _env("LLM_RETRY_RATE_LIMIT_SLEEP", "5.0")))
+    # 强制压缩达标线: 压缩后 token 须低于压缩前 * 该比例, 否则视为压缩失败
+    llm_force_compress_target_ratio: float = field(default_factory=lambda: float(
+        _env("LLM_FORCE_COMPRESS_TARGET_RATIO", "0.85")))
+
     # ==================== 上下文管理 ====================
     # trim_messages 上限 (token), 给工具结果与回复预留余量
     # ★ 2026-06 调整: system prompt 加入动态工具目录+CoT思维链后膨胀到约 3700 token,
     #   原 6000 上限留给历史/工具结果的余量太窄 (尤其 query_and_render_table 等工具
     #   返回大表格时), 会触发 trim 误删当前 HumanMessage 的边界 bug.
-    #   qwen3.7-plus 上下文窗口 128K, 16000 是兼顾成本和稳定性的保守值.
+    #   gpt-5.4-mini 的上下文窗口由 provider 决定，16000 是兼顾成本和稳定性的保守值.
     context_max_tokens: int = 16000
 
     # ==================== 上下文缓存 (Context Cache) ====================
     # 显式缓存开关; 开启时 system prompt 拆分为带 cache_control 标记的内容块,
     # 跨轮稳定的固定部分 (角色+工具目录+快捷映射+CoT+回复规则) 命中后按 10% 计费.
-    # 关闭时退回纯字符串 system prompt (DashScope 隐式缓存仍自动生效, 命中按 20%).
+    # 关闭时退回纯字符串 system prompt, 由 Responses API provider 负责缓存策略.
     enable_context_cache: bool = field(
         default_factory=lambda: _env("ENABLE_CONTEXT_CACHE", "true").lower() == "true"
     )
@@ -110,8 +159,8 @@ class Settings:
     # 历史累计 token 超过此阈值时, 触发对旧消息的 LLM 摘要
     # 设为 0 可禁用摘要; 默认 8000 配合 context_max_tokens=16000, 保留一半近期消息不摘要
     summarize_threshold: int = 8000
-    # 摘要调用用的模型 (用免费/便宜模型降本, deepseek-v4-flash 走百炼免费额度)
-    summary_model: str = "deepseek-v4-flash"
+    # 摘要/长期记忆统一 GLM-5.3-Flash (flash 档轻量快速)
+    summary_model: str = field(default_factory=lambda: _env("SUMMARY_MODEL", "GLM-5.3-Flash"))
     # 单次摘要的目标长度上限 (token), 控制摘要体积
     summary_max_tokens: int = 300
 
@@ -136,8 +185,9 @@ class Settings:
     enable_preference_extraction: bool = field(
         default_factory=lambda: _env("ENABLE_PREFERENCE_EXTRACTION", "true").lower() == "true"
     )
-    # 收尾时自动提取用户偏好/关键事实的模型 (同样用免费/便宜模型)
-    long_term_memory_model: str = "deepseek-v4-flash"
+    # 收尾时自动提取用户偏好/关键事实的模型
+    long_term_memory_model: str = field(default_factory=lambda: _env(
+        "LONG_TERM_MEMORY_MODEL", "GLM-5.3-Flash"))
     # 单轮最多提取的记忆条数 (避免 LLM 一次吐太多噪声)
     long_term_memory_max_items: int = 5
 
@@ -161,6 +211,12 @@ class Settings:
     agent_db_name: str = field(default_factory=lambda: _env("AGENT_DB_NAME", "Agent_study"))
     agent_db_user: str = field(default_factory=lambda: _env("AGENT_DB_USER", "postgres"))
     agent_db_password: str = field(default_factory=lambda: _env("AGENT_DB_PASSWORD", "001117"))
+
+    # ==================== Java 业务服务对接 ====================
+    # /internal/* 内部接口静态令牌 (供 Java 业务服务代理调用), 需与 Java 侧
+    # app.internal-token 保持一致; 仅本机/内网可达, 不经 nginx 对外暴露。
+    internal_api_token: str = field(default_factory=lambda: _env(
+        "INTERNAL_API_TOKEN", "rsiis-dev-internal-token"))
 
     # ==================== GeoServer 配置 ====================
     # ★ 用 127.0.0.1 而非 localhost: 后端 requests/httpx 解析 localhost 时,
