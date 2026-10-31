@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>国土智察 · 核心工作台 UI 原型</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --panel:#fff; --panel-2:#fafbfc;
+    --line:#e3e7ec; --line-strong:#cbd2da;
+    --ink:#1d2b3a; --ink-2:#5b7288; --ink-3:#91a5b7;
+    --blue:#2c6fbd; --blue-soft:#eaf2fb;
+    --green:#2f9e56; --amber:#c77c0a; --red:#c94a4a; --purple:#5b55c9;
+    --r:8px; --shadow:0 8px 24px rgba(20,40,70,.06);
+    --mono:"Cascadia Code","SF Mono",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{height:100vh;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.55 var(--sans)}
+  button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  .app{display:grid;grid-template-rows:56px 1fr;height:100vh}
+
+  /* ---------- top bar ---------- */
+  .top{display:flex;align-items:center;gap:16px;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--line);z-index:20}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;white-space:nowrap}
+  .brand .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#2c6fbd,#5b9ad8);color:#fff;display:grid;place-items:center;font-size:12px;letter-spacing:.5px}
+  .brand small{font-weight:500;color:var(--ink-3);font-size:11px;margin-left:2px}
+  .project-switch{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);min-width:220px}
+  .project-switch .dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+  .project-switch b{font-size:13px;font-weight:600}
+  .project-switch span{color:var(--ink-3);font-size:11px}
+  .grow{flex:1}
+  .search{display:flex;align-items:center;gap:8px;width:320px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;color:var(--ink-3);background:var(--panel-2)}
+  .search kbd{margin-left:auto;font:11px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--ink-3);background:#fff}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .icon-btn{position:relative;width:32px;height:32px;border-radius:7px;display:grid;place-items:center;color:var(--ink-2)}
+  .icon-btn:hover{background:var(--bg)}
+  .badge{position:absolute;top:2px;right:2px;min-width:14px;height:14px;border-radius:99px;background:var(--red);color:#fff;font:10px/14px var(--sans);text-align:center;padding:0 3px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#e7eef8;color:var(--blue);display:grid;place-items:center;font-weight:700;font-size:12px}
+
+  /* ---------- shell ---------- */
+  .shell{display:grid;grid-template-columns:68px 1fr;min-height:0}
+  .rail{background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px}
+  .rail button{width:52px;height:52px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--ink-3);font-size:11px}
+  .rail button svg{width:19px;height:19px}
+  .rail button:hover{background:var(--bg);color:var(--ink-2)}
+  .rail button.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .rail .spacer{flex:1}
+  .main{min-width:0;min-height:0;overflow:auto;padding:20px 22px 28px}
+  .page-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}
+  .page-head h1{font-size:20px;letter-spacing:.2px}
+  .page-head p{color:var(--ink-3);font-size:12px;margin-top:3px}
+  .head-actions{margin-left:auto;display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink-2);font-size:12px}
+  .btn:hover{border-color:var(--line-strong);color:var(--ink)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.primary:hover{background:#2461a6}
+  .btn.soft{background:var(--blue-soft);border-color:transparent;color:var(--blue)}
+
+  /* ---------- cards / grid ---------- */
+  .grid{display:grid;gap:14px}
+  .kpis{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  .kpi{padding:14px 16px}
+  .kpi .label{color:var(--ink-3);font-size:12px}
+  .kpi .num{font-size:28px;font-weight:700;letter-spacing:.5px;margin:2px 0 4px}
+  .kpi .sub{color:var(--ink-3);font-size:11px}
+  .kpi .sub b{color:var(--green);font-weight:600}
+  .two-col{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-top:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .panel-head h3{font-size:13px;font-weight:600}
+  .panel-head .more{margin-left:auto;color:var(--ink-3);font-size:12px}
+  .panel-body{padding:6px 0}
+  .row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f3f5}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:var(--panel-2)}
+  .tag{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:99px;font-size:11px;white-space:nowrap}
+  .tag.blue{background:var(--blue-soft);color:var(--blue)}
+  .tag.green{background:#e9f6ee;color:var(--green)}
+  .tag.amber{background:#fdf3e1;color:var(--amber)}
+  .tag.red{background:#fbeaea;color:var(--red)}
+  .tag.gray{background:#f0f2f5;color:var(--ink-2)}
+  .muted{color:var(--ink-3);font-size:12px}
+  .mono{font-family:var(--mono);font-size:11px}
+  .progress{height:5px;background:#eef1f4;border-radius:99px;overflow:hidden;min-width:120px}
+  .progress i{display:block;height:100%;background:var(--blue);border-radius:99px}
+  .quick{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 14px}
+  .quick button{display:flex;align-items:center;gap:8px;padding:10px;border:1px dashed var(--line-strong);border-radius:8px;color:var(--ink-2);font-size:12px;background:var(--panel-2)}
+  .quick button:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-soft)}
+
+  /* ---------- data table ---------- */
+  .toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .chips{display:flex;gap:6px;padding:4px;background:#eef1f4;border-radius:8px}
+  .chips button{padding:5px 10px;border-radius:6px;color:var(--ink-2);font-size:12px}
+  .chips button.active{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .toolbar .grow{flex:1}
+  .table-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #f0f2f4;white-space:nowrap}
+  th{font-size:11px;color:var(--ink-3);font-weight:600;background:#fbfcfd}
+  tbody tr:hover{background:var(--panel-2)}
+  td.name{font-weight:600;color:var(--ink)}
+  .thumb{width:34px;height:26px;border-radius:5px;object-fit:cover;background:#dfe7ef;display:inline-block;vertical-align:middle;margin-right:8px}
+  .thumb.raster{background:linear-gradient(135deg,#5d7f58,#a6b98b 45%,#496d9c)}
+  .thumb.vector{background:linear-gradient(135deg,#dbe8fb,#8fb7e8);position:relative}
+  .thumb.vector::after{content:"";position:absolute;inset:5px;border:1.5px solid var(--blue);clip-path:polygon(8% 55%,32% 18%,80% 12%,95% 62%,52% 92%,18% 82%)}
+  .thumb.doc{background:linear-gradient(135deg,#f1e8d8,#d9c6a4)}
+
+  /* ---------- map ---------- */
+  .map-layout{display:grid;grid-template-columns:238px 1fr 300px;gap:12px;height:calc(100vh - 160px);min-height:520px}
+  .map-side{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:auto}
+  .side-title{display:flex;align-items:center;padding:11px 12px;border-bottom:1px solid var(--line);font-weight:600;font-size:12px}
+  .side-title .more{margin-left:auto;color:var(--ink-3)}
+  .layer-group{padding:8px 12px 4px;color:var(--ink-3);font-size:11px;letter-spacing:.4px}
+  .layer{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;color:var(--ink-2)}
+  .layer:hover{background:var(--panel-2)}
+  .layer .eye{width:14px;height:14px;border:1.5px solid var(--line-strong);border-radius:4px;display:grid;place-items:center;font-size:9px;color:#fff;background:#fff}
+  .layer.on .eye{background:var(--blue);border-color:var(--blue)}
+  .layer .swatch{width:10px;height:10px;border-radius:2px}
+  .map-stage{position:relative;background:#dce6df;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);min-height:480px}
+  .map-stage svg{position:absolute;inset:0;width:100%;height:100%}
+  .map-toolbar{position:absolute;top:10px;left:10px;display:flex;gap:4px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:3px;box-shadow:var(--shadow)}
+  .map-toolbar button{width:28px;height:28px;border-radius:5px;display:grid;place-items:center;color:var(--ink-2)}
+  .map-toolbar button:hover{background:var(--bg)}
+  .map-basemap{position:absolute;top:10px;right:10px;display:flex;gap:2px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:2px;font-size:11px}
+  .map-basemap span{padding:3px 7px;border-radius:4px;color:var(--ink-2)}
+  .map-basemap span.active{background:var(--blue);color:#fff}
+  .map-status{position:absolute;left:10px;bottom:10px;display:flex;gap:10px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:5px;padding:4px 8px;font:10px var(--mono);color:var(--ink-2)}
+  .legend{position:absolute;right:10px;bottom:10px;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:11px;box-shadow:var(--shadow)}
+  .legend div{display:flex;align-items:center;gap:6px;margin:3px 0;color:var(--ink-2)}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  /* ---------- jobs / results ---------- */
+  .job-layout{display:grid;grid-template-columns:1.25fr 1fr;gap:14px}
+  .job-card{padding:12px 14px;border-bottom:1px solid #f0f2f4}
+  .job-card:last-child{border-bottom:0}
+  .job-top{display:flex;align-items:center;gap:8px}
+  .job-title{font-weight:600;font-size:13px}
+  .job-meta{display:flex;align-items:center;gap:10px;margin-top:7px;color:var(--ink-3);font-size:11px}
+  .job-detail{padding:14px}
+  .kv{display:grid;grid-template-columns:86px 1fr;gap:8px 10px;font-size:12px}
+  .kv dt{color:var(--ink-3)}
+  .kv dd{color:var(--ink-2);word-break:break-all}
+  .log{background:#101a24;color:#b9c7d4;border-radius:6px;padding:10px;font:11px/1.7 var(--mono);max-height:220px;overflow:auto;margin-top:12px}
+  .log .ok{color:#77c98a}.log .warn{color:#e0b268}
+  .result-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .result-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  .result-thumb{height:132px;background:linear-gradient(135deg,#486b5a,#9bb08a 50%,#3c628f);position:relative}
+  .result-thumb.vector{background:linear-gradient(135deg,#e8f0fa,#b7cce6)}
+  .result-thumb.vector::after{content:"";position:absolute;inset:20px;border:1.5px solid var(--blue);clip-path:polygon(8% 55%,32% 18%,80% 12%,95% 62%,52% 92%,18% 82%)}
+  .result-thumb.report{background:linear-gradient(135deg,#efe9dd,#d8c7a8)}
+  .result-body{padding:11px 12px}
+  .result-body h4{font-size:13px;margin-bottom:4px}
+  .result-body .meta{display:flex;gap:8px;color:var(--ink-3);font-size:11px}
+  .result-foot{display:flex;gap:6px;padding:9px 12px;border-top:1px solid var(--line)}
+  .result-foot button{font-size:11px;color:var(--blue)}
+
+  /* ---------- copilot ---------- */
+  .copilot-fab{position:fixed;right:22px;bottom:22px;z-index:40;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:99px;background:#1f2d3b;color:#fff;box-shadow:0 10px 26px rgba(10,25,45,.28);font-size:12px}
+  .copilot-fab:hover{background:#16222e}
+  .copilot{position:fixed;right:0;top:56px;bottom:0;width:390px;background:#fff;border-left:1px solid var(--line);box-shadow:-10px 0 30px rgba(20,40,70,.10);z-index:35;display:none;flex-direction:column}
+  .copilot.open{display:flex}
+  .copilot-head{padding:13px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .copilot-head b{font-size:13px}
+  .copilot-head .close{margin-left:auto;color:var(--ink-3)}
+  .ctx{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid #f0f2f4;flex-wrap:wrap}
+  .ctx span{background:var(--blue-soft);color:var(--blue);border-radius:99px;padding:3px 8px;font-size:11px}
+  .copilot-body{flex:1;padding:14px;overflow:auto;background:var(--panel-2)}
+  .bubble{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px;color:var(--ink-2);margin-bottom:10px;max-width:92%}
+  .bubble.me{margin-left:auto;background:var(--blue);border-color:var(--blue);color:#fff}
+  .suggest{display:grid;gap:6px;margin-top:10px}
+  .suggest button{text-align:left;background:#fff;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12px;color:var(--ink-2)}
+  .suggest button:hover{border-color:var(--blue);color:var(--blue)}
+  .copilot-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+  .copilot-input input{flex:1;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:12px var(--sans);outline:none}
+  .copilot-input input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(44,111,189,.10)}
+  .view{display:none}.view.active{display:block}
+  @media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.two-col,.job-layout{grid-template-columns:1fr}.result-grid{grid-template-columns:repeat(2,1fr)}.map-layout{grid-template-columns:210px 1fr}.map-layout .map-side:last-child{display:none}}
+  @media(max-width:760px){.search,.project-switch small{display:none}.map-layout{grid-template-columns:1fr}.map-layout .map-side{display:none}.result-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="mark">国</div>国土智察<small>核心工作台</small></div>
+    <button class="project-switch" title="切换项目">
+      <span class="dot"></span><b>成都市变化监测</b><span>· 12 项资产</span>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="grow"></div>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      搜索项目、数据集、任务
+      <kbd>⌘K</kbd>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" title="任务中心">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+        <span class="badge">2</span>
+      </button>
+      <button class="icon-btn" title="帮助"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 1 1 4.2 2.7c-.8.4-1.3 1.1-1.3 2.3"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg></button>
+      <div class="avatar">管</div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" aria-label="主导航">
+      <button class="active" data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>项目</button>
+      <button data-view="data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据</button>
+      <button data-view="map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3Z"/><path d="M9 3v15M15 6v15"/></svg>地图</button>
+      <button data-view="jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3 7-7"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>任务</button>
+      <button data-view="results"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 15 5-5 4 4 3-3 6 6"/><circle cx="8.5" cy="8.5" r="1.3"/></svg>结果</button>
+      <button data-view="reports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>报告</button>
+      <div class="spacer"></div>
+      <button data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>设置</button>
+    </nav>
+
+    <main class="main">
+      <!-- ================= 项目总览 ================= -->
+      <section class="view active" id="view-dashboard">
+        <div class="page-head">
+          <div><h1>成都市变化监测</h1><p>项目总览 · 最近更新 2 分钟前 · 责任单位：自然资源监测中心</p></div>
+          <div class="head-actions">
+            <button class="btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 21h16"/></svg>上传数据</button>
+            <button class="btn primary" data-goto="jobs"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新建分析</button>
+          </div>
+        </div>
+
+        <div class="grid kpis">
+          <div class="card kpi"><div class="label">数据集</div><div class="num">12</div><div class="sub"><b>+3</b> 本月新增</div></div>
+          <div class="card kpi"><div class="label">已发布图层</div><div class="num">8</div><div class="sub">栅格 5 · 矢量 3</div></div>
+          <div class="card kpi"><div class="label">运行中任务</div><div class="num">2</div><div class="sub"><b>1</b> 个变化检测</div></div>
+          <div class="card kpi"><div class="label">产物</div><div class="num">36</div><div class="sub">最近 24h <b>+6</b></div></div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-head"><h3>最近任务</h3><button class="more">查看全部 →</button></div>
+            <div class="panel-body">
+              <div class="row">
+                <span class="tag blue">变化检测</span>
+                <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px">T1/T2 · 建筑+水</div><div class="muted">输入：2026-10 影像 / 2026-11 影像</div></div>
+                <div class="progress" style="width:120px"><i style="width:62%"></i></div>
+                <span class="muted">62%</span>
+                <button class="btn" style="padding:4px 8px">查看</button>
+              </div>
+              <div class="row">
+                <span class="tag green">语义分割</span>
+                <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px">2026-10 影像 · 建筑提取</div><div class="muted">19s · 86 区域 · 43.8%</div></div>
+                <span class="tag green">完成</span>
+                <button class="btn" style="padding:4px 8px">结果</button>
+              </div>
+              <div class="row">
+                <span class="tag gray">发布图层</span>
+                <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:12px">变化图斑 202611</div><div class="muted">GeoServer · samseg</div></div>
+                <span class="tag green">完成</span>
+                <button class="btn" style="padding:4px 8px">地图</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>快捷操作</h3></div>
+            <div class="quick">
+              <button data-goto="data">＋ 上传影像 / 矢量</button>
+              <button data-goto="map">🗺 打开地图工作台</button>
+              <button data-goto="jobs">◷ 新建变化检测</button>
+              <button data-goto="results">▤ 查看结果中心</button>
+            </div>
+            <div class="panel-head" style="border-top:1px solid var(--line)"><h3>项目资产</h3><button class="more">管理 →</button></div>
+            <div style="display:flex;gap:8px;padding:12px 14px">
+              <div class="thumb raster" style="width:86px;height:58px;border-radius:6px"></div>
+              <div class="thumb vector" style="width:86px;height:58px;border-radius:6px"></div>
+              <div class="thumb doc" style="width:86px;height:58px;border-radius:6px"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col" style="grid-template-columns:1fr 1fr">
+          <div class="panel">
+            <div class="panel-head"><h3>最近产物</h3><button class="more">结果中心 →</button></div>
+            <div class="panel-body">
+              <div class="row">
+                <span class="thumb raster" style="width:54px;height:38px;border-radius:5px"></span>
+                <div style="flex:1"><div style="font-weight:600;font-size:12px">变化检测叠加图</div><div class="muted">#128 · PNG · 2 分钟前</div></div>
+                <span class="tag blue">变化</span><button class="btn" style="padding:4px 8px">预览</button>
+              </div>
+              <div class="row">
+                <span class="thumb vector" style="width:54px;height:38px;border-radius:5px"></span>
+                <div style="flex:1"><div style="font-weight:600;font-size:12px">变化图斑 202611</div><div class="muted">#128 · GeoJSON · 24 要素</div></div>
+                <span class="tag green">已发布</span><button class="btn" style="padding:4px 8px">地图</button>
+              </div>
+              <div class="row">
+                <span class="thumb doc" style="width:54px;height:38px;border-radius:5px"></span>
+                <div style="flex:1"><div style="font-weight:600;font-size:12px">成都市变化监测报告</div><div class="muted">#124 · PDF · 昨天</div></div>
+                <span class="tag gray">报告</span><button class="btn" style="padding:4px 8px">打开</button>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>项目范围</h3><span class="muted">EPSG:4490 · 约 86 km²</span></div>
+            <div style="position:relative;height:196px;background:#dce6df;overflow:hidden">
+              <svg viewBox="0 0 600 200" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">
+                <rect width="600" height="200" fill="#dfe8d9"/>
+                <path d="M-20 150 C120 135 220 170 340 150 S520 125 640 145" fill="none" stroke="#7ea6c9" stroke-width="12" opacity=".7"/>
+                <path d="M60 30 190 20 210 80 80 95Z" fill="#b7c3b2" stroke="#9aa993"/>
+                <path d="M260 50 400 40 420 100 275 110Z" fill="#b7c3b2" stroke="#9aa993"/>
+                <path d="M450 30 560 25 575 85 460 92Z" fill="#b7c3b2" stroke="#9aa993"/>
+                <g fill="#c95a4e" opacity=".85"><path d="M120 105 190 100 198 140 128 146Z"/><path d="M300 105 370 100 378 142 306 148Z"/><path d="M450 110 520 105 528 145 456 150Z"/></g>
+                <g fill="#ffffff" opacity=".9" font-family="sans-serif" font-size="10"><text x="118" y="92">建筑区</text><text x="300" y="92">工业园</text><text x="450" y="96">河道</text></g>
+              </svg>
+              <div style="position:absolute;left:10px;bottom:8px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:5px;padding:3px 7px;font:10px var(--mono);color:var(--ink-2)">103.94–104.02E · 30.72–30.80N</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 数据中心 ================= -->
+      <section class="view" id="view-data">
+        <div class="page-head">
+          <div><h1>数据中心</h1><p>项目内所有影像、矢量、文档与表格；上传后自动解析 CRS / 范围 / 缩略图</p></div>
+          <div class="head-actions"><button class="btn">从 GeoServer 导入</button><button class="btn primary">＋ 上传数据</button></div>
+        </div>
+        <div class="toolbar">
+          <div class="chips"><button class="active">全部 12</button><button>影像 8</button><button>矢量 3</button><button>文档 1</button></div>
+          <div class="grow"></div>
+          <button class="btn">筛选</button><button class="btn">排序：最近更新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th style="width:34px"><input type="checkbox" /></th><th>名称</th><th>类型</th><th>CRS</th><th>范围</th><th>大小</th><th>来源</th><th>状态</th><th style="width:56px"></th></tr></thead>
+            <tbody>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb raster"></span>2026-10 影像</td><td><span class="tag gray">栅格</span></td><td class="mono">EPSG:4490</td><td class="mono">103.94–104.02E<br/>30.72–30.80N</td><td>153.9 KB</td><td>上传</td><td><span class="tag green">就绪</span></td><td>⋯</td></tr>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb raster"></span>2026-11 影像</td><td><span class="tag gray">栅格</span></td><td class="mono">EPSG:4490</td><td class="mono">103.94–104.02E<br/>30.72–30.80N</td><td>142.2 KB</td><td>上传</td><td><span class="tag green">就绪</span></td><td>⋯</td></tr>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb vector"></span>变化图斑 202611</td><td><span class="tag blue">矢量</span></td><td class="mono">EPSG:4490</td><td class="mono">103.96–103.97E<br/>30.95–30.97N</td><td>24 要素</td><td>分析产物</td><td><span class="tag green">已发布</span></td><td>⋯</td></tr>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb raster"></span>建筑分割掩膜</td><td><span class="tag gray">栅格</span></td><td class="mono">EPSG:4490</td><td class="mono">103.94–104.02E<br/>30.72–30.80N</td><td>8.4 MB</td><td>分析产物</td><td><span class="tag green">就绪</span></td><td>⋯</td></tr>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb doc"></span>项目技术方案.pdf</td><td><span class="tag gray">文档</span></td><td>—</td><td>—</td><td>2.1 MB</td><td>上传</td><td><span class="tag green">就绪</span></td><td>⋯</td></tr>
+              <tr><td><input type="checkbox" /></td><td class="name"><span class="thumb raster"></span>待处理影像</td><td><span class="tag gray">栅格</span></td><td>—</td><td>—</td><td>12.8 MB</td><td>上传</td><td><span class="tag amber">解析中</span></td><td>⋯</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= 地图工作台 ================= -->
+      <section class="view" id="view-map">
+        <div class="page-head">
+          <div><h1>地图工作台</h1><p>项目图层与地图交互；后续 Copilot 从这里获取当前视口与选中要素</p></div>
+          <div class="head-actions"><button class="btn">底图</button><button class="btn primary">框选分析</button></div>
+        </div>
+        <div class="map-layout">
+          <aside class="map-side">
+            <div class="side-title">图层 <span class="more">＋</span></div>
+            <div class="layer-group">底图</div>
+            <div class="layer on"><span class="eye">✓</span><span class="swatch" style="background:#90a98d"></span>天地图影像</div>
+            <div class="layer-group">项目图层</div>
+            <div class="layer on"><span class="eye">✓</span><span class="swatch" style="background:#5f7f58"></span>2026-10 影像</div>
+            <div class="layer on"><span class="eye">✓</span><span class="swatch" style="background:#2c6fbd"></span>变化图斑</div>
+            <div class="layer"><span class="eye"></span><span class="swatch" style="background:#c94a4a"></span>建筑分割掩膜</div>
+            <div class="layer-group">分析结果</div>
+            <div class="layer"><span class="eye"></span><span class="swatch" style="background:#c77c0a"></span>变化检测叠加</div>
+          </aside>
+          <div class="map-stage">
+            <svg viewBox="0 0 800 600" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="land" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe8d9"/><stop offset=".55" stop-color="#c9d7c2"/><stop offset="1" stop-color="#b9cbbd"/></linearGradient>
+                <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0v40" fill="none" stroke="#ffffff" stroke-opacity=".25"/></pattern>
+              </defs>
+              <rect width="800" height="600" fill="url(#land)"/>
+              <rect width="800" height="600" fill="url(#grid)"/>
+              <path d="M-20 430 C160 400 240 470 420 440 S680 390 830 420" fill="none" stroke="#7ea6c9" stroke-width="16" opacity=".8"/>
+              <path d="M-20 430 C160 400 240 470 420 440 S680 390 830 420" fill="none" stroke="#a9c7df" stroke-width="6"/>
+              <g fill="#b7c3b2" stroke="#9aa993" stroke-width="1"><polygon points="90,90 210,70 230,150 120,175"/><polygon points="250,120 360,100 390,180 270,200"/><polygon points="430,80 560,90 570,170 440,160"/></g>
+              <g fill="#d9b36c" opacity=".55"><polygon points="90,250 200,235 220,310 105,330"/><polygon points="250,260 360,245 380,315 265,335"/><polygon points="430,250 560,240 575,320 445,330"/></g>
+              <g fill="#c95a4e" opacity=".82" stroke="#a53b32" stroke-width="1.2">
+                <polygon points="150,190 235,182 242,236 158,244"/>
+                <polygon points="300,200 355,198 360,242 305,246"/>
+                <polygon points="470,190 545,186 552,235 476,240"/>
+                <polygon points="180,360 260,355 268,408 186,414"/>
+                <polygon points="490,355 570,350 578,405 496,410"/>
+              </g>
+              <g fill="#ffffff" opacity=".9" font-family="sans-serif" font-size="12">
+                <text x="170" y="160">建筑区</text><text x="470" y="150">工业园</text><text x="180" y="450">河道</text>
+              </g>
+              <g stroke="#2c6fbd" stroke-width="1.3" fill="none" opacity=".9"><path d="M40 210 H760"/><path d="M420 40 V560"/></g>
+            </svg>
+            <div class="map-toolbar">
+              <button title="放大">＋</button><button title="缩小">－</button><button title="复位">⌂</button><button title="绘制">✎</button>
+            </div>
+            <div class="map-basemap"><span>无</span><span class="active">影像</span><span>矢量</span><span>地形</span></div>
+            <div class="map-status"><span>103.9636, 30.9588</span><span>1:25,000</span><span>EPSG:4490</span></div>
+            <div class="legend"><div><i style="background:#c95a4e"></i>新增建筑</div><div><i style="background:#7ea6c9"></i>水体变化</div><div><i style="background:#d9b36c"></i>裸地/推土</div></div>
+          </div>
+          <aside class="map-side">
+            <div class="side-title">属性</div>
+            <div style="padding:12px">
+              <div class="thumb vector" style="width:100%;height:92px;border-radius:6px"></div>
+              <div style="font-weight:600;margin:10px 0 2px">变化图斑 202611</div>
+              <div class="muted">矢量 · 24 要素 · 面积 1.28 km²</div>
+              <dl class="kv" style="margin-top:12px">
+                <dt>CRS</dt><dd class="mono">EPSG:4490</dd>
+                <dt>范围</dt><dd class="mono">103.9636–103.9746<br/>30.9588–30.9698</dd>
+                <dt>来源任务</dt><dd>#128 变化检测</dd>
+                <dt>发布图层</dt><dd>samseg:p_001_change_001</dd>
+                <dt>样式</dt><dd>按类别着色</dd>
+              </dl>
+              <div style="display:flex;gap:6px;margin-top:14px"><button class="btn soft" style="flex:1">定位</button><button class="btn" style="flex:1">透明度</button></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= 任务中心 ================= -->
+      <section class="view" id="view-jobs">
+        <div class="page-head">
+          <div><h1>分析任务</h1><p>人工与 Agent 任务同源；长任务异步执行，可离开页面</p></div>
+          <div class="head-actions"><button class="btn">刷新</button><button class="btn primary">＋ 新建任务</button></div>
+        </div>
+        <div class="job-layout">
+          <div class="panel">
+            <div class="panel-head"><h3>全部任务</h3><span class="muted">2 运行中 · 14 完成</span></div>
+            <div>
+              <div class="job-card">
+                <div class="job-top"><span class="tag blue">变化检测</span><span class="job-title">T1/T2 · 建筑+水</span><span style="margin-left:auto" class="tag amber">运行中</span></div>
+                <div class="job-meta"><span>#128</span><span>2026-11 影像 × 2026-10 影像</span><span>01:23</span><span>62%</span></div>
+                <div class="progress" style="margin-top:8px"><i style="width:62%"></i></div>
+              </div>
+              <div class="job-card">
+                <div class="job-top"><span class="tag green">语义分割</span><span class="job-title">2026-10 影像 · 建筑提取</span><span style="margin-left:auto" class="tag green">完成</span></div>
+                <div class="job-meta"><span>#127</span><span>86 区域 · 43.8%</span><span>19s</span><span>官方流程</span></div>
+              </div>
+              <div class="job-card">
+                <div class="job-top"><span class="tag gray">发布图层</span><span class="job-title">变化图斑 202611</span><span style="margin-left:auto" class="tag green">完成</span></div>
+                <div class="job-meta"><span>#126</span><span>samseg:p_001_change_001</span><span>8s</span></div>
+              </div>
+              <div class="job-card">
+                <div class="job-top"><span class="tag red">变化检测</span><span class="job-title">T1/T2 · 全类别</span><span style="margin-left:auto" class="tag red">失败</span></div>
+                <div class="job-meta"><span>#125</span><span>模型显存不足</span><span>建议：减少类别或开启滑窗</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>任务详情 · #128</h3><span class="tag amber">运行中</span></div>
+            <div class="job-detail">
+              <dl class="kv">
+                <dt>类型</dt><dd>变化检测（官方实例 ∩ 语义）</dd>
+                <dt>输入</dt><dd>ds_t1 / ds_t2</dd>
+                <dt>参数</dt><dd class="mono">classes=建筑,水 · prob_thd=0.1 · slide=512</dd>
+                <dt>当前阶段</dt><dd>T2 FPN 语义变化计算</dd>
+                <dt>预计剩余</dt><dd>约 40s</dd>
+              </dl>
+              <div class="log"><div>[16:42:01] <span class="ok">✓</span> 任务已创建 source=manual</div><div>[16:42:03] T1 分割完成 (19.2s)</div><div>[16:42:22] T2 分割完成 (18.8s)</div><div>[16:42:24] 实例级变化 2117px</div><div>[16:42:31] <span class="warn">…</span> FPN 语义变化计算中</div></div>
+              <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" style="flex:1">取消任务</button><button class="btn soft" style="flex:1">查看输入</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 结果中心 ================= -->
+      <section class="view" id="view-results">
+        <div class="page-head">
+          <div><h1>结果中心</h1><p>产物是资产：可预览、下载、发布为图层、生成报告</p></div>
+          <div class="head-actions"><button class="btn">按任务筛选</button><button class="btn primary">批量操作</button></div>
+        </div>
+        <div class="toolbar"><div class="chips"><button class="active">全部 36</button><button>分割 18</button><button>变化 12</button><button>报告 6</button></div><div class="grow"></div><button class="btn">卡片视图</button><button class="btn">表格视图</button></div>
+        <div class="result-grid">
+          <article class="result-card"><div class="result-thumb"></div><div class="result-body"><h4>变化检测叠加图</h4><div class="meta"><span>#128</span><span>PNG</span><span>2 分钟前</span></div></div><div class="result-foot"><button>预览</button><button>下载</button><button>发布</button></div></article>
+          <article class="result-card"><div class="result-thumb vector"></div><div class="result-body"><h4>变化图斑 202611</h4><div class="meta"><span>#128</span><span>GeoJSON</span><span>24 要素</span></div></div><div class="result-foot"><button>地图</button><button>下载</button><button>报告</button></div></article>
+          <article class="result-card"><div class="result-thumb" style="background:linear-gradient(135deg,#8c4f4a,#d99a7a 55%,#7b3f3a)"></div><div class="result-body"><h4>建筑分割掩膜</h4><div class="meta"><span>#127</span><span>GeoTIFF</span><span>19s</span></div></div><div class="result-foot"><button>预览</button><button>下载</button><button>发布</button></div></article>
+          <article class="result-card"><div class="result-thumb report"></div><div class="result-body"><h4>成都市变化监测报告</h4><div class="meta"><span>#124</span><span>PDF</span><span>昨天</span></div></div><div class="result-foot"><button>预览</button><button>下载</button><button>版本</button></div></article>
+          <article class="result-card"><div class="result-thumb" style="background:linear-gradient(135deg,#4c6f8c,#9ab7ce)"></div><div class="result-body"><h4>水体变化统计表</h4><div class="meta"><span>#128</span><span>XLSX</span><span>6 类</span></div></div><div class="result-foot"><button>预览</button><button>下载</button><button>报告</button></div></article>
+          <article class="result-card"><div class="result-thumb" style="background:linear-gradient(135deg,#6b5a3f,#c3a56d)"></div><div class="result-body"><h4>裸地/推土图斑</h4><div class="meta"><span>#128</span><span>SHP</span><span>11 要素</span></div></div><div class="result-foot"><button>地图</button><button>下载</button><button>发布</button></div></article>
+        </div>
+      </section>
+
+      <!-- ================= 报告 / 设置占位 ================= -->
+      <section class="view" id="view-reports">
+        <div class="page-head"><div><h1>报告中心</h1><p>模板化生成监测报告，引用项目任务与产物</p></div><div class="head-actions"><button class="btn primary">＋ 新建报告</button></div></div>
+        <div class="grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="panel"><div class="panel-head"><h3>变化监测报告</h3><span class="tag green">已生成</span></div><div class="panel-body" style="padding:14px"><div class="muted">引用 #128 变化检测 · 12 页 · PDF</div><div style="margin-top:10px;display:flex;gap:8px"><button class="btn soft">预览</button><button class="btn">下载</button></div></div></div>
+          <div class="panel"><div class="panel-head"><h3>建筑提取报告</h3><span class="tag green">已生成</span></div><div class="panel-body" style="padding:14px"><div class="muted">引用 #127 语义分割 · 8 页 · DOCX</div><div style="margin-top:10px;display:flex;gap:8px"><button class="btn soft">预览</button><button class="btn">下载</button></div></div></div>
+          <div class="panel" style="border-style:dashed;box-shadow:none"><div class="panel-head"><h3>自定义模板</h3></div><div class="panel-body" style="padding:14px"><div class="muted">选择章节、图表与产物，生成项目级报告</div><div style="margin-top:10px"><button class="btn soft">创建模板</button></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="page-head"><div><h1>项目设置</h1><p>项目信息、数据默认值、模型参数与成员权限</p></div><div class="head-actions"><button class="btn primary">保存</button></div></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div class="panel"><div class="panel-head"><h3>项目信息</h3></div><div class="panel-body" style="padding:14px"><dl class="kv"><dt>名称</dt><dd>成都市变化监测</dd><dt>描述</dt><dd>2026 年度城市变化监测</dd><dt>状态</dt><dd>进行中</dd><dt>负责人</dt><dd>管理员</dd></dl></div></div>
+          <div class="panel"><div class="panel-head"><h3>默认分析参数</h3></div><div class="panel-body" style="padding:14px"><dl class="kv"><dt>分割阈值</dt><dd class="mono">prob_thd=0.1</dd><dt>滑窗</dt><dd class="mono">512 / 512</dd><dt>默认 CRS</dt><dd class="mono">EPSG:4490</dd><dt>模型</dt><dd>SegEarth-OV3 / SAM3</dd></dl></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<button class="copilot-fab" id="copilotFab">✦ Copilot <span style="opacity:.55;font-size:11px">预览</span></button>
+<aside class="copilot" id="copilot">
+  <div class="copilot-head"><b>Copilot</b><span class="tag blue">后续接入</span><button class="close" id="copilotClose">✕</button></div>
+  <div class="ctx"><span>项目：成都市变化监测</span><span>数据集：2026-10 影像</span><span>图层：变化图斑</span></div>
+  <div class="copilot-body">
+    <div class="bubble">我可以基于当前项目和选中数据，帮你发起分析、解释结果或生成报告。现在先以“建议操作”的方式呈现。</div>
+    <div class="bubble me">对当前影像做建筑提取</div>
+    <div class="suggest">
+      <button>✓ 创建任务：语义分割 · 建筑 · 当前影像</button>
+      <button>✓ 打开地图并定位到结果</button>
+      <button>✓ 生成一份建筑提取报告</button>
+    </div>
+  </div>
+  <div class="copilot-input"><input placeholder="描述你的任务…" /><button class="btn primary">发送</button></div>
+</aside>
+
+<script>
+  const views = document.querySelectorAll('.view');
+  const railBtns = document.querySelectorAll('.rail button[data-view]');
+  function show(view){
+    views.forEach(v=>v.classList.toggle('active', v.id === 'view-' + view));
+    railBtns.forEach(b=>b.classList.toggle('active', b.dataset.view === view));
+    document.querySelector('.main').scrollTop = 0;
+    if (location.hash !== '#' + view) history.replaceState(null, '', '#' + view);
+  }
+  railBtns.forEach(b=>b.addEventListener('click', ()=>show(b.dataset.view)));
+  document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click', ()=>show(b.dataset.goto)));
+  const initial = location.hash.replace('#','');
+  if (initial) show(initial);
+
+  const copilot = document.getElementById('copilot');
+  document.getElementById('copilotFab').addEventListener('click', ()=>{
+    copilot.classList.toggle('open');
+  });
+  document.getElementById('copilotClose').addEventListener('click', ()=>{
+    copilot.classList.remove('open');
+  });
+</script>
+</body>
+</html>

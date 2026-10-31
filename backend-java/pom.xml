@@ -36,6 +36,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!-- P0 新增 RBAC/审计/Refresh Token 使用 JdbcTemplate 轻量仓储 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
         <!-- MyBatis-Plus: Spring Boot 3 专用 starter -->
         <dependency>
             <groupId>com.baomidou</groupId>

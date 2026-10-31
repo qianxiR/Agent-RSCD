@@ -294,29 +294,28 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   align-items: flex-start;
 }
 
-/* AI 头像（对齐原生 .message-avatar） */
+/* 消息标识（方形浅色，只有 AI 显示） */
 .message-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--accent-soft);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #eef1ff;
   color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid var(--border);
-  margin-top: 2px;
+  border: none;
+  margin-top: 1px;
+  font-size: var(--fs-md);
+  font-weight: 600;
 }
 .message-avatar.user {
-  background: var(--bg-panel);
-  color: var(--primary);
-  border-color: rgba(44, 111, 189, 0.22);
+  display: none;
 }
 .message-avatar.tool {
   background: var(--bg-inset);
-  color: var(--accent);
-  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 .message-col {
@@ -356,14 +355,14 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 .assistant-content-actions {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(44, 111, 189, 0.12);
+  border-top: 1px solid var(--border);
 }
 
-/* 气泡（对齐原生 .message-bubble） */
+/* 气泡：方形、细边框、左侧强调条 */
 .message-bubble {
   max-width: 100%;
-  padding: 10px 12px;
-  border-radius: var(--r-shell);
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
   font-size: var(--fs-lg);
   font-weight: 400;
   line-height: 1.7;
@@ -371,24 +370,22 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   overflow-wrap: break-word;
 }
 .message.user .message-bubble {
-  background: var(--primary);
-  color: #fff;
-  border-bottom-right-radius: 4px;
-  box-shadow: 0 2px 8px rgba(43, 125, 233, 0.16);
+  background: #f2f3f5;
+  color: var(--text-primary);
+  border: none;
+  border-radius: 12px;
 }
 .message.ai .message-bubble {
-  background: var(--bg-elevated);
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid rgba(157, 188, 213, 0.78);
-  border-bottom-left-radius: 4px;
-  box-shadow: 0 2px 8px rgba(15, 35, 58, 0.06);
+  border: none;
+  padding: 0;
 }
 .message.tool .message-bubble {
-  background: var(--bg-panel);
+  background: var(--bg-inset);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
-  box-shadow: 0 1px 3px rgba(15, 35, 58, 0.04);
+  border-left: 2px solid var(--border-strong);
 }
 
 /* 分段块：回复正文 */
@@ -693,7 +690,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 .message-action-btn:hover {
   background: var(--bg-hover);
   color: var(--accent);
-  border-color: rgba(44, 111, 189, 0.18);
+  border-color: var(--border);
 }
 
 /* 沙盒聊天图片: 缩略图卡片 + 点击 el-image 放大预览 */
@@ -744,7 +741,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   align-items: center;
   gap: 7px;
   padding: 6px;
-  border: 1px solid rgba(44, 111, 189, 0.18);
+  border: 1px solid var(--border);
   border-radius: var(--r-shell);
   background: var(--bg-panel);
   color: var(--text-secondary);

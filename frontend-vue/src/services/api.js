@@ -6,9 +6,11 @@
 const DEFAULT_USER = 'study_user'
 
 // ==================== 认证状态 (Java 业务服务签发的 JWT) ====================
-// ★ 一阶段 (security.mode=off) 登录仅打通 token 链路；数据查询的 user_id
-//   仍用 DEFAULT_USER 保持连续性，权限语义切换在 enforce 阶段引入。
+// ★ 用户端沿用本工作台作为最终入口；认证走 P0 的新契约:
+//   access_token(30min) + refresh_token(14d, 旋转) + user{user_id,username,roles,...}
+//   工作台自身只需要 access token；refresh 由本文件自动续期一次。
 const TOKEN_KEY = 'rsiis_token'
+const REFRESH_KEY = 'rsiis_token_refresh'
 const USER_KEY = 'rsiis_user'
 
 export function getAuthToken() {
@@ -24,35 +26,88 @@ export function getAuthUser() {
 }
 
 export function logout() {
+  const refresh = localStorage.getItem(REFRESH_KEY)
+  if (refresh) {
+    // 尽力撤销，不阻塞本地退出
+    fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refresh }),
+    }).catch(() => {})
+  }
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_KEY)
   localStorage.removeItem(USER_KEY)
 }
 
 // 入参: username, password
-// 方法: 调 Java /api/v1/auth/login，成功则持久化 token 与用户信息
-// 出参: 后端响应 { status, token?, user_id?, username?, role?, msg? }
+// 方法: 调 Java /api/v1/auth/login；成功则持久化 access/refresh token 与用户信息
+// 出参: 后端响应 { status, access_token?, user?, mfa_required? ... }
+//   管理端账号会返回 mfa_required / mfa_setup_required，工作台无法完成 MFA，
+//   由登录弹窗提示改用管理控制台。
 export async function login(username, password) {
   const data = await request('/api/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   })
-  if (data.status === 'success') {
-    localStorage.setItem(TOKEN_KEY, data.token)
+  if (data.status === 'success' && data.access_token) {
+    const u = data.user || {}
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    if (data.refresh_token) localStorage.setItem(REFRESH_KEY, data.refresh_token)
     localStorage.setItem(USER_KEY, JSON.stringify({
-      user_id: data.user_id, username: data.username, role: data.role,
+      user_id: u.user_id,
+      username: u.username,
+      role: u.role,
+      roles: u.roles || [],
+      mfa_enabled: !!u.mfa_enabled,
     }))
   }
   return data
 }
 
+// access token 过期时用 refresh token 换一次（并发去重）
+let refreshing = null
+async function refreshAccessToken() {
+  const refresh = localStorage.getItem(REFRESH_KEY)
+  if (!refresh) return false
+  if (!refreshing) {
+    const run = fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refresh }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          localStorage.removeItem(TOKEN_KEY)
+          localStorage.removeItem(REFRESH_KEY)
+          return false
+        }
+        const data = await res.json().catch(() => ({}))
+        if (data.access_token) localStorage.setItem(TOKEN_KEY, data.access_token)
+        if (data.refresh_token) localStorage.setItem(REFRESH_KEY, data.refresh_token)
+        return !!data.access_token
+      })
+      .catch(() => false)
+    refreshing = run
+    const ok = await run
+    if (refreshing === run) refreshing = null
+    return ok
+  }
+  return refreshing
+}
+
 // 入参: url, options(fetch 配置)
-// 方法: 统一 fetch 封装，非 2xx 抛错；已登录时自动附带 Bearer token
+// 方法: 统一 fetch 封装；已登录时自动附带 Bearer token；401 先刷新再重试一次
 // 出参: 解析后的 JSON
-async function request(url, options = {}) {
+async function request(url, options = {}, retry = true) {
   const headers = { 'Content-Type': 'application/json' }
   const token = getAuthToken()
   if (token) headers.Authorization = `Bearer ${token}`
   const res = await fetch(url, { headers, ...options })
+  if (res.status === 401 && retry && token) {
+    const ok = await refreshAccessToken()
+    if (ok) return request(url, options, false)
+  }
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${url}`)
   }

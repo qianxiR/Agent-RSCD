@@ -69,7 +69,9 @@ def _create_position_encoding(precompute_resolution=None):
 def _create_vit_backbone(compile_mode=None):
     """Create ViT backbone for visual feature extraction."""
     return ViT(
-        img_size=336,
+        # ★ 官方权重按 1008 输入训练/导出（1008/14=72, RoPE freqs_cis=72²=5184）；
+        #   本地曾改成 336 以省显存，但会与 sam3.pt 的 5184×32 对不上。
+        img_size=1008,
         pretrain_img_size=336,
         patch_size=14,
         embed_dim=1024,
@@ -90,7 +92,8 @@ def _create_vit_backbone(compile_mode=None):
         retain_cls_token=False,
         ln_pre=True,
         ln_post=False,
-        return_interm_layers=True,
+        # 官方 neck 只取最后一层特征（simpleFPN），不需要 intermediate layers。
+        return_interm_layers=False,
         bias_patch_embed=False,
         compile_mode=compile_mode,
     )
@@ -179,8 +182,8 @@ def _create_transformer_decoder() -> TransformerDecoder:
         frozen=False,
         interaction_layer=None,
         dac_use_selfatt_ln=True,
-        resolution=336,
-        stride=28,
+        resolution=1008,
+        stride=14,
         use_act_checkpoint=True,
         presence_token=True,
     )
@@ -500,7 +503,10 @@ def _create_vision_backbone(
 ) -> Sam3DualViTDetNeck:
     """Create SAM3 visual backbone with ViT and neck."""
     # Position encoding
-    position_encoding = _create_position_encoding(precompute_resolution=336)
+    # ★ 必须与官方一致使用 1008: freqs_cis 由 precompute_resolution/patch_size 决定,
+    #   336 会生成 576×32, 而官方 sam3.pt 权重是 5184×32 (1008/14=72, 72²=5184),
+    #   导致 load_state_dict 直接 size mismatch。
+    position_encoding = _create_position_encoding(precompute_resolution=1008)
     # ViT backbone
     vit_backbone: ViT = _create_vit_backbone(compile_mode=compile_mode)
     vit_neck: Sam3DualViTDetNeck = _create_vit_neck(

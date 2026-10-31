@@ -31,12 +31,19 @@ app:
   # 服务间静态令牌, 需与 Python 侧 INTERNAL_API_TOKEN 一致
   internal-token: ${INTERNAL_API_TOKEN:rsiis-dev-internal-token}
   security:
-    # off: 全放行 (迁移期默认, 不破坏现有 E2E)
-    # observe: 解析 token 填充认证上下文, 不拦截无效请求
-    # enforce: 除 /api/v1/auth/login 外均需有效 JWT
+    # off: HTTP 层全放行 (迁移期默认); observe: 解析 token 但不拦截; enforce: 除 auth 外均需 JWT
+    # ★ 管理端 /api/v1/admin/** 始终由方法级权限校验, 与 mode 无关。
     mode: ${SECURITY_MODE:off}
     jwt-secret: ${JWT_SECRET:rsiis-dev-jwt-secret-key-please-change-it-32b}
+    # 旧版字段保留兼容; 新代码使用 access-ttl-minutes / refresh-ttl-days
     jwt-ttl-hours: 24
+    access-ttl-minutes: ${ACCESS_TTL_MINUTES:30}
+    refresh-ttl-days: ${REFRESH_TTL_DAYS:14}
+    # 已确认：管理端强制 MFA。生产必须 true；本地联调可临时 false。
+    mfa-required: ${MFA_REQUIRED:true}
+    mfa-issuer: ${MFA_ISSUER:国土智察}
+    # 留空时由 jwt-secret 派生；生产建议独立配置 32 字节 Base64 密钥。
+    mfa-encryption-key: ${MFA_ENCRYPTION_KEY:}
 
 logging:
   level:

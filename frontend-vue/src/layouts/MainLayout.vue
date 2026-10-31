@@ -2,7 +2,7 @@
 // ==================== 三栏主布局 + 拖拽分隔 ====================
 // ★ 对应原生 index.html 的 .header + .main 三栏结构
 //   header：logo + 系统标题 + WS 状态点（与原生前端一比一）
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useConversationStore } from '@/stores/conversation'
 import { useResize } from '@/composables/useResize'
@@ -10,9 +10,35 @@ import LeftSidebar from '@/components/sidebar/LeftSidebar.vue'
 import MapPanel from '@/components/map/MapPanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import LoginDialog from '@/components/auth/LoginDialog.vue'
+import ImagerySearchDialog from '@/components/map/ImagerySearchDialog.vue'
+import Icon from '@/shared/ui/Icon.vue'
 
 const store = useConversationStore()
 const { wsStatus, sessionId } = storeToRefs(store)
+
+const WS_LABELS = {
+  connected: '数据链路正常',
+  connecting: '链路连接中',
+  disconnected: '链路已断开',
+  error: '链路异常',
+}
+const wsLabel = computed(() => WS_LABELS[wsStatus.value] || '链路状态未知')
+
+// 顶栏时间：30s 刷新一次，避免秒级重渲染
+const clock = ref('')
+let clockTimer = null
+function tickClock() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+onMounted(() => {
+  tickClock()
+  clockTimer = setInterval(tickClock, 30000)
+})
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
 
 // 左右栏宽度（px），中间栏 flex:1
 const leftWidth = ref(300)
@@ -40,16 +66,30 @@ function startResize(which, ev) {
 
 <template>
   <div class="layout shell-fade-in">
-    <!-- 顶部：logo + 系统标题 + 状态（对齐原生 .header） -->
+    <!-- 顶部：机构标识 + 系统名 + 链路/时间/账号 -->
     <header class="app-header">
-      <h1>
-        <img src="/image.svg" alt="logo" class="header-logo">
-        <span class="header-accent">国土智察</span> 自然资源遥感智能监测系统
-      </h1>
+      <div class="header-brand">
+        <img src="/image.svg" alt="国土智察" class="brand-logo-img" />
+        <div class="header-titles">
+          <h1>
+            <span class="header-brand-name">国土智察</span>
+            自然资源遥感智能监测系统
+          </h1>
+        </div>
+      </div>
+
       <div class="header-status">
+        <span class="status-item">
+          <span class="status-dot" :class="wsStatus"></span>
+          <span class="status-text">{{ wsLabel }}</span>
+        </span>
+        <span v-if="sessionId" class="status-item mono">会话 {{ sessionId.slice(0, 8) }}</span>
+        <span class="status-item mono clock">{{ clock }}</span>
+        <RouterLink class="admin-entry" to="/admin" title="进入管理控制台（需要管理员 MFA）">
+          <Icon name="shield" :size="13" />
+          <span>管理控制台</span>
+        </RouterLink>
         <LoginDialog />
-        <span class="status-dot" :class="wsStatus"></span>
-        <span v-if="sessionId" class="session-id">{{ sessionId.slice(0, 8) }}…</span>
       </div>
     </header>
 
@@ -69,6 +109,9 @@ function startResize(which, ev) {
         <ChatPanel />
       </div>
     </div>
+
+    <!-- 开源影像检索（Teleport 到 body，入口在左栏 / 地图左下角） -->
+    <ImagerySearchDialog />
   </div>
 </template>
 
@@ -80,50 +123,111 @@ function startResize(which, ev) {
   background: var(--bg-base);
 }
 
-/* ===== 顶部 header（一比一对齐原生 .header） ===== */
+/* ===== 顶部：极简品牌栏 ===== */
 .app-header {
-  background: var(--bg-panel);
-  padding: 8px 16px;
+  height: 52px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+  gap: 16px;
+  padding: 0 18px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--text-primary);
+  z-index: 10;
 }
-.app-header h1 {
-  font-size: var(--fs-hero);
-  color: var(--accent);
-  font-weight: 600;
+.header-brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
-.header-logo {
-  height: 34px;
-  width: auto;
-  border-radius: var(--r-sm);
-  flex-shrink: 0;
+.brand-logo-img {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
   object-fit: contain;
+  display: block;
 }
-.header-accent {
-  color: var(--accent);
-  margin-right: 6px;
+.header-titles {
+  min-width: 0;
+}
+.app-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0.2px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.header-brand-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .header-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 14px;
+  flex-shrink: 0;
   font-size: var(--fs-md);
-  color: var(--text-secondary);
-  font-family: var(--mono);
-}
-.session-id {
   color: var(--text-muted);
 }
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.status-item.clock {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.status-text {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+/* 工作台 → 管理控制台的入口 */
+.admin-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-family: var(--sans);
+  font-size: var(--fs-md);
+  text-decoration: none;
+  transition: background-color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out);
+}
+.admin-entry:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.app-header :deep(.auth-entry) {
+  color: var(--text-secondary);
+}
+.app-header :deep(.auth-entry .auth-user) {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.app-header :deep(.auth-entry .el-button.is-link) {
+  color: var(--accent);
+  font-size: var(--fs-sm);
+}
+.app-header :deep(.auth-entry .el-button.is-link:hover) {
+  color: var(--accent-hover);
+}
 .status-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
@@ -170,7 +274,6 @@ function startResize(which, ev) {
 .pane-right {
   background: var(--bg-base);
   border-left: 1px solid var(--border);
-  box-shadow: -4px 0 16px rgba(15, 35, 58, 0.04);
   flex-shrink: 0;
 }
 

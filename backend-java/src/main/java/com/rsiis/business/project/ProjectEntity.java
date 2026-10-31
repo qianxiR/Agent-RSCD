@@ -26,6 +26,36 @@ public class ProjectEntity {
 
     private String folderPath;
 
+    private String orgId;
+
+    private String status;
+
+    private String tags;
+
+    public String getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(String orgId) {
+        this.orgId = orgId;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public String getTags() {
+        return tags;
+    }
+
+    public void setTags(String tags) {
+        this.tags = tags;
+    }
+
     public String getId() {
         return id;
     }

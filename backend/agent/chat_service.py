@@ -159,6 +159,7 @@ def _normalize_chat_images(images: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "path": path,
             "preview_url": str(item.get("preview_url") or item.get("url") or ""),
             "source": str(item.get("source") or "upload"),
+            "intent": str(item.get("intent") or ""),
             "workspace": str(item.get("workspace") or ""),
             "layer_name": str(item.get("layer_name") or ""),
             "full_name": str(item.get("full_name") or ""),

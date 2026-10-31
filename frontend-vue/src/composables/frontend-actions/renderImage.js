@@ -1,22 +1,41 @@
 // ==================== handler: render_image (完整版) ====================
-// ★ 对应原生 renderImage (wms-render.js:355) 的 Step1-4
-//   四步: 底图(WMS) + 变化面(WFS) + 边缘线(WFS) + 图例浮层
+// ★ 对应原生 renderImage (wms-render.js:355) 的 Step1-3
+//   三步: 底图(WMS) + 面图斑(WFS) + 图例浮层
 //   wait_for_result=False, 但本方案统一回传以保持协议一致
 //
-// await 语义(对齐原生): 仅 await 底图成败 → status; 变化面/边缘线/图例 fire-and-forget
+// await 语义(对齐原生): 仅 await 底图成败 → status; 面图斑/图例 fire-and-forget
 
 // 入参: data = { base_layer{layer_name,workspace,wms_url}, caption, image_url, legend, bbox?,
-//                polygon_layer{layer_name,workspace,bbox,wms_url}?, edge_layer{...}? }
+//                polygon_layer{layer_name,workspace,bbox,wms_url}? }
 //      ctx.map = useMap() 图层操作能力(含 addWmsLayer/addWfsLayer/setLegend)
-// 方法: Step1 底图 await → Step2/3 矢量叠加(fire-and-forget)
+// 方法: Step1 底图 await → Step2 矢量叠加(fire-and-forget)
 // 出参: { status, loaded, error?, image_url }
 export async function handleRenderImage(data, ctx) {
-  const { base_layer, polygon_layer, edge_layer, caption } = data
+  const { base_layer, polygon_layer, caption } = data
 
   // Step1 底图(必须 await, status 据此)
   const result = loadBase(base_layer)
   if (!result) {
-    return { status: 'error', loaded: false, error: '原始影像未发布到 GeoServer', image_url: data.image_url }
+    // 框选解译等场景不叠加 GeoServer 原图 WMS：直接叠加本地捕获影像（带 CRS），
+    // 保证矢量结果与“原始影像”严格同源、同 transform，消除配准偏移。
+    if (data.input_image_path) {
+      ctx.map.addStaticImageLayer({ path: data.input_image_path }).catch(() => {})
+    }
+    if (polygon_layer?.layer_name) {
+      ctx.map.addWfsLayer({
+        name: polygon_layer.layer_name,
+        workspace: polygon_layer.workspace,
+        bbox: polygon_layer.bbox,
+        forceFit: false,
+      })
+    }
+    const hasVector = !!polygon_layer?.layer_name
+    return {
+      status: hasVector ? 'success' : 'error',
+      loaded: hasVector,
+      error: hasVector ? null : '原始影像未发布到 GeoServer',
+      image_url: data.image_url,
+    }
   }
   const r = ctx.map.addWmsLayer({
     name: result.name,
@@ -34,16 +53,6 @@ export async function handleRenderImage(data, ctx) {
       forceFit: false,
     })
   }
-  // Step3 边缘线(fire-and-forget)
-  if (edge_layer && edge_layer.layer_name) {
-    ctx.map.addWfsLayer({
-      name: edge_layer.layer_name,
-      workspace: edge_layer.workspace,
-      bbox: edge_layer.bbox,
-      forceFit: false,
-    })
-  }
-
   return {
     status: r.loaded ? 'success' : 'error',
     loaded: r.loaded,

@@ -20,7 +20,8 @@ class JwtServiceTest {
                 "http://127.0.0.1:8020",
                 "test-internal-token",
                 new AppProperties.Security("off",
-                        "rsiis-unit-test-secret-key-0123456789abcdef", ttlHours));
+                        "rsiis-unit-test-secret-key-0123456789abcdef", ttlHours,
+                        30, 14, false, "test", ""));
     }
 
     @Test
@@ -65,7 +66,8 @@ class JwtServiceTest {
         JwtService other = new JwtService(new AppProperties(
                 "http://127.0.0.1:8020", "t",
                 new AppProperties.Security("off",
-                        "another-secret-key-abcdefghijklmnopqrstuvwxyz", 1)));
+                        "another-secret-key-abcdefghijklmnopqrstuvwxyz", 1,
+                        30, 14, false, "test", "")));
         assertThat(other.parse(token)).isEmpty();
     }
 }

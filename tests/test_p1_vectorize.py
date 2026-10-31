@@ -6,8 +6,15 @@ P1 栅格→矢量 端到端验证脚本
 """
 import sys
 import os
+import io
 import time
 from pathlib import Path
+
+# Windows 控制台默认 GBK，emoji/✅ 会 UnicodeEncodeError
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 # 项目根
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,8 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 # 测试数据
 TEST_DIR = ROOT / "tests" / "data"
-T1 = str(TEST_DIR / "test_t1.tif")
-T2 = str(TEST_DIR / "test_t2.tif")
+T1 = str(TEST_DIR / "r000_c006_t1.tif")
+T2 = str(TEST_DIR / "r000_c006_t2.tif")
 
 # 输出目录 (放 agent-files 下, 模拟真实路径) — v2.4 目录顺序 {proj}/{conv}
 OUT_DIR = ROOT / "agent-files" / "samseg" / "generate" / "_default" / "test_p1"
@@ -56,13 +63,14 @@ if not ok2:
 print()
 
 # 3) 跑变化检测
-print("[3/4] 运行变化检测 (预计 10-30s)...")
+print("[3/4] 运行变化检测 (官方流程, 预计 30-90s)...")
 t0 = time.time()
 result = runner.run_change_detection(
     t1_path=T1,
     t2_path=T2,
     output_path=OUT_PNG,
     vector_output_path=OUT_GEOJSON,
+    classes="建筑,水",
 )
 elapsed = time.time() - t0
 print(f"  耗时: {elapsed:.1f}s")

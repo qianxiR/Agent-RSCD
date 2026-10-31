@@ -373,9 +373,12 @@ def _normalize_context_images(images: List[Dict[str, Any]]) -> List[Dict[str, An
             "path": path,
             "preview_url": str(item.get("preview_url") or item.get("url") or ""),
             "source": str(item.get("source") or "upload"),
+            "intent": str(item.get("intent") or ""),
             "workspace": str(item.get("workspace") or ""),
             "layer_name": str(item.get("layer_name") or ""),
             "full_name": str(item.get("full_name") or ""),
+            "phase": str(item.get("phase") or ""),
+            "datetime": str(item.get("datetime") or ""),
         })
     return result
 
@@ -393,17 +396,51 @@ def _append_image_context_to_prompt(prompt: str, images: List[Dict[str, Any]]) -
     """
     if not images:
         return prompt
-    lines = ["", "[本轮影像输入]"]
+    lines = ["", "[Image input]"]
+    need_segment = False
+    need_change = False
     for idx, item in enumerate(images, 1):
         source = item.get("source") or "upload"
         title = item.get("full_name") or item.get("name") or f"image_{idx}"
         lines.append(f"- image_{idx}: {title}")
         if item.get("name"):
-            lines.append(f"  文件名: {item['name']}")
+            lines.append(f"  File: {item['name']}")
         if item.get("full_name"):
-            lines.append(f"  图层: {item['full_name']}")
-        lines.append(f"  本地路径: {item.get('path')}")
-        lines.append(f"  来源: {'GeoServer 图层下载' if source == 'geoserver' else '用户手动上传'}")
+            lines.append(f"  Layer: {item['full_name']}")
+        lines.append(f"  Local path: {item.get('path')}")
+        if item.get("phase"):
+            lines.append(f"  Phase: {item['phase'].upper()}")
+        if item.get("datetime"):
+            lines.append(f"  Acquired at: {item['datetime']}")
+        source_label = {
+            "geoserver": "GeoServer layer",
+            "capture": "BBox capture",
+            "change": "Change-detection capture",
+        }.get(source, "User upload")
+        lines.append(f"  Source: {source_label}")
+        if item.get("intent") == "segment":
+            need_segment = True
+        if item.get("intent") == "change":
+            need_change = True
+    if need_change:
+        lines.append("")
+        t1_item = next((x for x in images if x.get("phase") == "t1"), images[0])
+        t2_item = next((x for x in images if x.get("phase") == "t2"), images[-1])
+        lines.append(
+            "[Task] Change detection. The two attached images are T1 and T2 of the same "
+            "AOI, in order. Infer the target classes from the user's message, convert "
+            "Chinese/natural-language class names into English primary names plus English "
+            "synonyms, then call detect_change. "
+            f"Use t1_path={t1_item.get('path')} and t2_path={t2_item.get('path')}. "
+            "Do not call segment_image."
+        )
+    elif need_segment:
+        lines.append("")
+        lines.append(
+            "[Task] Segment the attached image. Infer the target classes from the user's "
+            "message, convert Chinese/natural-language class names into English primary "
+            "names plus English synonyms, then call segment_image."
+        )
     return f"{prompt.rstrip()}\n" + "\n".join(lines)
 
 

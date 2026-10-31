@@ -14,9 +14,9 @@ graph TB
     subgraph DATA["数据层 (backend/data/)"]
         direction TB
 
-        subgraph PG["🐘 PostgreSQL (2 个独立库)"]
+        subgraph PG["🐘 PostgreSQL (3 个独立库)"]
             BIZ["业务库 cd<br/>business_db.py<br/>表名作参数的通用 CRUD<br/>+ image_metadata / vector_layer 元数据"]
-            AGENTDB["记忆库 Agent_study<br/>agent_db.py (agent 层)<br/>project / conversation / message<br/>summary / user_memory / ai_task"]
+            AGENTDB["记忆库 Agent_study<br/>agent_db.py (agent 层)<br/>conversation / message / summary<br/>user_memory / ai_task / task_log<br/>artifact / mcp_server"]
         end
 
         subgraph GS["🗺️ GeoServer (服务)"]
@@ -33,7 +33,7 @@ graph TB
         end
     end
 
-    TOOLS["model/tools 工具箱<br/>(10 大分类 47 工具)"] -->|"查询/增删改/元数据登记"| BIZ
+    TOOLS["model/tools 工具箱<br/>(10 大分类 42 工具)"] -->|"查询/增删改/元数据登记"| BIZ
     TOOLS -->|"发布/下载/GetFeatureInfo"| WMS
     BIZ <-->|"PostGIS 存储层"| STORE
 
@@ -50,7 +50,8 @@ graph TB
 | 数据源 | 物理载体 | 访问模块 | 作用 | 默认配置 |
 |--------|---------|---------|------|---------|
 | **业务库** | PostgreSQL `cd` | `backend/data/business_db.py` | 业务数据 + 空间元数据 | `localhost:5432/cd` |
-| **记忆库** | PostgreSQL `Agent_study` | `backend/agent/memory/agent_db.py` | 会话/消息/摘要/长期记忆/任务 | `localhost:5432/Agent_study` |
+| **记忆库** | PostgreSQL `Agent_study` | `backend/agent/memory/agent_db.py` | 会话/消息/摘要/长期记忆/任务/产物血缘/MCP 配置 | `localhost:5432/Agent_study` |
+| **Java 业务库** | PostgreSQL `rsiis_business` | `backend-java/`（Spring Boot + MyBatis-Plus） | 登录用户 + 项目 CRUD | `localhost:5432/rsiis_business` |
 | **GeoServer** | GeoServer 服务 | `backend/data/geoserver_client.py` | 图层发布/下载/查询（WMS/WFS/REST） | `http://localhost:8080/geoserver` |
 | **文件存储** | 本地磁盘 `agent-files/` | `backend/model/tools/_paths.py` | 上传原图 + 各类产物落盘 | `项目根/agent-files/` |
 | **知识库** | 骨架（未实现） | `backend/data/knowledge/knowledge_store.py` | RAG 检索占位 | — |
@@ -182,6 +183,10 @@ list_image_metadata(limit=100) / list_vector_layers(kind=None, limit=100)
 **自动登记触发点**（工具调用成功后自动写元数据）：
 - `main.py::upload_samseg_images`：上传 GeoTIFF 后调 `_try_register_image_metadata`（仅地理影像生效，PNG/JPG 跳过）
 - `data_tools.py::upload_raster_layer` / `upload_shapefile_layer`：成功后自动登记
+- `samseg_tools.py::segment_image` / `detect_change`：产出 GeoJSON 后调
+  [`backend/data/vector_registry.py`](../../backend/data/vector_registry.py) 登记 `vector_layer`
+  （bbox / 要素数 / 真实面积 / CRS / 类别统计；`vector_layer.artifact_id` 为应用层关联，非跨库外键）
+- `chat_service.py`：工具返回后调 `agent_db.register_artifact` 写 `artifact` 血缘（文件→任务→会话）
 
 > ★ **SRID 修复**：`rasterio.crs.to_epsg()` 对 Web Mercator Auxiliary Sphere 返回 None，用 bounds 数值范围兜底（`>180` 必为投影坐标 → 3857），PostGIS `ST_Transform` 正确转换。
 
@@ -212,7 +217,11 @@ _pool = pool_mod.ThreadedConnectionPool(
 
 > **设计理由**：两个库职责完全不同（业务 vs 对话），分开部署可独立扩容/备份；学习场景下共用一个 PG 实例也行，但逻辑上保持表名空间隔离。
 
-### 3.2 记忆库表结构全景（7 张表）
+### 3.2 记忆库表结构全景（8 张表；`project` 已迁 Java）
+
+> ★ 阶段 24 变更：`project` 表已迁到 Java 业务库 `rsiis_business`，`Agent_study` 不再建 project 表；
+> `conversation.project_id` 只是无外键的字符串关联（删项目时 Java 调 `/internal/conversations/detach-project` 解绑）。
+> 下方 ER 图中的 `project` 仅保留历史关系示意，实际以本节表格和 `agent_db.init_schema()` 为准。
 
 `init_schema()` 幂等建表，表间通过外键级联：
 
@@ -288,15 +297,18 @@ erDiagram
     }
 ```
 
-| 表 | 职责 | v2.5 关键字段 |
+| 表 | 职责 | 关键字段 |
 |---|---|---|
-| `project` | 项目组织（user_id + name） | `folder_path`（关联本地文件夹，UPSERT 复用） |
-| `conversation` | 会话元数据 | `status`（状态机）+ `active_leaf_node`（DAG 叶子）+ `trace_*`（trace 快照） |
-| `message` | 完整消息（含工具调用链） | `node_id`/`parent_id`/`is_active`（Git-like DAG 分支）+ `thinking_content`（思考轨迹） |
+| `conversation` | 会话元数据 | `status`（active/completed/stopped/background）+ `active_leaf_node`（DAG 叶子）+ `trace_*`（trace 快照） |
+| `message` | 完整消息（含工具调用链） | `node_id`/`parent_id`/`is_active`（Git-like DAG 分支）+ `thinking_content`（思考轨迹）+ `images`（聊天图片） |
 | `conversation_summary` | 短期记忆（每会话至多 1 条） | `compress_level`（0/1/2 多级压缩） |
 | `user_memory` | 长期记忆（跨会话） | `category=lesson`（自纠教训，user_id='global'） |
-| `ai_task` | 重工具任务持久化 | `input/output`（JSONB）+ `progress` + 时间戳 |
+| `ai_task` | 重工具任务持久化 | `input/output`（JSONB）+ `progress` + `verification` + `plan_version` + 时间戳 |
 | `task_log` | 任务执行日志 | `level` + `elapsed_ms` |
+| `artifact` | 产物血缘（文件→任务→会话） | `artifact_type` + `storage_uri` + `spatial/temporal/business/lineage/quality`（JSONB） |
+| `mcp_server` | MCP 服务器配置持久化 | `transport`/`url`/`command`/`enabled` |
+
+> `project` / `users` 在 Java 库 `rsiis_business`（见 [schema.sql](../../backend-java/src/main/resources/schema.sql)）。
 
 ### 3.3 消息持久化映射（核心设计）
 
@@ -322,6 +334,10 @@ erDiagram
 | v2.5 | `conversation.active_leaf_node` | `_migrate_message_nodes()` 补全历史数据 |
 | v2.5 | `conversation_summary.compress_level` | `DEFAULT 0` |
 | v2.5 | `conversation.status` | `DEFAULT 'active'` |
+| 2026-10 | `message.images` | 聊天图片 URL 列表（JSONB） |
+| 2026-10 | `artifact` / `mcp_server` 新表 | `CREATE TABLE IF NOT EXISTS` |
+| 2026-10 | `ai_task.evidence/quality/resource/failure_signature/plan_version` | `ADD COLUMN IF NOT EXISTS` |
+| 2026-10 | `project` 迁出到 Java `rsiis_business` | 启动时 `DROP CONSTRAINT IF EXISTS conversation_project_id_fkey`；存量会话用 `scripts/migrate_legacy_agent_db.py` 从旧 `agent` 库迁入 |
 
 **历史迁移**（`_migrate_message_nodes()`，幂等）：
 1. 给 `node_id IS NULL` 的消息生成 UUID

@@ -71,36 +71,37 @@ graph TB
 
 ### 2.1 实现方法
 
-**① 单一 LLM 抽象（DashScope 兼容 OpenAI 协议）**
+**① 单一 LLM 抽象（OpenAI 兼容协议，端点按凭据路由）**
 
-通过 LangChain 的 `ChatOpenAI` 连接阿里云百炼（DashScope），无需 SDK 差异处理：
+通过 LangChain 的 `ChatOpenAI` 连接，凭据优先级见 `llm_client._llm_endpoint()`：
+
+1. Responses API（`RESPONSES_API_KEY` + `RESPONSES_BASE_URL` 齐全）
+2. **智谱 GLM**（默认主线，`GLM_API_KEY`，`https://open.bigmodel.cn/api/paas/v4`）
+3. DashScope（`DASHSCOPE_API_KEY`，`qwen3.7-plus`）
 
 ```python
 def create_llm(model=None, temperature=None) -> ChatOpenAI:
+    endpoint = _llm_endpoint()  # Responses → GLM → DashScope
     return ChatOpenAI(
-        api_key=settings.dashscope_api_key,
-        base_url=settings.dashscope_base_url,  # https://dashscope.aliyuncs.com/compatible-mode/v1
-        model=model or settings.dashscope_model,  # 默认 qwen3.7-plus
-        temperature=temperature or settings.default_temperature,  # 0.7
-        max_tokens=settings.max_tokens,  # 4096
-        stream_usage=settings.enable_context_cache,  # ★ 显式缓存必须开 stream_usage
+        api_key=endpoint["api_key"],
+        base_url=endpoint["base_url"],
+        model=model or endpoint["default_model"],  # GLM 主线默认 GLM-5.3-Flash
+        temperature=temperature or settings.default_temperature,
+        max_tokens=settings.max_tokens,
+        stream_usage=settings.enable_context_cache,
+        use_responses_api=endpoint["use_responses_api"],
     )
-
-def create_llm_with_tools(tools, model=None, temperature=None) -> ChatOpenAI:
-    llm = create_llm(model, temperature)
-    return llm.bind_tools(tools, tool_choice="auto")  # LLM 自行决定是否调工具
 ```
 
-**② 模型分工策略（降本）**
-
-通过 `config.py` 的多模型配置，按任务复杂度分配模型：
+**② 模型分工策略**
 
 | 用途 | 配置项 | 默认模型 | 选择理由 |
 |------|--------|---------|---------|
-| 主对话/Agent 推理 | `dashscope_model` | `qwen3.7-plus` | 强能力 + 函数调用，1M 免费额度 |
-| 视觉理解 | `vision_model` | `qwen3.7-plus` | 多模态，复用主模型 |
-| 短期摘要 | `summary_model` | `deepseek-v4-flash` | 轻量快速，免费额度，不花主模型 token |
-| 长期记忆提炼 | `long_term_memory_model` | `deepseek-v4-flash` | 同上，后台异步 |
+| 主对话/Agent 推理 | `chat_model` / `dashscope_model` | **GLM-5.3-Flash** / 回退 `qwen3.7-plus` | 工具调用 + 中文推理；GLM 端点缺失时回退 DashScope |
+| 视觉理解 | `vision_model` | **GLM-5.3-Flash** | 多模态，复用 GLM 端点 |
+| 短期摘要 | `summary_model` | **GLM-5.3-Flash** | 轻量快速，与主模型统一 |
+| 长期记忆提炼 | `long_term_memory_model` | **GLM-5.3-Flash** | 同上，后台异步 |
+| Responses 端点（可选） | `responses_model` | `gpt-5.4-mini` | 仅当 Responses 凭据齐全时优先 |
 
 > ★ 摘要/记忆提取用便宜模型是**核心降本策略**——主对话的 token 消耗留给真正的推理，辅助任务走免费额度模型。
 
@@ -251,7 +252,8 @@ build_render_image_action(params, ...)               # frontend_action 的 rende
 graph LR
     TOOLS["samseg_tools.py<br/>工具入口"] -->|"segment_image()"| RUNNER
     TOOLS -->|"detect_change()"| RUNNER
-    RUNNER["runner.py<br/>推理核心"] -->|"模型加载/推理/统计/VLM"| SAM3["SAM3 (SegEarth-OV3)"]
+    RUNNER["runner.py<br/>编排/统计/落盘"] -->|"单次前向/滑窗/双头融合"| OFFICIAL["official.py<br/>官方推理流程"]
+    OFFICIAL -->|"官方 sam3 + sam3.pt"| ENGINE["engine.py<br/>模型加载"]
     RUNNER -->|"re-export"| GEOIO["geoio.py<br/>地理 IO"]
     RUNNER -->|"re-export"| VIZ["visualize.py<br/>可视化"]
     GEOIO -->|"读影像/存 GeoTIFF/矢量化"| FS["agent-files/"]
@@ -268,7 +270,8 @@ graph LR
 | 层 | 文件 | 职责 |
 |---|---|---|
 | **工具入口** | `samseg_tools.py` | 接收 LLM 调用参数，编排 runner + geoio + visualize，构造 `frontend_action` |
-| **推理核心** | `runner.py` | 模型加载（全局缓存）、`run_segment` / `run_change_detection`、VLM 判读 |
+| **推理核心** | `official.py` + `engine.py` | 官方 SegEarth-OV3 单次前向/滑窗、双头+presence 融合、`prob_thd`、实例∩语义变化 |
+| **编排** | `runner.py` | 模型全局缓存、`run_segment` / `run_change_detection`、类别映射、统计/上色/落盘、规则判读 |
 | **地理 IO** | `geoio.py` | 读源影像、存 GeoTIFF 掩膜、矢量化为 GeoJSON |
 | **可视化** | `visualize.py` | PNG 上色、颜色图注 legend |
 

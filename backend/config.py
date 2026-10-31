@@ -23,6 +23,21 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# ★ 本机环境变量 PROJ_LIB 可能指向 PostGIS 自带的旧版 proj.db (LAYOUT.MINOR=2),
+#   与当前 GDAL 期望的 >=3 冲突 → 写 GeoTIFF / CRS.from_epsg 报 OGR Error 6。
+#   这里在 rasterio 首次 import 前切换到 rasterio 自带的 proj_data。
+try:
+    import importlib.util as _importlib_util
+
+    _rio_spec = _importlib_util.find_spec("rasterio")
+    if _rio_spec and _rio_spec.submodule_search_locations:
+        _proj_dir = Path(list(_rio_spec.submodule_search_locations)[0]) / "proj_data"
+        if (_proj_dir / "proj.db").is_file():
+            os.environ["PROJ_DATA"] = str(_proj_dir)
+            os.environ["PROJ_LIB"] = str(_proj_dir)
+except Exception:  # noqa: BLE001
+    pass
+
 
 def _env(key: str, default: str = "") -> str:
     """读取环境变量, 优先读取 agent-flow-study 根目录的 .env"""
@@ -229,6 +244,48 @@ class Settings:
     # 默认工作空间留空: 不绑定具体业务工作空间, 由工具层按裸名自动搜索所有工作空间定位
     geoserver_workspace: str = field(default_factory=lambda: _env("GEOSERVER_WORKSPACE", ""))
 
+    # ==================== 开源遥感影像检索 (2026-10) ====================
+    # 统一检索/下载适配层, 数据源均为公开开放数据:
+    #   - pc   : Microsoft Planetary Computer (STAC, 免密钥; 检索 + 瓦片预览 + AOI 裁剪下载)
+    #   - es   : AWS Earth Search (STAC, 免密钥; 检索 + 快视图)
+    #   - cdse : Copernicus Data Space (STAC, 检索免登录; 整景下载需免费账号, 走浏览器)
+    #   - gee  : Google Earth Engine (兜底, 需账号 + 科学上网, 默认未启用)
+    imagery_enabled: bool = field(
+        default_factory=lambda: _env("IMAGERY_ENABLED", "true").lower() == "true"
+    )
+    # 外部 API 超时 (秒) 与缩略图磁盘缓存 TTL (秒)
+    imagery_http_timeout: int = field(default_factory=lambda: int(_env("IMAGERY_HTTP_TIMEOUT", "45")))
+    imagery_thumbnail_ttl: int = field(default_factory=lambda: int(_env("IMAGERY_THUMBNAIL_TTL", "86400")))
+    # 单次 AOI 裁剪下载上限 (MB); 超出直接拒绝, 避免误下整景拖垮服务
+    imagery_download_max_mb: int = field(default_factory=lambda: int(_env("IMAGERY_DOWNLOAD_MAX_MB", "300")))
+    # 单次 AOI 裁剪下载面积上限 (平方度); 0.5≈0.7°×0.7°(约 78km×78km)
+    imagery_download_max_area_deg2: float = field(
+        default_factory=lambda: float(_env("IMAGERY_DOWNLOAD_MAX_AREA_DEG2", "0.5")))
+    # 单次检索返回上限 (跨数据源合计)
+    imagery_search_max_items: int = field(default_factory=lambda: int(_env("IMAGERY_SEARCH_MAX_ITEMS", "60")))
+    # ==================== 框选取图 / 解译 (2026-10) ====================
+    # 高分底图框选后, 服务端按 bbox 抓取影像并写成带 CRS GeoTIFF:
+    #   - esri     : ArcGIS World Imagery export (2K/4K 导出, 无 VPN)
+    #   - tianditu : 天地图 img_w WMTS 瓦片拼接 (z≤18)
+    tianditu_key: str = field(default_factory=lambda: _env(
+        "TIANDITU_KEY", "5db6058d7e236c138f2f2b686f550933"))
+    # 天地图浏览器端 Key 需要 Referer/Origin 校验；服务端 Key 可留空
+    tianditu_referer: str = field(default_factory=lambda: _env(
+        "TIANDITU_REFERER", "http://127.0.0.1:5173/"))
+    # 单次框选面积上限 (平方度); 0.02≈0.14°×0.14°(约 15km×15km)
+    imagery_capture_max_area_deg2: float = field(
+        default_factory=lambda: float(_env("IMAGERY_CAPTURE_MAX_AREA_DEG2", "0.02")))
+    # 输出边长上限 (像素); 同时用于控制瓦片拼接后的图像尺寸
+    imagery_capture_max_size: int = field(
+        default_factory=lambda: int(_env("IMAGERY_CAPTURE_MAX_SIZE", "1024")))
+    # 天地图拼接瓦片数上限 (防止一次抓太多)
+    imagery_capture_max_tiles: int = field(
+        default_factory=lambda: int(_env("IMAGERY_CAPTURE_MAX_TILES", "144")))
+    # Google Earth Engine 兜底源 (需 earthengine-api + 服务账号 + 科学上网)
+    gee_service_account: str = field(default_factory=lambda: _env("GEE_SERVICE_ACCOUNT", ""))
+    gee_key_file: str = field(default_factory=lambda: _env("GEE_KEY_FILE", ""))
+    gee_project: str = field(default_factory=lambda: _env("GEE_PROJECT", ""))
+
     # ==================== 统一文件存储 (v2.4 按来源维度组织) ====================
     # ★ 所有文件统一收归 agent-files/, 按数据来源作为一级目录:
     #   agent-files/
@@ -289,6 +346,55 @@ class Settings:
     ))
     # 计算设备: cuda / cpu (ViT-L 模型在 CPU 上极慢, 实际需 CUDA)
     samseg_device: str = field(default_factory=lambda: _env("SAMSEG_DEVICE", "cuda"))
+
+    # ==================== ProC-SAM3 (替换 SegEarth-OV3) ====================
+    # 2026-10: 语义分割主引擎改为 ProC-SAM3（Prompt-Calibrated SAM3）。
+    # 类别使用英文 + 英文同义词；旧引擎保留但默认不启用。
+    samseg_engine: str = field(default_factory=lambda: _env(
+        "SAMSEG_ENGINE", "proc_sam3").lower())
+    proc_sam3_root: str = field(default_factory=lambda: _env(
+        "PROC_SAM3_ROOT", r"E:\1代码\模型\变化检测\ProC-SAM3-main"))
+    proc_sam3_weights_root: str = field(default_factory=lambda: _env(
+        "PROC_SAM3_WEIGHTS_ROOT", r"E:\1代码\模型\权重"))
+    # 504 为交互默认：显存占用低、单次推理 ~5-8s；精度优先可设 1008
+    proc_sam3_resolution: int = field(default_factory=lambda: int(
+        _env("PROC_SAM3_RESOLUTION", "504")))
+    # 启动后台预热模型 + 默认 3 类提示，首解译不再等 ~60s 权重加载
+    proc_sam3_warmup: bool = field(
+        default_factory=lambda: _env("PROC_SAM3_WARMUP", "true").lower() == "true")
+    proc_sam3_device: str = field(default_factory=lambda: _env("PROC_SAM3_DEVICE", ""))
+    # ==================== SamSeg 官方推理流程 (2026-10) ====================
+    # ★ 对齐 earth-insights/SegEarth-OV-3 的 demo.py / segearthov3_segmentor.py:
+    #   单次前向 + 大图滑窗 + 双头/存在性融合 + prob_thd 阈值回背景。
+    #   multipass = 旧的“多轮涂黑残差 + 阈值衰减”自研流程，仅保留作回退。
+    samseg_inference_mode: str = field(default_factory=lambda: _env(
+        "SAMSEG_INFERENCE_MODE", "official").lower())
+    # 官方 demo.py: confidence_threshold=0.1（Sam3Processor 的实例置信度）
+    samseg_confidence_threshold: float = field(default_factory=lambda: float(
+        _env("SAMSEG_CONFIDENCE_THRESHOLD", "0.1")))
+    # 官方 demo.py: prob_thd=0.1（argmax 后低于该置信度的像素压回背景）
+    samseg_prob_thd: float = field(default_factory=lambda: float(
+        _env("SAMSEG_PROB_THD", "0.1")))
+    # 官方 demo.py: slide_stride=512, slide_crop=512；0 表示关闭滑窗
+    samseg_slide_crop: int = field(default_factory=lambda: int(
+        _env("SAMSEG_SLIDE_CROP", "512")))
+    samseg_slide_stride: int = field(default_factory=lambda: int(
+        _env("SAMSEG_SLIDE_STRIDE", "512")))
+    # 官方在 CUDA 上使用 bfloat16 autocast；CPU/旧卡自动退回 float32
+    samseg_autocast: bool = field(
+        default_factory=lambda: _env("SAMSEG_AUTOCAST", "true").lower() == "true"
+    )
+    # 官方流程不做形态学后处理；保留开关用于产物降噪（默认关闭，严格对齐官方）
+    samseg_postprocess: bool = field(
+        default_factory=lambda: _env("SAMSEG_POSTPROCESS", "false").lower() == "true"
+    )
+    # 官方变化检测: 实例覆盖率阈值 / 最小实例面积 / 配准膨胀半径
+    samseg_instance_iou_threshold: float = field(default_factory=lambda: float(
+        _env("SAMSEG_INSTANCE_IOU_THRESHOLD", "0.3")))
+    samseg_min_instance_area: int = field(default_factory=lambda: int(
+        _env("SAMSEG_MIN_INSTANCE_AREA", "20")))
+    samseg_instance_dilation: int = field(default_factory=lambda: int(
+        _env("SAMSEG_INSTANCE_DILATION", "2")))
 
     # ==================== Sandbox 沙盒配置 (Agent 自写代码执行环境) ====================
     # 沙盒让 Agent 在 Docker 容器中执行任意 Python/Shell 代码, 弥补预定义工具的不足。

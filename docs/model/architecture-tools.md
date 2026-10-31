@@ -1,4 +1,4 @@
-# 工具系统（注册 / 分类 / 47 工具 / 统一 Schema）
+# 工具系统（注册 / 分类 / 42 工具 / 统一 Schema）
 
 > 本文是 [architecture.md](../architecture.md) 的子文档。系统总览见总纲。
 
@@ -6,7 +6,7 @@
 
 ## 3. 工具系统
 
-> **一句话**：47 个工具 + 装饰器注册机制，LLM 通过 `bind_tools()` 调用，工具返回 `frontend_action` 指令或普通数据结果。
+> **一句话**：42 个工具（38 个经白名单暴露给 LLM）+ 装饰器注册机制，LLM 通过 `bind_tools()` 调用，工具返回 `frontend_action` 指令或普通数据结果。
 
 **关键文件**：
 - [`backend/model/tools/tool_registry.py`](../../backend/model/tools/tool_registry.py) — 注册表
@@ -60,19 +60,20 @@ System Prompt 中工具目录按以下分类展示（[`system_prompt.py::_TOOL_C
 | `skill` | 长任务技能 | 检索标准化长任务编排方案 |
 | `memory` | 记忆管理 | 查看/清空长期记忆与会话摘要 |
 
-### 3.3 工具完整清单（47 个，10 大分类）
+### 3.3 工具完整清单（42 个，10 大分类）
 
-> ★ 工具规模演进：阶段 8（28 个）→ 阶段 12（+11：database 元数据检索 / preprocess / report）→ 阶段 14（+1：analysis 类 connect_components）→ 阶段 16（+2：delete_geoserver_layer 补齐图层删除 + overlay_edge_on_image 边缘算子叠加）→ 阶段 19（+1：visualize_vector GeoJSON 可视化进工作区）→ 当前 47 个 10 大类。
+> ★ 工具规模演进：阶段 8（28 个）→ 阶段 12（+11：database 元数据检索 / preprocess / report）→ 阶段 14（+1：analysis 类 connect_components）→ 阶段 16（+2：delete_geoserver_layer + overlay_edge_on_image）→ 阶段 19（+1：visualize_vector）→ 阶段 24（收敛为 42 个 / 10 大类）。
+> ★ 本清单为阶段性说明；**权威清单以运行时 `tool_registry.get_all_tools()` 为准**（当前 42 个，LLM 白名单 38 个）。
 
-#### 遥感解译主线（samseg 4 + remote_sensing 1）
+#### 遥感解译主线（samseg 2 + vlm 1 + remote_sensing 1）
 
 | # | 工具名 | 分类 | 签名 | 返回类型 |
 |---|--------|------|------|---------|
-| 1 | `segment_image` | samseg | `(image_path, classes="") -> Dict` | frontend_action(`render_image`) |
-| 2 | `detect_change` | samseg | `(t1_path, t2_path, classes="") -> Dict` | frontend_action(`render_image`) + VLM 业务归类 |
-| 3 | `understand_image` | samseg | `(image_path, question="") -> Dict` | direct（VLM 视觉理解文本） |
-| 4 | `prepare_cd_dataset_by_fishnet` | samseg | `(t1_path, t2_path, output_dir, tile_size=512) -> Dict` | direct（CD 训练集渔网切片） |
-| 5 | `download_geoserver_layer` | geoserver | `(layer_name) -> Dict` | frontend_action(`download`) |
+| 1 | `segment_image` | samseg | `(image_path, classes="", referring_expression="") -> Dict` | frontend_action(`render_image`) |
+| 2 | `detect_change` | samseg | `(t1_path, t2_path, classes="") -> Dict` | frontend_action(`render_image`) + 规则/转移矩阵业务归类 |
+| 3 | `understand_image` | vlm | `(image_path, question="") -> Dict` | direct（VLM 视觉理解文本） |
+| — | `prepare_cd_dataset_by_fishnet` | 内部 | `(t1_path, t2_path, output_dir, tile_size=512) -> Dict` | 不注册、不暴露给 LLM，仅供内部调用 |
+| 4 | `download_geoserver_layer` | geoserver | `(layer_name) -> Dict` | frontend_action(`download`) |
 
 #### GeoServer 图层服务（geoserver 8）
 

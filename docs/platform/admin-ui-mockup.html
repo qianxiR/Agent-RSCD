@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>国土智察 · 管理控制台 UI 原型</title>
+<style>
+  :root{
+    --bg:#f2f4f6; --panel:#fff; --panel-2:#fafbfc;
+    --line:#e2e6eb; --line-strong:#cbd2da;
+    --ink:#182735; --ink-2:#536b80; --ink-3:#8fa2b3;
+    --blue:#2c6fbd; --blue-soft:#eaf2fb;
+    --orange:#d97706; --orange-soft:#fdf1e3;
+    --green:#2f9e56; --red:#c94a4a; --amber:#c77c0a;
+    --nav:#ffffff; --nav-2:#eef3f9; --nav-ink:#536b80;
+    --r:8px; --shadow:0 8px 24px rgba(20,40,70,.06);
+    --mono:"Cascadia Code","SF Mono",Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{height:100vh;overflow:hidden;background:var(--bg);color:var(--ink);font:13px/1.55 var(--sans)}
+  button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  .app{display:grid;grid-template-rows:56px 1fr;height:100vh}
+
+  /* top */
+  .top{display:flex;align-items:center;gap:14px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line);z-index:20}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:14px;white-space:nowrap}
+  .brand .mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#2c6fbd,#5b9ad8);color:#fff;display:grid;place-items:center;font-size:12px}
+  .brand small{font-weight:500;color:var(--ink-3);font-size:11px}
+  .env{display:flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;background:#fff7ed;color:#b45309;border:1px solid #f3dfc2;font-size:10px;font-weight:600}
+  .env i{width:6px;height:6px;border-radius:50%;background:#d97706}
+  .grow{flex:1}
+  .search{display:flex;align-items:center;gap:8px;width:300px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;color:var(--ink-3);background:var(--panel-2)}
+  .search kbd{margin-left:auto;font:10px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:#fff;color:var(--ink-3)}
+  .top-actions{display:flex;align-items:center;gap:8px}
+  .icon-btn{position:relative;width:32px;height:32px;border-radius:7px;display:grid;place-items:center;color:var(--ink-2)}
+  .icon-btn:hover{background:var(--bg)}
+  .badge{position:absolute;top:1px;right:1px;min-width:14px;height:14px;border-radius:99px;background:var(--red);color:#fff;font:10px/14px var(--sans);text-align:center;padding:0 3px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#e7eef8;color:var(--blue);display:grid;place-items:center;font-weight:700;font-size:12px}
+  .admin-name{font-size:12px;color:var(--ink-2);white-space:nowrap}
+
+  /* shell */
+  .shell{display:grid;grid-template-columns:212px 1fr;min-height:0}
+  .side{background:#fff;color:var(--ink-2);display:flex;flex-direction:column;padding:12px 10px;overflow:auto;border-right:1px solid var(--line)}
+  .side .group{padding:12px 10px 5px;font-size:10px;color:var(--ink-3);letter-spacing:1px}
+  .side button{width:100%;display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;color:var(--ink-2);font-size:12px;text-align:left;position:relative}
+  .side button svg{width:16px;height:16px;flex-shrink:0;opacity:.8}
+  .side button:hover{background:#f2f6fb;color:var(--ink)}
+  .side button.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .side button.active::before{content:"";position:absolute;left:-10px;top:7px;bottom:7px;width:3px;border-radius:0 3px 3px 0;background:var(--blue)}
+  .side .foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
+
+  .main{min-width:0;min-height:0;overflow:auto;padding:18px 20px 26px}
+  .page-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:16px}
+  .page-head h1{font-size:18px;letter-spacing:.2px}
+  .page-head p{color:var(--ink-3);font-size:12px;margin-top:2px}
+  .head-actions{margin-left:auto;display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink-2);font-size:12px}
+  .btn:hover{border-color:var(--line-strong);color:var(--ink)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn.primary:hover{background:#2461a6}
+  .btn.danger{color:var(--red);border-color:#e7b8b8;background:#fff}
+  .btn.danger:hover{background:#fdf2f2}
+  .btn.soft{background:var(--blue-soft);border-color:transparent;color:var(--blue)}
+
+  .grid{display:grid;gap:12px}
+  .kpis{grid-template-columns:repeat(5,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  .kpi{padding:12px 14px}
+  .kpi .label{color:var(--ink-3);font-size:11px}
+  .kpi .num{font-size:24px;font-weight:700;margin:1px 0 2px;letter-spacing:.3px}
+  .kpi .sub{color:var(--ink-3);font-size:10px}
+  .kpi .sub b{color:var(--green)}
+  .two{display:grid;grid-template-columns:1.45fr 1fr;gap:12px;margin-top:12px}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--line)}
+  .panel-head h3{font-size:12px;font-weight:600}
+  .panel-head .more{margin-left:auto;color:var(--ink-3);font-size:11px}
+  .panel-body{padding:10px 13px}
+  .muted{color:var(--ink-3);font-size:11px}
+  .mono{font-family:var(--mono);font-size:11px}
+  .tag{display:inline-flex;align-items:center;padding:2px 7px;border-radius:99px;font-size:10px;white-space:nowrap}
+  .tag.blue{background:var(--blue-soft);color:var(--blue)}
+  .tag.orange{background:var(--orange-soft);color:var(--orange)}
+  .tag.green{background:#e9f6ee;color:var(--green)}
+  .tag.red{background:#fbeaea;color:var(--red)}
+  .tag.gray{background:#f0f2f5;color:var(--ink-2)}
+
+  /* charts */
+  .chart{height:140px;position:relative;margin-top:4px}
+  .chart svg{width:100%;height:100%}
+  .chart-legend{display:flex;gap:12px;color:var(--ink-3);font-size:10px;margin-top:2px}
+  .chart-legend i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px}
+  .bars{display:flex;align-items:flex-end;gap:10px;height:150px;padding:8px 4px 0}
+  .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end}
+  .bar{width:100%;max-width:22px;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#7fa9d8,#2c6fbd)}
+  .bar.orange{background:linear-gradient(180deg,#f0b45c,#d97706)}
+  .bar-col small{font-size:9px;color:var(--ink-3)}
+
+  /* table */
+  .toolbar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .chips{display:flex;gap:4px;padding:3px;background:#e9edf1;border-radius:7px}
+  .chips button{padding:4px 9px;border-radius:5px;color:var(--ink-2);font-size:11px}
+  .chips button.active{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .toolbar .grow{flex:1}
+  .table-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid #f0f2f4;white-space:nowrap;font-size:12px}
+  th{font-size:10px;color:var(--ink-3);font-weight:600;background:#fbfcfd;letter-spacing:.2px}
+  tbody tr:hover{background:var(--panel-2)}
+  td.name{font-weight:600}
+  .check{width:13px;height:13px;border:1.5px solid var(--line-strong);border-radius:3px;display:inline-block;vertical-align:-2px}
+  .check.on{background:var(--blue);border-color:var(--blue);position:relative}
+  .check.on::after{content:"✓";position:absolute;inset:0;color:#fff;font-size:9px;line-height:11px;text-align:center}
+
+  /* user inspector / roles */
+  .split{display:grid;grid-template-columns:230px 1fr;gap:12px}
+  .role-list{padding:6px}
+  .role-item{padding:9px 10px;border-radius:6px;font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:8px;cursor:pointer}
+  .role-item:hover{background:var(--panel-2)}
+  .role-item.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .role-item small{margin-left:auto;color:var(--ink-3);font-weight:400}
+  .matrix th,.matrix td{text-align:center;padding:7px 8px;font-size:11px}
+  .matrix th:first-child,.matrix td:first-child{text-align:left}
+  .matrix td .check{width:14px;height:14px}
+
+  /* jobs / audit */
+  .queue{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .queue-card{border:1px solid var(--line);border-radius:7px;padding:10px}
+  .queue-card b{font-size:18px}
+  .progress{height:5px;background:#eef1f4;border-radius:99px;overflow:hidden}
+  .progress i{display:block;height:100%;background:var(--blue);border-radius:99px}
+  .progress.orange i{background:var(--orange)}
+  .log{background:#101a24;color:#b9c7d4;border-radius:6px;padding:9px;font:10px/1.65 var(--mono);max-height:180px;overflow:auto;margin-top:10px}
+  .log .ok{color:#77c98a}.log .warn{color:#e0b268}.log .err{color:#ef8a8a}
+  .alert{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #f0d9b8;background:#fffbf4;border-radius:6px;margin-bottom:8px;font-size:11px;color:#8a5a12}
+  .alert.red{border-color:#edc4c4;background:#fff7f7;color:#9b3a3a}
+
+  .view{display:none}.view.active{display:block}
+  @media(max-width:1180px){.kpis{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div class="mark">国</div>国土智察<small>管理控制台</small></div>
+    <div class="env"><i></i>生产环境</div>
+    <div class="grow"></div>
+    <div class="search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      搜索用户、项目、任务
+      <kbd>⌘K</kbd>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" title="告警"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg><span class="badge">3</span></button>
+      <button class="icon-btn" title="文档"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg></button>
+      <span class="admin-name">系统管理员</span>
+      <span class="tag green">MFA</span>
+      <div class="avatar">管</div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="side">
+      <div class="group">运营</div>
+      <button class="active" data-view="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>运营总览</button>
+      <div class="group">身份与权限</div>
+      <button data-view="users"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19c.6-3.2 3-5 6.2-5s5.6 1.8 6.2 5"/><path d="M17 8.5a3 3 0 1 1 0 6"/><path d="M18 14.5c2 .5 3.2 2 3.5 4.5"/></svg>用户与组织</button>
+      <button data-view="roles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6.5V12c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6.5Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>角色与权限</button>
+      <div class="group">业务治理</div>
+      <button data-view="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>项目管理</button>
+      <button data-view="datasets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>数据治理</button>
+      <button data-view="layers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></svg>图层服务</button>
+      <button data-view="jobs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3 7-7"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>任务与模型</button>
+      <button data-view="storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="5" rx="1.5"/><rect x="3" y="14" width="18" height="5" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>存储与配额</button>
+      <div class="group">安全与系统</div>
+      <button data-view="audit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6l4 4v14H5V3Z"/><path d="M9 12h6M9 16h6M9 8h2"/></svg>审计日志</button>
+      <button data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>系统设置</button>
+      <div class="foot"><button data-view="help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 1 1 4.2 2.7c-.8.4-1.3 1.1-1.3 2.3"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>帮助与文档</button></div>
+    </aside>
+
+    <main class="main">
+      <!-- ================= 总览 ================= -->
+      <section class="view active" id="view-overview">
+        <div class="page-head">
+          <div><h1>运营总览</h1><p>系统运行状态、资源使用与最近管理动作 · 2026-10-26 19:50</p></div>
+          <div class="head-actions"><button class="btn">导出日报</button><button class="btn primary">查看告警</button></div>
+        </div>
+        <div class="grid kpis">
+          <div class="card kpi"><div class="label">用户</div><div class="num">128</div><div class="sub"><b>+6</b> 本月</div></div>
+          <div class="card kpi"><div class="label">项目</div><div class="num">36</div><div class="sub">活跃 32 · 归档 4</div></div>
+          <div class="card kpi"><div class="label">运行任务</div><div class="num">8</div><div class="sub">GPU 6 · CPU 2</div></div>
+          <div class="card kpi"><div class="label">存储</div><div class="num">1.8 <small style="font-size:12px;color:var(--ink-3)">TB</small></div><div class="sub">配额 3 TB · 60%</div></div>
+          <div class="card kpi"><div class="label">GPU</div><div class="num">2/4</div><div class="sub">显存 71% · 队列 5</div></div>
+        </div>
+
+        <div class="two">
+          <div class="panel">
+            <div class="panel-head"><h3>任务趋势</h3><span class="tag blue">近 7 天</span><button class="more">任务中心 →</button></div>
+            <div class="panel-body">
+              <div class="chart">
+                <svg viewBox="0 0 560 130" preserveAspectRatio="none">
+                  <g stroke="#eef1f4" stroke-width="1"><path d="M0 20H560M0 50H560M0 80H560M0 110H560"/></g>
+                  <path d="M10 100 L90 78 L170 86 L250 52 L330 62 L410 34 L490 44 L540 24" fill="none" stroke="#2c6fbd" stroke-width="2.4"/>
+                  <path d="M10 110 L90 104 L170 96 L250 90 L330 78 L410 82 L490 68 L540 62" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="4 4"/>
+                  <g fill="#2c6fbd"><circle cx="10" cy="100" r="2.6"/><circle cx="90" cy="78" r="2.6"/><circle cx="170" cy="86" r="2.6"/><circle cx="250" cy="52" r="2.6"/><circle cx="330" cy="62" r="2.6"/><circle cx="410" cy="34" r="2.6"/><circle cx="490" cy="44" r="2.6"/><circle cx="540" cy="24" r="2.6"/></g>
+                </svg>
+              </div>
+              <div class="chart-legend"><span><i style="background:#2c6fbd"></i>任务数</span><span><i style="background:#d97706"></i>失败数</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>存储 Top 5 项目</h3><button class="more">存储管理 →</button></div>
+            <div class="panel-body">
+              <div style="display:grid;gap:10px;margin-top:4px">
+                <div><div style="display:flex;font-size:11px"><span>成都变化监测</span><b style="margin-left:auto">620 GB</b></div><div class="progress" style="margin-top:4px"><i style="width:84%"></i></div></div>
+                <div><div style="display:flex;font-size:11px"><span>青海湖监测</span><b style="margin-left:auto">480 GB</b></div><div class="progress" style="margin-top:4px"><i style="width:66%"></i></div></div>
+                <div><div style="display:flex;font-size:11px"><span>耕地非农化</span><b style="margin-left:auto">310 GB</b></div><div class="progress" style="margin-top:4px"><i style="width:43%"></i></div></div>
+                <div><div style="display:flex;font-size:11px"><span>城市扩张</span><b style="margin-left:auto">220 GB</b></div><div class="progress" style="margin-top:4px"><i style="width:30%"></i></div></div>
+                <div><div style="display:flex;font-size:11px"><span>应急监测</span><b style="margin-left:auto">120 GB</b></div><div class="progress" style="margin-top:4px"><i style="width:16%"></i></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two" style="grid-template-columns:1fr 1.2fr">
+          <div class="panel">
+            <div class="panel-head"><h3>队列与告警</h3></div>
+            <div class="panel-body">
+              <div class="queue">
+                <div class="queue-card"><div class="muted">GPU 队列</div><b>3 运行 / 5 等待</b><div class="progress" style="margin-top:7px"><i style="width:72%"></i></div></div>
+                <div class="queue-card"><div class="muted">CPU 队列</div><b>1 运行 / 0 等待</b><div class="progress orange" style="margin-top:7px"><i style="width:24%"></i></div></div>
+              </div>
+              <div class="alert" style="margin-top:10px"><span>⚠</span><span>存储使用率 60%，项目“成都变化监测”接近软配额</span></div>
+              <div class="alert red"><span>!</span><span>任务 #125 GPU OOM 失败，已自动重试 1 次</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>最近管理动作</h3><button class="more">审计日志 →</button></div>
+            <div class="panel-body" style="padding:4px 0">
+              <div style="display:flex;gap:10px;padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px"><span class="tag orange">权限</span><span style="flex:1">admin 将 analyst1 加入“成都变化监测”项目</span><span class="muted">2 分钟前</span></div>
+              <div style="display:flex;gap:10px;padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px"><span class="tag blue">用户</span><span style="flex:1">admin 禁用了用户 test01</span><span class="muted">18 分钟前</span></div>
+              <div style="display:flex;gap:10px;padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px"><span class="tag gray">存储</span><span style="flex:1">系统清理孤儿文件 2.1 GB</span><span class="muted">1 小时前</span></div>
+              <div style="display:flex;gap:10px;padding:8px 13px;font-size:11px"><span class="tag green">任务</span><span style="flex:1">admin 重试任务 #125</span><span class="muted">2 小时前</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <div class="panel-head"><h3>最近任务</h3><span class="muted">全部项目 · 最近 24 小时</span><button class="more">任务中心 →</button></div>
+          <table>
+            <thead><tr><th>#</th><th>类型</th><th>项目</th><th>用户</th><th>状态</th><th>耗时</th><th>产物</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">128</td><td>变化检测</td><td>成都变化监测</td><td>zhangsan</td><td><span class="tag amber">运行 62%</span></td><td>01:23</td><td>—</td><td>取消</td></tr>
+              <tr><td class="mono">127</td><td>语义分割</td><td>成都变化监测</td><td>zhangsan</td><td><span class="tag green">完成</span></td><td>19s</td><td>3 个</td><td>查看</td></tr>
+              <tr><td class="mono">125</td><td>变化检测</td><td>耕地非农化</td><td>wangwu</td><td><span class="tag red">失败</span></td><td>00:42</td><td>—</td><td>重试</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= 用户 ================= -->
+      <section class="view" id="view-users">
+        <div class="page-head"><div><h1>用户与组织</h1><p>账号、角色、状态与会话管理；禁用后立即失效</p></div><div class="head-actions"><button class="btn">导出</button><button class="btn primary">＋ 邀请用户</button></div></div>
+        <div class="toolbar"><div class="chips"><button class="active">全部 128</button><button>启用 120</button><button>禁用 8</button></div><div class="grow"></div><button class="btn">组织：全部</button><button class="btn">角色：全部</button></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th style="width:32px"><span class="check"></span></th><th>用户名</th><th>邮箱</th><th>组织</th><th>角色</th><th>状态</th><th>最近登录</th><th style="width:50px"></th></tr></thead>
+            <tbody>
+              <tr><td><span class="check"></span></td><td class="name">admin</td><td>admin@rsiis.cn</td><td>自然资源监测中心</td><td><span class="tag blue">系统管理员</span></td><td><span class="tag green">启用</span></td><td>2 分钟前</td><td>⋯</td></tr>
+              <tr><td><span class="check"></span></td><td class="name">zhangsan</td><td>zhangsan@rsiis.cn</td><td>自然资源监测中心</td><td><span class="tag blue">分析员</span></td><td><span class="tag green">启用</span></td><td>昨天 18:20</td><td>⋯</td></tr>
+              <tr><td><span class="check"></span></td><td class="name">lisi</td><td>lisi@rsiis.cn</td><td>自然资源监测中心</td><td><span class="tag blue">项目管理员</span></td><td><span class="tag green">启用</span></td><td>2 天前</td><td>⋯</td></tr>
+              <tr><td><span class="check"></span></td><td class="name">test01</td><td>test01@rsiis.cn</td><td>外部协作</td><td><span class="tag gray">访客</span></td><td><span class="tag red">已禁用</span></td><td>2026-10-01</td><td>⋯</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1.2fr">
+          <div class="panel"><div class="panel-head"><h3>用户详情 · zhangsan</h3><span class="tag green">启用</span></div><div class="panel-body"><dl style="display:grid;grid-template-columns:78px 1fr;gap:8px;font-size:12px"><dt style="color:var(--ink-3)">用户 ID</dt><dd class="mono">u_1024</dd><dt style="color:var(--ink-3)">角色</dt><dd>分析员 · 项目管理员（成都）</dd><dt style="color:var(--ink-3)">项目</dt><dd>成都变化监测、耕地非农化</dd><dt style="color:var(--ink-3)">会话</dt><dd>2 台设备 · 最近 18:20</dd><dt style="color:var(--ink-3)">配额</dt><dd>存储 50 GB · 任务 20/天</dd></dl><div style="display:flex;gap:8px;margin-top:12px"><button class="btn soft">重置密码</button><button class="btn">退出所有设备</button><button class="btn danger">禁用</button></div></div></div>
+          <div class="panel"><div class="panel-head"><h3>最近操作</h3><button class="more">审计 →</button></div><div class="panel-body" style="padding:0"><div style="padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px">18:20 登录成功 · 127.0.0.1</div><div style="padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px">18:22 上传数据集“2026-10 影像”</div><div style="padding:8px 13px;font-size:11px">18:31 创建变化检测任务 #128</div></div></div>
+        </div>
+
+        <div class="two" style="grid-template-columns:1.4fr 1fr">
+          <div class="panel">
+            <div class="panel-head"><h3>登录趋势</h3><span class="muted">近 7 天 · 成功/失败</span></div>
+            <div class="panel-body">
+              <div class="bars">
+                <div class="bar-col"><div class="bar" style="height:52%"></div><small>周一</small></div>
+                <div class="bar-col"><div class="bar" style="height:64%"></div><small>周二</small></div>
+                <div class="bar-col"><div class="bar" style="height:48%"></div><small>周三</small></div>
+                <div class="bar-col"><div class="bar" style="height:76%"></div><small>周四</small></div>
+                <div class="bar-col"><div class="bar" style="height:88%"></div><small>周五</small></div>
+                <div class="bar-col"><div class="bar" style="height:32%"></div><small>周六</small></div>
+                <div class="bar-col"><div class="bar" style="height:20%"></div><small>周日</small></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>待激活邀请</h3><span class="tag orange">3</span></div>
+            <div class="panel-body" style="padding:0">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px"><span style="flex:1">wangwu@rsiis.cn</span><span class="muted">2 天前</span><button class="btn" style="padding:3px 7px">重发</button></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px"><span style="flex:1">newuser@rsiis.cn</span><span class="muted">5 天前</span><button class="btn" style="padding:3px 7px">重发</button></div>
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 13px;font-size:11px"><span style="flex:1">guest02@partner.cn</span><span class="muted">6 天前</span><button class="btn" style="padding:3px 7px">撤销</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 角色 ================= -->
+      <section class="view" id="view-roles">
+        <div class="page-head"><div><h1>角色与权限</h1><p>内置角色只读，可复制为自定义角色；保存前展示影响人数</p></div><div class="head-actions"><button class="btn primary">＋ 新建角色</button></div></div>
+        <div class="split">
+          <div class="panel"><div class="panel-head"><h3>角色</h3><span class="muted">5 个</span></div><div class="role-list">
+            <div class="role-item active">系统管理员 <small>2 人</small></div>
+            <div class="role-item">组织管理员 <small>3 人</small></div>
+            <div class="role-item">项目管理员 <small>12 人</small></div>
+            <div class="role-item">分析员 <small>68 人</small></div>
+            <div class="role-item">访客 <small>43 人</small></div>
+          </div></div>
+          <div class="panel">
+            <div class="panel-head"><h3>权限矩阵 · 系统管理员</h3><span class="tag gray">内置 · 只读</span><button class="more">复制为自定义</button></div>
+            <div style="overflow:auto">
+              <table class="matrix">
+                <thead><tr><th>模块</th><th>查看</th><th>创建</th><th>修改</th><th>删除</th><th>执行</th><th>管理</th></tr></thead>
+                <tbody>
+                  <tr><td>项目</td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check on"></span></td></tr>
+                  <tr><td>数据</td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td></tr>
+                  <tr><td>任务</td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td></tr>
+                  <tr><td>用户</td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check on"></span></td></tr>
+                  <tr><td>系统设置</td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check on"></span></td></tr>
+                  <tr><td>审计</td><td><span class="check on"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td><td><span class="check"></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;padding:10px 13px;border-top:1px solid var(--line)"><span class="muted">影响 2 个用户 · 修改将写审计</span><button class="btn primary" style="margin-left:auto">保存</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 项目 ================= -->
+      <section class="view" id="view-projects">
+        <div class="page-head"><div><h1>项目管理</h1><p>全量项目、归属、配额与归档；管理员可只读进入用户端</p></div><div class="head-actions"><button class="btn">导出清单</button><button class="btn primary">＋ 新建项目</button></div></div>
+        <div class="toolbar"><div class="chips"><button class="active">全部 36</button><button>正常 32</button><button>归档 4</button></div><div class="grow"></div><button class="btn">组织：全部</button><button class="btn">按存储排序</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="width:32px"><span class="check"></span></th><th>项目</th><th>所有者</th><th>组织</th><th>资产</th><th>任务</th><th>存储</th><th>状态</th><th style="width:50px"></th></tr></thead>
+          <tbody>
+            <tr><td><span class="check"></span></td><td class="name">成都市变化监测</td><td>zhangsan</td><td>自然资源监测中心</td><td>12</td><td>18</td><td>620 GB</td><td><span class="tag green">正常</span></td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">青海湖水域监测</td><td>lisi</td><td>自然资源监测中心</td><td>8</td><td>9</td><td>480 GB</td><td><span class="tag green">正常</span></td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">耕地非农化</td><td>wangwu</td><td>耕保处</td><td>21</td><td>34</td><td>310 GB</td><td><span class="tag green">正常</span></td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">历史项目 2024</td><td>zhaoliu</td><td>自然资源监测中心</td><td>4</td><td>2</td><td>90 GB</td><td><span class="tag gray">已归档</span></td><td>⋯</td></tr>
+          </tbody>
+        </table></div>
+        <div class="two" style="grid-template-columns:1.2fr 1fr">
+          <div class="panel"><div class="panel-head"><h3>项目详情 · 成都市变化监测</h3><span class="tag green">正常</span></div><div class="panel-body"><dl style="display:grid;grid-template-columns:78px 1fr;gap:8px;font-size:12px"><dt style="color:var(--ink-3)">所有者</dt><dd>zhangsan（可转移）</dd><dt style="color:var(--ink-3)">成员</dt><dd>6 人（项目管理员 1 / 分析员 4 / 访客 1）</dd><dt style="color:var(--ink-3)">配额</dt><dd>存储 1 TB（已用 620 GB）· 任务 200/月</dd><dt style="color:var(--ink-3)">最近任务</dt><dd>#128 变化检测 · 运行中</dd></dl><div style="display:flex;gap:8px;margin-top:12px"><button class="btn soft">只读进入</button><button class="btn">转移所有者</button><button class="btn">归档</button><button class="btn danger">删除</button></div></div></div>
+          <div class="panel"><div class="panel-head"><h3>成员</h3><button class="more">管理 →</button></div><div class="panel-body" style="padding:0"><div style="padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px">zhangsan · 项目管理员</div><div style="padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px">lisi · 分析员</div><div style="padding:8px 13px;border-bottom:1px solid #f1f3f5;font-size:11px">wangwu · 分析员</div><div style="padding:8px 13px;font-size:11px">guest01 · 访客</div></div></div>
+        </div>
+      </section>
+
+      <!-- ================= 数据治理 ================= -->
+      <section class="view" id="view-datasets">
+        <div class="page-head"><div><h1>数据治理</h1><p>全量数据集质量、孤儿文件、保留策略与清理</p></div><div class="head-actions"><button class="btn">扫描孤儿</button><button class="btn primary">导出清单</button></div></div>
+        <div class="toolbar"><div class="chips"><button class="active">全部 1,284</button><button>缺 CRS 12</button><button>孤儿文件 8</button><button>重复 3</button></div><div class="grow"></div><button class="btn">类型：全部</button><button class="btn">按大小排序</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="width:32px"><span class="check"></span></th><th>数据集</th><th>项目</th><th>类型</th><th>CRS</th><th>大小</th><th>状态</th><th>问题</th><th style="width:50px"></th></tr></thead>
+          <tbody>
+            <tr><td><span class="check"></span></td><td class="name">2026-10 影像</td><td>成都变化监测</td><td>栅格</td><td class="mono">4490</td><td>153.9 KB</td><td><span class="tag green">就绪</span></td><td>—</td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">待处理影像</td><td>成都变化监测</td><td>栅格</td><td>—</td><td>12.8 MB</td><td><span class="tag amber">解析中</span></td><td><span class="tag red">缺 CRS</span></td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">orphan_2025.tif</td><td>—</td><td>栅格</td><td class="mono">3857</td><td>2.1 GB</td><td><span class="tag gray">孤儿</span></td><td><span class="tag red">无引用</span></td><td>⋯</td></tr>
+            <tr><td><span class="check"></span></td><td class="name">变化图斑 202611</td><td>成都变化监测</td><td>矢量</td><td class="mono">4490</td><td>24 要素</td><td><span class="tag green">已发布</span></td><td>—</td><td>⋯</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ================= 任务 ================= -->
+      <section class="view" id="view-jobs">
+        <div class="page-head"><div><h1>任务与模型</h1><p>全量队列、Worker/GPU、模型配置与重试/取消</p></div><div class="head-actions"><button class="btn">刷新</button><button class="btn primary">调整并发</button></div></div>
+        <div class="grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="card kpi"><div class="label">GPU 队列</div><div class="num">3 / 5</div><div class="sub">运行 / 等待</div></div>
+          <div class="card kpi"><div class="label">CPU 队列</div><div class="num">1 / 0</div><div class="sub">运行 / 等待</div></div>
+          <div class="card kpi"><div class="label">今日失败</div><div class="num">2</div><div class="sub">自动重试 1</div></div>
+          <div class="card kpi"><div class="label">Worker</div><div class="num">4</div><div class="sub">GPU 2 · CPU 2</div></div>
+        </div>
+        <div class="two" style="grid-template-columns:1.4fr 1fr">
+          <div class="panel"><div class="panel-head"><h3>任务队列</h3><div class="chips" style="margin-left:auto"><button class="active">全部</button><button>运行中</button><button>失败</button></div></div>
+            <table><thead><tr><th>#</th><th>类型</th><th>项目</th><th>用户</th><th>状态</th><th>耗时</th><th>操作</th></tr></thead><tbody>
+              <tr><td class="mono">128</td><td>变化检测</td><td>成都变化监测</td><td>zhangsan</td><td><span class="tag amber">运行 62%</span></td><td>01:23</td><td>取消</td></tr>
+              <tr><td class="mono">127</td><td>语义分割</td><td>成都变化监测</td><td>zhangsan</td><td><span class="tag green">完成</span></td><td>19s</td><td>查看</td></tr>
+              <tr><td class="mono">125</td><td>变化检测</td><td>耕地非农化</td><td>wangwu</td><td><span class="tag red">失败</span></td><td>00:42</td><td>重试</td></tr>
+              <tr><td class="mono">124</td><td>报告生成</td><td>青海湖监测</td><td>lisi</td><td><span class="tag green">完成</span></td><td>08s</td><td>下载</td></tr>
+            </tbody></table>
+          </div>
+          <div class="panel"><div class="panel-head"><h3>Worker / GPU</h3><span class="tag green">健康</span></div><div class="panel-body">
+            <div style="display:grid;gap:9px;font-size:11px">
+              <div style="display:flex"><span>gpu-worker-01</span><span class="tag green" style="margin-left:auto">busy</span></div><div class="progress"><i style="width:78%"></i></div><div class="muted">RTX 4090 · 显存 19/24 GB · #128</div>
+              <div style="display:flex"><span>gpu-worker-02</span><span class="tag green" style="margin-left:auto">idle</span></div><div class="progress"><i style="width:8%"></i></div><div class="muted">RTX 4090 · 显存 2/24 GB</div>
+              <div style="display:flex"><span>cpu-worker-01</span><span class="tag green" style="margin-left:auto">busy</span></div><div class="progress orange"><i style="width:35%"></i></div><div class="muted">报告生成 · #124</div>
+            </div>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- ================= 审计 ================= -->
+      <section class="view" id="view-audit">
+        <div class="page-head"><div><h1>审计日志</h1><p>登录、权限、数据、任务、系统操作全记录；只追加，不可编辑</p></div><div class="head-actions"><button class="btn">导出 CSV</button></div></div>
+        <div class="toolbar"><div class="chips"><button class="active">全部</button><button>登录</button><button>权限</button><button>数据</button><button>任务</button><button>系统</button></div><div class="grow"></div><button class="btn">时间：今天</button><button class="btn">操作者：全部</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>对象</th><th>IP</th><th>结果</th><th>详情</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">19:48:12</td><td>admin</td><td><span class="tag orange">权限变更</span> 分配项目管理员</td><td>zhangsan → 成都变化监测</td><td class="mono">10.0.0.8</td><td><span class="tag green">成功</span></td><td>查看 diff</td></tr>
+            <tr><td class="mono">19:32:05</td><td>admin</td><td><span class="tag red">禁用用户</span></td><td>test01</td><td class="mono">10.0.0.8</td><td><span class="tag green">成功</span></td><td>查看 diff</td></tr>
+            <tr><td class="mono">18:20:41</td><td>zhangsan</td><td><span class="tag blue">登录</span></td><td>—</td><td class="mono">10.0.0.23</td><td><span class="tag green">成功</span></td><td>查看</td></tr>
+            <tr><td class="mono">18:12:09</td><td>wangwu</td><td><span class="tag gray">任务重试</span></td><td>#125</td><td class="mono">10.0.0.31</td><td><span class="tag green">成功</span></td><td>查看</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ================= 设置 ================= -->
+      <section class="view" id="view-settings">
+        <div class="page-head"><div><h1>系统设置</h1><p>安全、认证、存储、任务、通知与功能开关；保存写审计</p></div><div class="head-actions"><button class="btn primary">保存</button></div></div>
+        <div class="two" style="grid-template-columns:1fr 1fr">
+          <div class="panel"><div class="panel-head"><h3>安全策略</h3></div><div class="panel-body"><dl style="display:grid;grid-template-columns:110px 1fr;gap:9px;font-size:12px"><dt style="color:var(--ink-3)">密码最小长度</dt><dd class="mono">12</dd><dt style="color:var(--ink-3)">失败锁定</dt><dd>5 次 / 15 分钟</dd><dt style="color:var(--ink-3)">Access Token</dt><dd class="mono">30 分钟</dd><dt style="color:var(--ink-3)">Refresh Token</dt><dd class="mono">14 天 · 旋转</dd><dt style="color:var(--ink-3)">管理端 MFA</dt><dd><span class="tag green">已启用</span></dd><dt style="color:var(--ink-3)">管理端 IP 白名单</dt><dd>10.0.0.0/24</dd></dl></div></div>
+          <div class="panel"><div class="panel-head"><h3>任务与模型</h3></div><div class="panel-body"><dl style="display:grid;grid-template-columns:110px 1fr;gap:9px;font-size:12px"><dt style="color:var(--ink-3)">GPU 并发</dt><dd>1 / 卡</dd><dt style="color:var(--ink-3)">CPU 并发</dt><dd>4</dd><dt style="color:var(--ink-3)">队列上限</dt><dd>100</dd><dt style="color:var(--ink-3)">任务超时</dt><dd>30 分钟</dd><dt style="color:var(--ink-3)">默认模型</dt><dd>SegEarth-OV3 / SAM3</dd><dt style="color:var(--ink-3)">Agent</dt><dd><span class="tag gray">已关闭（一期）</span></dd></dl></div></div>
+        </div>
+        <div class="two" style="grid-template-columns:1fr 1fr">
+          <div class="panel"><div class="panel-head"><h3>存储</h3></div><div class="panel-body"><dl style="display:grid;grid-template-columns:110px 1fr;gap:9px;font-size:12px"><dt style="color:var(--ink-3)">后端</dt><dd>MinIO（S3 兼容）</dd><dt style="color:var(--ink-3)">总容量</dt><dd>3 TB</dd><dt style="color:var(--ink-3)">已用</dt><dd>1.8 TB（60%）</dd><dt style="color:var(--ink-3)">签名 URL</dt><dd>15 分钟</dd><dt style="color:var(--ink-3)">临时文件</dt><dd>7 天清理</dd></dl></div></div>
+          <div class="panel"><div class="panel-head"><h3>通知与公告</h3></div><div class="panel-body"><div style="font-size:12px;color:var(--ink-2)">系统维护通知：2026-10-28 02:00–04:00</div><div class="muted" style="margin-top:4px">将展示在用户端顶部；保存后 5 分钟内生效。</div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn soft">编辑公告</button><button class="btn">测试邮件</button></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-storage">
+        <div class="page-head"><div><h1>存储与配额</h1><p>容量、增长、组织/项目配额、清理任务</p></div><div class="head-actions"><button class="btn">清理孤儿</button><button class="btn primary">调整配额</button></div></div>
+        <div class="grid" style="grid-template-columns:repeat(4,1fr)"><div class="card kpi"><div class="label">总容量</div><div class="num">3 TB</div><div class="sub">MinIO</div></div><div class="card kpi"><div class="label">已用</div><div class="num">1.8 TB</div><div class="sub">60%</div></div><div class="card kpi"><div class="label">本月增长</div><div class="num">+210 GB</div><div class="sub">较上月 +12%</div></div><div class="card kpi"><div class="label">孤儿文件</div><div class="num">8</div><div class="sub">约 2.1 GB</div></div></div>
+        <div class="two"><div class="panel"><div class="panel-head"><h3>按项目</h3></div><table><thead><tr><th>项目</th><th>已用</th><th>配额</th><th>状态</th></tr></thead><tbody><tr><td>成都变化监测</td><td>620 GB</td><td>1 TB</td><td><span class="tag green">正常</span></td></tr><tr><td>青海湖监测</td><td>480 GB</td><td>800 GB</td><td><span class="tag amber">接近</span></td></tr><tr><td>耕地非农化</td><td>310 GB</td><td>1 TB</td><td><span class="tag green">正常</span></td></tr></tbody></table></div><div class="panel"><div class="panel-head"><h3>清理任务</h3></div><div class="panel-body"><div class="log"><div>[19:40] 扫描孤儿文件：8 个 / 2.1 GB</div><div>[19:41] <span class="warn">等待确认</span> 删除将写审计</div></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn danger">确认清理</button><button class="btn">取消</button></div></div></div></div>
+      </section>
+
+      <section class="view" id="view-layers">
+        <div class="page-head"><div><h1>图层服务</h1><p>GeoServer 健康、工作空间、图层与发布任务</p></div><div class="head-actions"><button class="btn">刷新</button><button class="btn primary">重发布</button></div></div>
+        <div class="grid" style="grid-template-columns:repeat(4,1fr)"><div class="card kpi"><div class="label">GeoServer</div><div class="num">正常</div><div class="sub">2.25 · 42ms</div></div><div class="card kpi"><div class="label">工作空间</div><div class="num">7</div><div class="sub">项目 5 · 共享 2</div></div><div class="card kpi"><div class="label">图层</div><div class="num">23</div><div class="sub">栅格 16 · 矢量 7</div></div><div class="card kpi"><div class="label">发布失败</div><div class="num">1</div><div class="sub">可重试</div></div></div>
+        <div class="table-wrap"><table><thead><tr><th>工作空间</th><th>图层</th><th>类型</th><th>项目</th><th>样式</th><th>状态</th><th>操作</th></tr></thead><tbody><tr><td class="mono">samseg</td><td>p_001_change_001</td><td><span class="tag blue">矢量</span></td><td>成都变化监测</td><td>按类别着色</td><td><span class="tag green">已发布</span></td><td>重发布 · 删除</td></tr><tr><td class="mono">cd_raster</td><td>2026_10_image</td><td><span class="tag gray">栅格</span></td><td>成都变化监测</td><td>默认</td><td><span class="tag green">已发布</span></td><td>重发布 · 删除</td></tr><tr><td class="mono">qh_raster</td><td>cuorinanhu</td><td><span class="tag gray">栅格</span></td><td>既有数据</td><td>默认</td><td><span class="tag amber">异常</span></td><td>修复</td></tr></tbody></table></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+  const views = document.querySelectorAll('.view');
+  const btns = document.querySelectorAll('.side button[data-view]');
+  function show(v){
+    views.forEach(x=>x.classList.toggle('active', x.id === 'view-' + v));
+    btns.forEach(b=>b.classList.toggle('active', b.dataset.view === v));
+    document.querySelector('.main').scrollTop = 0;
+    if(location.hash !== '#' + v) history.replaceState(null,'','#' + v);
+  }
+  btns.forEach(b=>b.addEventListener('click',()=>show(b.dataset.view)));
+  const initial = location.hash.replace('#','');
+  if(initial) show(initial);
+</script>
+</body>
+</html>

@@ -89,10 +89,10 @@ function finishLayerRefresh(convId, status) {
 }
 
 // 入参: convId 对话 ID, eventData 分析工具返回的前端渲染参数。
-// 方法: 识别已发布的底图、面和边缘图层；发布参数到达即刷新目录，并消费任务兜底标记。
+// 方法: 识别已发布的底图和面图层；发布参数到达即刷新目录，并消费任务兜底标记。
 // 出参: 无；未包含 GeoServer 图层参数的普通前端动作不会触发刷新。
 function refreshPublishedLayerCatalog(convId, eventData) {
-  const publishedLayerKeys = ['base_layer', 'polygon_layer', 'edge_layer']
+  const publishedLayerKeys = ['base_layer', 'polygon_layer']
   const hasPublishedLayer = publishedLayerKeys.some((key) => {
     const layer = eventData?.[key]
     return !!(layer?.layer_name && layer?.workspace)

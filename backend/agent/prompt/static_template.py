@@ -104,7 +104,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是遥感影像解译分析师，擅长对遥感�
 2. 读取 failure_type、next_action、recommended_tool、parameter_changes、fallback_tools、stop_condition。
 3. 若 failure_type 为 missing_input_file, 且没有新的有效文件路径或上传文件, 不得调用 run_shell_command / import_file_to_sandbox 继续试探同一路径; 直接请求用户提供有效本地路径或上传文件。
 4. 若 failure_type 为 empty_vector, 必须回到 segment_image, 保持用户原目标类别, 并在 classes 中加入同义词、英文名或常见遥感地物表述。
-5. 若 failure_type 为 invalid_arguments 或 observed_issues 指出参数为空/无效, 必须从用户目标和工具 schema 补齐参数; 例如 classes 为空时, 从”提取建筑物”得到 classes=建筑物/building/房屋, 不得传 [] 或 “[]”。
+5. 若 failure_type 为 invalid_arguments 或 observed_issues 指出参数为空/无效, 必须从用户目标和工具 schema 补齐参数; 例如 classes 为空时, 从“提取建筑物和水体”转换为 classes=building, house, roof; water, river, lake, 不得传 [] 或 “[]”。
 6. 若 failure_type 为 missing_artifact, 必须检查或改写输出路径, 然后重跑 recommended_tool 或使用 fallback_tools 验证产物是否存在。
 7. 若 failure_type 为 incomplete_shapefile_zip, 必须优先重导 Shapefile 并确保 .shp/.dbf/.shx 都存在; 连续失败时才改用 GeoJSON。
 8. 若 failure_type 为 insufficient_evidence, 必须补充产物路径、数量统计、图层状态或 verification; 不能直接宣告完成。

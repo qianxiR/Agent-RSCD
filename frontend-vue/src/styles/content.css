@@ -173,22 +173,34 @@
   border-radius: var(--r-md);
   padding: 12px 14px;
   min-width: 180px;
-  max-width: 320px;
+  /* 弹窗宽度受 max-width 约束；box-sizing 保证 padding 不额外撑宽 */
+  max-width: min(320px, calc(100vw - 24px));
+  box-sizing: border-box;
   font-size: var(--fs-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  /* 卫星景号等超长无空格字符串必须可断行，否则会撑破弹窗 */
+  overflow-wrap: anywhere;
 }
 .wms-popup .popup-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 8px;
   margin-bottom: 8px;
 }
 .wms-popup .popup-title {
+  /* flex 子项默认 min-width:auto 会按最长单词撑开，置 0 后才能换行收缩 */
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   color: var(--accent);
   font-size: var(--fs-lg);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .wms-popup .popup-close {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   background: var(--bg-base);
   color: var(--text-secondary);
@@ -205,13 +217,19 @@
 .wms-popup .popup-table {
   border-collapse: collapse;
   width: 100%;
+  /* 固定列宽 + 单元格断行，长属性值不会再横向溢出弹窗 */
+  table-layout: fixed;
 }
 .wms-popup .popup-table td {
   padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .wms-popup .popup-table td:first-child {
+  width: 38%;
   color: var(--text-secondary);
   font-weight: 500;
 }

@@ -141,7 +141,11 @@ def load_model(ckpt="sam3/sam3.pt", bpe="sam3/assets/bpe_simple_vocab_16e6.txt.g
         bpe_path=bpe, checkpoint_path=ckpt, device=device, load_from_HF=False,
     )
     model = model.to(device).float()
-    processor = Sam3Processor(model, confidence_threshold=conf, device=device)
+    # ★ 官方 SAM3 输入分辨率是 1008（1008/14=72, RoPE 表 5184）；处理器默认 336 会把图
+    #   压到 336，和模型/权重不匹配，必须显式传 1008。
+    processor = Sam3Processor(
+        model, resolution=1008, confidence_threshold=conf, device=device
+    )
     return processor, device
 
 

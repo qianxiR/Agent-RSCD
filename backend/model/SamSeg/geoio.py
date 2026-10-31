@@ -303,7 +303,9 @@ def vectorize_mask_to_geojson(
         "vector_stats": vector_stats,
     }
 
-    # ---- 同源 Shapefile 导出 (面 SHP + 边线 SHP, 复用同一个 gdf) ----
+    # ---- 同源 Shapefile 导出（仅面 SHP，复用同一个 gdf）----
+    # ★ 不再额外导出 *_edge 边线 SHP/图层：用户只需要一个面结果，
+    #   地图描边由面图层样式直接完成，避免图层管理里出现两个重复图版。
     if output_shp_dir:
         base_stem = shp_stem or Path(output_geojson_path).stem
         safe_stem = ascii_stem(base_stem)
@@ -313,18 +315,5 @@ def vectorize_mask_to_geojson(
             result["shp_zip_path"] = shp_result["shp_zip_path"]
             result["shp_components"] = shp_result["shp_components"]
             logger.info(f"[Vectorize] 面 SHP 已导出: {shp_result['shp_path']}")
-
-        # ★ 边线 SHP: 从面 GDF 直接提取 boundary (不经过 GeoJSON)
-        try:
-            edge_gdf = gdf.copy()
-            edge_gdf["geometry"] = gdf.geometry.boundary
-            if edge_gdf is not None and len(edge_gdf) > 0:
-                edge_stem = ascii_stem(safe_stem + "_edge")
-                edge_shp_result = export_shp_from_gdf(edge_gdf, output_shp_dir, edge_stem)
-                if edge_shp_result:
-                    result["edge_shp_path"] = edge_shp_result["shp_path"]
-                    logger.info(f"[Vectorize] 边线 SHP 已导出: {edge_shp_result['shp_path']}")
-        except Exception as e:
-            logger.warning(f"[Vectorize] 边线 SHP 导出失败: {e}")
 
     return result

@@ -8,7 +8,7 @@
 //   和面要素(变化图斑 MultiPolygon); GeoServer 按要素几何类型自动选匹配的符号化器,
 //   若只放一种则另一种几何类型渲染为空瓦片。
 // 出参: SLD XML 字符串
-export function makeBoundarySLD(layerName, strokeColor = '#2c6fbd', showLabel = true) {
+export function makeBoundarySLD(layerName, strokeColor = '#4d6bfe', showLabel = true) {
   const c = strokeColor
   const labelSymbolizer = showLabel
     ? '<TextSymbolizer>' +

@@ -2,7 +2,7 @@
 // ==================== 聊天面板 ====================
 // ★ 对应原生 chat/ 面板：welcome 欢迎页 + 消息列表 + 输入区
 //   样式一比一对齐原生 .ai-chat / .welcome-area / .ai-input-area
-import { ref, computed, watch, nextTick, onBeforeUnmount, useTemplateRef } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useConversationStore } from '@/stores/conversation'
@@ -38,14 +38,6 @@ const layerTree = ref(null)
 
 // 输入框默认高度（发送后复位目标；与 CSS .ai-textarea height 对齐）
 const DEFAULT_INPUT_H = 58
-
-// 快捷问题（对齐原生 .quick-questions）
-const quickQuestions = [
-  { label: 'GeoServer 服务', prompt: '列出 GeoServer 所有服务' },
-  { label: '数据库表', prompt: '列出数据库所有表' },
-  { label: '查看影像', prompt: '显示图层示例影像' },
-  { label: '我的记忆', prompt: '你记住了关于我的哪些信息？' },
-]
 
 // 是否展示 welcome（无激活对话或无消息）
 const showWelcome = computed(() => !active.value || active.value.messages.length === 0)
@@ -93,13 +85,6 @@ function onSend() {
   pendingLayers.value = []
   layerPickerVisible.value = false
   resetHeight()
-}
-
-function onQuick(prompt) {
-  // 入参: prompt 快捷问题文本。
-  // 方法: 复用发送编排；断线时不创建本地伪消息。
-  // 出参: 无。
-  send({ prompt })
 }
 
 // 入参: 无
@@ -330,27 +315,91 @@ function scrollToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-onBeforeUnmount(releaseAllPendingImagePreviews)
+// 入参: image 框选影像附件 | 方法: 发布为 GeoServer 栅格图层 → 叠加地图 → 刷新图层管理
+// 出参: Promise<void>（失败静默，不阻断解译主链路）
+async function publishCaptureLayer(image) {
+  try {
+    const pub = await publishGeoServerLayer({ file_path: image.path, layer_type: 'raster' })
+    if (pub.status !== 'success') return
+    let bbox = null
+    try {
+      const bb = await getLayerBbox(pub.workspace, pub.layer_name)
+      if (bb.status === 'success') bbox = bb.bbox
+    } catch {}
+    map.addWmsLayer({ name: pub.layer_name, workspace: pub.workspace, bbox, layerType: 'raster' })
+    projectStore.bumpLayerVersion()
+  } catch {
+    // 图层发布失败不影响后续 Agent 解译
+  }
+}
+
+// 入参: event 地图变化检测取图事件（detail.images = [T1, T2]）
+// 方法: 两期影像一起放入待发送附件，聚焦输入框，由用户补充变化类别后发送
+// 出参: 无
+function onChangeCapture(event) {
+  const images = (event.detail?.images || []).filter((item) => item?.path)
+  if (!images.length) return
+  pendingImages.value.push(...images)
+  if (active.value?.isSending) {
+    ElMessage.warning('当前任务执行中，两期影像已放入附件，请稍后发送')
+    return
+  }
+  const t1 = String(event.detail?.t1_date || '').slice(0, 10)
+  const t2 = String(event.detail?.t2_date || '').slice(0, 10)
+  const range = t1 && t2 ? `（T1 ${t1} / T2 ${t2}）` : ''
+  ElMessage.success(`两期影像已加入附件${range}，请输入变化检测类别后发送`)
+  nextTick(() => document.querySelector('.ai-textarea')?.focus())
+}
+
+// 入参: event 地图框选解译事件（detail.image + detail.prompt）
+// 方法: 把抓取到的 GeoTIFF 放入待发送附件，并自动以解译提示词发送到当前会话
+// 出参: 无
+function onCaptureInterpret(event) {
+  const detail = event.detail || {}
+  const image = detail.image
+  if (!image?.path) return
+  // 框选影像先发布为 GeoServer 图层并叠加，保证“预览图”真正进入地图与图层管理
+  void publishCaptureLayer(image)
+  if (detail.autoSend === false) {
+    pendingImages.value.push(image)
+    ElMessage.success('影像已加入附件，请输入解译类别后发送')
+    nextTick(() => document.querySelector('.ai-textarea')?.focus())
+    return
+  }
+  const prompt = detail.prompt || '对所选区域进行地物解译。'
+  if (active.value?.isSending) {
+    pendingImages.value.push(image)
+    input.value = prompt
+    ElMessage.warning('当前任务执行中，影像已放入附件，请稍后发送')
+    return
+  }
+  pendingImages.value.push(image)
+  input.value = input.value.trim() ? `${input.value.trim()}\n${prompt}` : prompt
+  nextTick(() => {
+    onSend()
+    if (pendingImages.value.length) {
+      ElMessage.warning('发送未完成，请检查链路状态后重试')
+    }
+  })
+}
+
+onMounted(() => {
+  window.addEventListener('rsiis:capture-interpret', onCaptureInterpret)
+  window.addEventListener('rsiis:change-capture', onChangeCapture)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('rsiis:capture-interpret', onCaptureInterpret)
+  window.removeEventListener('rsiis:change-capture', onChangeCapture)
+  releaseAllPendingImagePreviews()
+})
 </script>
 
 <template>
   <div class="right-sidebar shell-fade-in">
-    <!-- AI 头部（对齐原生 .ai-header） -->
-    <div class="ai-header">
-      <div class="ai-title">
-        <div class="ai-avatar">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="10" rx="2" />
-            <circle cx="12" cy="5" r="2" />
-            <path d="M12 7v4" />
-            <line x1="8" y1="16" x2="8" y2="16.01" />
-            <line x1="16" y1="16" x2="16" y2="16.01" />
-          </svg>
-        </div>
-        <span>GeoAI Copilot</span>
-      </div>
-      <!-- 头部操作区（对齐原生 .ai-actions）：任务日志监控弹窗 -->
-      <div class="ai-actions">
+    <!-- 会话上下文条: 项目归属 + 任务日志入口 -->
+    <ProjectSelector>
+      <template #actions>
         <button class="ai-action-btn" title="任务日志监控" @click="taskDialogVisible = true">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -360,25 +409,16 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
             <line x1="12" y1="14" x2="16" y2="14" />
           </svg>
         </button>
-      </div>
-    </div>
-
-    <!-- 会话上下文条: 当前对话的项目归属, 可直接切换 (解决对话与项目割裂) -->
-    <ProjectSelector />
+      </template>
+    </ProjectSelector>
 
     <!-- 消息滚动区（对齐原生 .ai-chat） -->
     <div ref="scrollRef" class="ai-chat">
-      <!-- 欢迎页 -->
+      <!-- 欢迎提示（居中，无会话/无消息时） -->
       <div v-if="showWelcome" class="welcome-area">
-        <div class="welcome-title">我是国土智察 AI 助手<br>可以帮你查看影像、分析数据、管理图层</div>
-        <div class="quick-questions">
-          <button
-            v-for="q in quickQuestions"
-            :key="q.label"
-            class="quick-question"
-            @click="onQuick(q.prompt)"
-          >{{ q.label }}</button>
-        </div>
+        <img src="/image.svg" alt="国土智察" class="welcome-logo" />
+        <p class="welcome-title">国土智察</p>
+        <p class="welcome-hint">输入指令开始解译，或上传影像与图层</p>
       </div>
 
       <template v-else>
@@ -449,7 +489,7 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
             ></textarea>
         </div>
         <div class="controls">
-          <button class="input-upload-btn small" title="上传资料" @click="onUpload">
+          <button class="input-upload-btn small" title="加载影像到地图（GeoTIFF）" @click="onUpload">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
@@ -489,116 +529,68 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
   min-height: 0;
 }
 
-/* ===== AI 头部（对齐原生 .ai-header） ===== */
-.ai-header {
-  padding: 0 14px;
-  height: 44px;
-  box-sizing: border-box;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between; /* title 靠左 / actions 靠右 */
-  background: var(--bg-panel);
-  flex-shrink: 0;
-}
-.ai-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
+/* ===== 顶栏操作按钮（放在项目条右侧） ===== */
 .ai-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  border-radius: var(--r-xs);
+  border-radius: var(--r-sm);
   cursor: pointer;
-  transition: all 0.15s;
 }
 .ai-action-btn:hover {
   background: var(--bg-hover);
-  color: var(--accent);
-}
-.ai-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  color: var(--accent);
-}
-.ai-avatar {
-  width: 28px;
-  height: 28px;
-  background: var(--accent-soft);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  font-family: var(--mono);
-  box-shadow: 0 2px 6px rgba(15, 35, 58, 0.12);
+  color: var(--text-primary);
 }
 
-/* ===== 消息区（对齐原生 .ai-chat） ===== */
+/* ===== 消息区 ===== */
 .ai-chat {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 14px 14px;
+  padding: 16px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  background:
-    linear-gradient(180deg, rgba(241, 247, 252, 0.68), rgba(255, 255, 255, 0) 96px),
-    var(--bg-base);
+  gap: 14px;
+  background: var(--bg-panel);
   scroll-behavior: smooth;
 }
 
-/* ===== 欢迎页（对齐原生 .welcome-area） ===== */
+/* ===== 欢迎提示（居中） ===== */
 .welcome-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  padding: 20px 0 10px;
+  gap: 6px;
+  padding-bottom: 40px;
+}
+.welcome-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 8px;
 }
 .welcome-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-primary);
+}
+.welcome-hint {
   font-size: var(--fs-lg);
-  color: var(--text-secondary);
-  margin-bottom: 12px;
-  line-height: 1.65;
-}
-.quick-questions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-.quick-question {
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: var(--fs-md);
-  color: var(--primary);
-  cursor: pointer;
-  transition: all var(--t-base) var(--ease-out);
-  font-weight: 500;
-  font-family: var(--sans);
-}
-.quick-question:hover {
-  border-color: var(--primary);
-  background: #f0f7ff;
-  box-shadow: 0 2px 6px rgba(43, 125, 233, 0.1);
+  color: var(--text-muted);
 }
 
-/* ===== 输入区（对齐原生 .ai-input-area） ===== */
+/* ===== 输入区 ===== */
 .ai-input-area {
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
+  padding: 10px 14px 14px;
   background: var(--bg-panel);
   flex-shrink: 0;
 }
@@ -607,16 +599,15 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
-  background: var(--bg-base);
-  padding: 7px;
-  border-radius: var(--r-shell);
-  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  padding: 10px 12px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
   transition: border-color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }
 .input-wrapper:focus-within {
-  border-color: var(--primary);
-  box-shadow: none; /* remove light focus shadow */
+  border-color: #c9d2ff;
+  box-shadow: 0 0 0 3px rgba(77, 107, 254, 0.08);
 }
 
 /* Ensure internal focusable elements do not show global focus shadow */
@@ -645,7 +636,7 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
 .input-upload-btn {
   width: 30px;
   height: 30px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--text-muted);
   border: none;
@@ -661,9 +652,9 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
   color: var(--primary);
 }
 .send-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
   background: var(--primary);
   color: #fff;
   border: none;
@@ -671,14 +662,12 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--t-base) var(--ease-out);
+  transition: background-color var(--t-base) var(--ease-out);
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(43, 125, 233, 0.25);
-  font-size: 15px;
+  font-size: 14px;
 }
 .send-btn:hover {
   background: var(--primary-dark);
-  transform: translateY(-1px);
 }
 .send-btn:disabled {
   opacity: 0.45;
@@ -692,7 +681,7 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
   background: var(--bg-elevated);
   color: var(--accent-red);
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   flex-shrink: 0;
   display: flex;
@@ -729,12 +718,10 @@ onBeforeUnmount(releaseAllPendingImagePreviews)
 .input-upload-btn.small,
 .send-btn.small,
 .stop-btn.small {
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-size: 12px;
 }
-.send-btn.small {
-  box-shadow: 0 1px 3px rgba(43, 125, 233, 0.2);
-}
+.send-btn.small {}
 .pending-attachments {
   display: flex;
   flex-wrap: wrap;

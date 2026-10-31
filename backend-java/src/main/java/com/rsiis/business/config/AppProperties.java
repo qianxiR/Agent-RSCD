@@ -19,10 +19,21 @@ public record AppProperties(
     /**
      * 安全子配置。
      *
-     * @param mode         认证模式: off 全放行 / observe 仅解析不拦截 / enforce 强制 JWT
-     * @param jwtSecret    HS256 签名密钥 (至少 32 字节)
-     * @param jwtTtlHours  token 有效期 (小时)
+     * @param mode              认证模式: off 全放行 / observe 仅解析不拦截 / enforce 强制 JWT
+     * @param jwtSecret         HS256 签名密钥 (至少 32 字节)
+     * @param jwtTtlHours       旧版 token 有效期 (小时), 仅兼容旧调用
+     * @param accessTtlMinutes  Access Token 有效期 (分钟)
+     * @param refreshTtlDays    Refresh Token 有效期 (天)
+     * @param mfaRequired       管理端是否强制 MFA
+     * @param mfaIssuer         TOTP 发行方 (显示在认证器 App)
+     * @param mfaEncryptionKey  MFA secret 加密密钥 (Base64 32 字节; 为空时从 jwtSecret 派生)
      */
-    public record Security(String mode, String jwtSecret, int jwtTtlHours) {
+    public record Security(String mode, String jwtSecret, int jwtTtlHours,
+                           int accessTtlMinutes, int refreshTtlDays,
+                           boolean mfaRequired, String mfaIssuer, String mfaEncryptionKey) {
+
+        public boolean enforce() {
+            return "enforce".equalsIgnoreCase(mode);
+        }
     }
 }

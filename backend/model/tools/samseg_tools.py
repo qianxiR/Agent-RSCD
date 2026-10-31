@@ -71,16 +71,22 @@ def _classes_tag(classes: Optional[str], max_len: int = 40) -> str:
     """
     if not classes or not classes.strip():
         return "default"
-    # 统一中文逗号, 用 - 连接各类
-    parts = [p.strip() for p in classes.replace("，", ",").split(",") if p.strip()]
-    if not parts:
+    # ★ 英文类别格式: 分号分隔不同类别, 逗号分隔同义词 → 只取每组首词做标签
+    if ";" in classes or "\n" in classes:
+        groups = [g.strip() for g in re.split(r"[;\n]+", classes) if g.strip()]
+        names = [g.split(",")[0].strip() for g in groups]
+        tag = "-".join(n for n in names if n)
+    else:
+        # 兼容旧格式: 逗号分隔多个类别
+        parts = [p.strip() for p in classes.replace("，", ",").split(",") if p.strip()]
+        tag = "-".join(parts)
+    if not tag:
         return "default"
-    tag = "-".join(parts)
-    # 清洗: 文件名非法字符 → _, 限制长度
-    tag = re.sub(r'[\\/:*?"<>|]', "_", tag)
+    # 清洗: 文件名/图层名非法字符 → _, 限制长度
+    tag = re.sub(r'[\\/:*?"<>|;\s]+', "_", tag).strip("_")
     if len(tag) > max_len:
         tag = tag[:max_len]
-    return tag
+    return tag or "default"
 
 
 def _build_image_url(filename: str) -> str:
@@ -104,6 +110,27 @@ def _build_vector_url(vector_path: Optional[str]) -> Optional[str]:
     from backend.model.tools._paths import build_download_url
     file_root = Path(settings.file_storage_root).resolve()
     return build_download_url(Path(vector_path).resolve(), file_root)
+
+
+def _register_vector_metadata(vector_path: Optional[str], kind: str,
+                              source_image_path: Optional[str] = None) -> None:
+    """
+    入参: 矢量 GeoJSON 路径、kind(segment/change)、可选源影像。
+    方法: 把矢量产物登记进业务库 vector_layer（bbox/要素数/面积/CRS），失败只告警不阻断。
+    出参: 无。
+    """
+    if not vector_path or not Path(vector_path).is_file():
+        return
+    try:
+        from backend.data.vector_registry import register_vector_product
+        register_vector_product(
+            vector_path,
+            kind=kind,
+            workspace=settings.geoserver_workspace or "samseg",
+            source_image_path=source_image_path,
+        )
+    except Exception as e:
+        logger.warning(f"[SamSeg] 矢量元数据登记失败 (非阻塞) {vector_path}: {e}")
 
 
 
@@ -197,7 +224,7 @@ def _build_polygon_layer_params(result: dict, cls_tag: str) -> dict:
                         bbox = bb
                 except Exception:
                     pass
-                # 为面图层设置蓝色样式 (#2C6FBD = GeoAI Copilot 标题色, 与边缘线同色)
+                # 为面图层设置蓝色样式 (#2C6FBD = GeoAI Copilot 标题色, 填充+描边)
                 style_name = gs._ensure_samseg_polygon_style()
                 if style_name:
                     gs._set_layer_default_style(workspace, layer_name, style_name)
@@ -211,65 +238,6 @@ def _build_polygon_layer_params(result: dict, cls_tag: str) -> dict:
             logger.warning(f"[Polygon] GeoServer 发布失败: {pub}")
         except Exception as e:
             logger.warning(f"[Polygon] GeoServer 发布异常: {e}")
-
-    return {}
-
-
-def _build_edge_layer_params(result: dict, cls_tag: str, polygon_bbox: Optional[dict] = None) -> dict:
-    """
-    把 runner 产出的边缘线 GeoJSON 发布到 GeoServer, 返回前端渲染所需的 edge_layer 参数。
-
-    ★ 策略:
-      1. 把边线 SHP 发布到 GeoServer → 返回 {layer_name, workspace, bbox, wms_url} (前端走 WMS)
-      2. 失败/无数据: 返回 {}
-
-    ★ bbox 由发布后自行查询 GeoServer 获取, 不再依赖 polygon_bbox (面 SHP 不再发布)。
-
-    入参:
-      - result: runner 返回的 dict (含 edge_shp_path)
-      - cls_tag: 类别短标签 (用于 GeoServer 图层命名)
-      - polygon_bbox: (保留兼容, 不再使用) 面图层的 bbox dict
-
-    出参:
-      - {layer_name, workspace, bbox, wms_url}    发布成功 (WMS 路径)
-      - {}                                          无边缘线 / 发布失败
-    """
-    edge_shp_path = result.get("edge_shp_path")
-
-    # ★ 用边缘线 SHP 发布到 GeoServer
-    if edge_shp_path and Path(edge_shp_path).is_file():
-        try:
-            from backend.data import geoserver_client as gs
-            from backend.config import settings
-            conv = short_conv() or "anon"
-            ascii_name = re.sub(r"[^a-zA-Z0-9._-]", "", f"{conv}_{cls_tag}_edge") or f"{conv}_edge"
-            ws = settings.geoserver_workspace or "samseg"
-            pub = gs.upload_shapefile(edge_shp_path, ascii_name, ws if ws else None)
-            if pub and pub.get("status") == "success":
-                layer_name = pub.get("layer_name", ascii_name)
-                workspace = pub.get("workspace", ws)
-                # 发布后自行查询 bbox, 不再依赖 polygon_layer
-                bbox = None
-                try:
-                    bb = gs.get_layer_bbox(f"{workspace}:{layer_name}")
-                    if bb and len(bb) == 4:
-                        bbox = bb
-                except Exception:
-                    pass
-                # 为边缘线设置蓝色样式 (#2C6FBD = GeoAI Copilot 标题色)
-                style_name = gs._ensure_samseg_edge_style()
-                if style_name:
-                    gs._set_layer_default_style(workspace, layer_name, style_name)
-                logger.info(f"[Edge] 边缘线 SHP 已发布到 GeoServer: {workspace}:{layer_name}")
-                return {
-                    "layer_name": layer_name,
-                    "workspace": workspace,
-                    "bbox": bbox,
-                    "wms_url": settings.geoserver_wms_url,
-                }
-            logger.warning(f"[Edge] GeoServer 发布失败: {pub}")
-        except Exception as e:
-            logger.warning(f"[Edge] GeoServer 发布异常: {e}")
 
     return {}
 
@@ -336,22 +304,26 @@ def segment_image(
     ★ 不触发场景: 用户只是问"图里有什么/描述一下/这是什么地物"等**理解类**问题 ——
       那是影像理解需求, 本工具只会按类别画掩膜, 无法回答"有什么", 不要调用。
     ★ 耗时: 推理通常 5~30 秒 (取决于图片大小和类别数), 首次调用需加载模型 (约几十秒)。
-    ★ 依赖: 需 torch + SamSeg 模型权重就绪, 否则返回不可用错误。
+    ★ 依赖: 需 torch + ProC-SAM3 权重就绪, 否则返回不可用错误。
     ★ 图片来源: 前端上传后返回的绝对路径 (如 .../agent-files/send/{conv_id}/xxx.png)。
 
     入参:
         - image_path (str): 要分割的图片绝对路径 (用户上传后获得)
-        - classes (str): 要识别的类别, 逗号分隔, 支持中文/英文。
-          常用: 建筑/道路/水/植被/农田/裸地 或 building/road/water/vegetation/farmland/bareland。
-          留空则用默认 7 类 (建筑/道路/水/裸地/植被/农田)。
-        - referring_expression (str): 可选完整指代表达。用于选择单个实例，例如
-          "最大的建筑"、"左上角的建筑"、"道路北侧最大的建筑"。使用时 classes 应只填目标类别。
+        - classes (str): 英文类别 + 英文同义词。
+          **逗号分隔同义词, 分号分隔不同类别**:
+            "building, house, roof, structure; water, river, lake, pond"
+          用户可能用中文/自然语言描述类别，调用前必须做意图识别并转成英文:
+            "提取建筑和水体" → "building, house, roof, structure; water, river, lake, pond"
+            "找出温室大棚" → "greenhouse, plastic roof, glasshouse"
+          常用类别: building / road / water / vegetation / farmland / bareland。
+          留空则用默认 6 类（含同义词）。
+        - referring_expression (str): 当前 ProC-SAM3 引擎暂不支持指代单实例；
+          传入会返回明确错误。
     出参: frontend_action 指令, 前端右侧面板展示彩色分割结果
 
     示例:
-        segment_image("E:/.../agent-files/send/{conv}/photo.png", "建筑,道路,水")
-        segment_image("E:/.../agent-files/send/{conv}/photo.png", "建筑", "道路北侧最大的建筑")
-        segment_image("E:/.../agent-files/send/{conv}/photo.png")  # 用默认全部类别
+        segment_image("E:/.../photo.png", "building, house, roof; water, river, lake")
+        segment_image("E:/.../photo.png")  # 用默认全部类别
     """
     from backend.model.SamSeg import runner
     from backend.model.SamSeg.geoio import assert_image_has_crs
@@ -396,16 +368,17 @@ def segment_image(
             classes=classes or None,
             vector_output_path=vec_path,
             referring_expression=referring_expression or None,
+            save_mask=False,
         )
         elapsed = time.time() - t0
 
         if not result:
             return {"type": "error", "msg": f"分割失败: {image_path}"}
 
-        size = Path(out_path).stat().st_size
+        size = Path(vec_path).stat().st_size if Path(vec_path).is_file() else 0
         # ★ 输入影像 URL: 让前端能从服务器读取原图, 与结果对比展示
         input_image_url = _build_input_image_url(image_path)
-        cls_desc = classes if classes else "(建筑/道路/水/裸地/植被/农田)"
+        cls_desc = classes if classes else "(building / road / water / vegetation / farmland / bareland)"
         referring_metadata = result.get("referring")
         stats = result.get("stats", {})
         legend = result.get("legend", [])  # ★ 颜色→类别图注 (与 PNG 颜色严格一致)
@@ -413,6 +386,7 @@ def segment_image(
         vector_stats = result.get("vector_stats")
         vector_path = result.get("vector_path")
         vector_url = _build_vector_url(vector_path)
+        _register_vector_metadata(vector_path, "segment", image_path)
 
         # ★ 构建详细摘要供 LLM 综合描述
         per_class_lines = []
@@ -438,8 +412,8 @@ def segment_image(
                     f"{pc['area_m2']} m² ({pc['area_m2']/10000:.2f} 公顷)\n"
                 )
 
-        # ★ GeoTIFF 带 CRS 掩膜 (前端地图容器用它做半透明叠加图层, 替代旧 overlay 混色图)
-        has_crs = result.get("has_crs", False)
+        # 分割/变化检测前均已通过 CRS 预检，矢量结果可地理定位
+        has_crs = True
         mask_tif_path = result.get("mask_tif_path")
         mask_tif_url = None
         if mask_tif_path and Path(mask_tif_path).is_file():
@@ -455,15 +429,13 @@ def segment_image(
         shp_exists = shp_dir_path and Path(shp_dir_path).is_dir()
 
         geo_summary = (
-            f"\n坐标系: {'已带 (GeoTIFF 掩膜可被 GIS 直接打开)' if has_crs else '无 (源影像无 CRS, 仅像素坐标)'}\n"
-            f"掩膜 GeoTIFF (前端地图叠加层): {'已生成' if mask_tif_url else '未生成'}\n"
-            f"GeoJSON 矢量图斑: 不加入工作区 (可下载/叠加到地图)\n"
-            f"Shapefile (GIS 可直接打开): {'已生成' if shp_exists else '未生成'}\n"
+            f"\n坐标系: {'已带 (矢量图斑可被 GIS 直接打开)' if has_crs else '源影像无 CRS'}\n"
+            f"矢量图斑: {'已生成 GeoJSON/Shapefile' if shp_exists else '已生成 GeoJSON'}\n"
         )
 
         summary = (
             f"已对图片 {stem} 完成语义分割"
-            f"（类别: {cls_desc}, 耗时 {elapsed:.1f}s, 结果 {size//1024}KB）。\n"
+            f"（类别: {cls_desc}, 耗时 {elapsed:.1f}s）。\n"
             f"分割统计:\n"
             f"  总区域数: {stats.get('total_regions', 0)} 个\n"
             f"  被分类像素: {stats.get('changed_pixels', 0)}"
@@ -477,20 +449,21 @@ def segment_image(
             f"指出占主导地位的地物类型。"
         )
 
-        # ★ 工作区布局: 原图层 (底图) + 变化面 (GeoServer WMS) + 边缘线 (GeoServer WMS)
-        #   面 SHP 与边缘线 SHP 颜色统一为 #2C6FBD (GeoAI Copilot 标题色)。
+        # ★ 工作区布局: 原图层 (底图) + 变化面 (GeoServer WMS, 仅此一个矢量结果)
+        #   面 SHP 统一为 #2C6FBD (GeoAI Copilot 标题色), 描边由面图层样式完成。
         polygon_layer = _build_polygon_layer_params(result, cls_tag)
-        edge_layer = _build_edge_layer_params(result, cls_tag, None)
         # ★ 原图底图层: 同步上传到 GeoServer → 前端从 WMS 加载 (支持属性查询 GetFeatureInfo)
-        base_layer = _build_base_layer_params(image_path, cls_tag)
+        #   框选解译的输入来自底图截图, 地图上已有同源高分底图;
+        #   不再叠加原图 WMS, 避免白色底图块遮挡, 只保留矢量结果。
+        base_layer = {}
+        if not ({"imagery", "captures"} <= set(Path(image_path).parts)):
+            base_layer = _build_base_layer_params(image_path, cls_tag)
         params = {
             # ★ 主图 = 输入原图 URL (地图容器据此加载底图层 + 查坐标定位)
             "image_url": input_image_url,
             "caption": f"语义分割结果: {stem}",
-            # ★ 变化面: 发布到 GeoServer (polygon_layer)
+            # ★ 唯一矢量结果: 面图斑 / 变化图斑发布到 GeoServer (polygon_layer)
             "polygon_layer": polygon_layer if polygon_layer else None,
-            # ★ 边缘线: GeoServer WMS 图层 (edge_layer)
-            "edge_layer": edge_layer if edge_layer else None,
             # ★ 原图底图层: GeoServer WMS (支持属性查询; 不可用时前端回退到本地文件)
             "base_layer": base_layer if base_layer else None,
             # ★ 输入影像 URL (供前端展示原图, 与结果对比)
@@ -503,9 +476,11 @@ def segment_image(
             "has_crs": has_crs,
             "vector_url": vector_url,
         }
-        # ★ 掩膜 GeoTIFF 不再自动渲染叠加 (仅保留为可下载产物); artifact_path 指向边缘线供下载
-        if mask_tif_path:
-            params["artifact_path"] = mask_tif_path
+        # ★ 主产物只保留矢量（GeoJSON/Shapefile）；不再生成/暴露红色掩膜 PNG/GeoTIFF
+        if vector_path and Path(vector_path).is_file():
+            params["artifact_path"] = vector_path
+        elif shp_path and Path(shp_path).is_file():
+            params["artifact_path"] = shp_path
 
         return {
             "type": "frontend_action",
@@ -530,8 +505,6 @@ def segment_image(
                 "vector_path": vector_path,
                 "vector_url": vector_url,
                 "has_crs": has_crs,
-                "mask_tif_path": mask_tif_path,
-                "mask_tif_url": mask_tif_url,
                 "polygon_layer": polygon_layer,
                 "base_layer": base_layer,
                 "shp_path": shp_path,
@@ -552,18 +525,21 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
     ★ 触发场景: 用户**明确要求做变化检测/对比变化** (如"对比这两张图的变化""检测这两期影像的变化""哪里发生了改变")。
     ★ 不触发场景: 用户只是想"了解/描述"某张图 —— 那是影像理解需求, 不要用本工具。
     ★ 耗时: 两张图各自分割 + 变化对比, 通常 10~60 秒, 首次调用需加载模型。
-    ★ 依赖: 需 torch + SamSeg 模型权重就绪, 否则返回不可用错误。
-    ★ 图片来源: 前端上传两张图片后返回的绝对路径。
+    ★ 依赖: 需 torch + ProC-SAM3 权重就绪, 否则返回不可用错误。
+    ★ 图片来源: 前端「变化检测」区域选择 + 时相选择自动生成的两期 Sentinel-2 GeoTIFF，
+      也可由用户直接上传两张图片；两张按顺序作为 T1、T2。
 
     入参:
         - t1_path (str): 前一时相 (T1) 图片绝对路径
         - t2_path (str): 后一时相 (T2) 图片绝对路径
-        - classes (str): 关注的类别, 逗号分隔, 支持中文/英文。留空用默认 7 类。
+        - classes (str): 英文类别 + 英文同义词；分号分隔类别、逗号分隔同义词。
+          例: "building, house, roof; vegetation, tree, grass"。留空用默认 6 类。
     出参: frontend_action 指令, 前端右侧面板展示变化检测结果
            (变化区域按变化后的地物类别上色, 未变化区域为白色背景)
 
     示例:
-        detect_change("E:/.../t1_2020.png", "E:/.../t2_2024.png", "建筑,植被")
+        detect_change("E:/.../t1_2020.png", "E:/.../t2_2024.png",
+                      "building, house, roof; vegetation, tree, grass")
     """
     from backend.model.SamSeg import runner
     from backend.model.SamSeg.geoio import assert_image_has_crs
@@ -622,6 +598,7 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             output_path=out_path,
             classes=classes or None,
             vector_output_path=vec_path,
+            save_mask=False,
         )
         elapsed = time.time() - t0
 
@@ -638,6 +615,7 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
         vector_stats = result.get("vector_stats")
         vector_path = result.get("vector_path")
         vector_url = _build_vector_url(vector_path)
+        _register_vector_metadata(vector_path, "change", t1_path)
 
         # 业务类型判读必须在本地确定性完成，避免外部 VLM 网络请求阻塞检测任务终态。
         present_classes = [item.get("name", "") for item in stats.get("per_class", [])]
@@ -685,16 +663,10 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 f"  判读依据: {reason}\n"
             )
 
-        # ★ GeoTIFF 带 CRS 掩膜 (前端地图容器用它做半透明叠加图层, 替代旧 overlay 混色图)
-        has_crs = result.get("has_crs", False)
-        mask_tif_path = result.get("mask_tif_path")
-        mask_tif_url = None
-        if mask_tif_path and Path(mask_tif_path).is_file():
-            mask_tif_file = Path(mask_tif_path).name
-            mask_tif_url = _build_image_url(mask_tif_file) + "?t=" + str(int(time.time() * 1000))
-
-        # ★ overlay 叠加图 / edge 边缘 GeoTIFF 已不再生成 (前端地图容器用图层透明度叠加实现)
-        #   如需变化边缘描线, AI 可单独调用 mask_tools.overlay_edge_on_image 工具
+        # 分割/变化检测前均已通过 CRS 预检，矢量结果可地理定位
+        has_crs = True
+        # ★ 解译链路只保留矢量结果：不再生成/暴露变化掩膜 PNG/GeoTIFF
+        #   如需掩膜, 其他调用可保留 runner.save_mask=True 默认行为。
 
         # ★ 新产物: Shapefile (变化图斑, 供 GIS 直接打开) — 保留为目录
         shp_path = result.get("shp_path")
@@ -702,10 +674,9 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
         shp_exists = shp_dir_path and Path(shp_dir_path).is_dir()
 
         geo_summary = (
-            f"\n坐标系: {'已带 (GeoTIFF 掩膜可被 GIS 直接打开)' if has_crs else '无 (源影像无 CRS, 仅像素坐标)'}\n"
-            f"掩膜 GeoTIFF (前端地图叠加层): {'已生成' if mask_tif_url else '未生成'}\n"
-            f"GeoJSON 矢量变化图斑: 不加入工作区 (可下载/叠加到地图)\n"
-            f"Shapefile (GIS 可直接打开): {'已生成' if shp_exists else '未生成'}\n"
+            f"\n坐标系: {'已带 (变化图斑可被 GIS 直接打开)' if has_crs else '无 (源影像无 CRS)'}\n"
+            f"矢量变化图斑: {'已生成 GeoJSON/Shapefile' if shp_exists else '已生成 GeoJSON'}\n"
+            f"掩膜文件: 不再生成 (只保留矢量结果)\n"
         )
 
         summary = (
@@ -730,10 +701,9 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 + "\n  - ".join(spatial_warnings) + "\n\n" + summary
             )
 
-        # ★ 工作区布局: T1 原图层 (底图) + 变化面 (GeoServer WMS) + 边缘线 (矢量描边)
-        #   面 SHP 与边缘线 SHP 颜色统一为 #2C6FBD (GeoAI Copilot 标题色)。
+        # ★ 工作区布局: T1 原图层 (底图) + 变化面 (GeoServer WMS, 仅此一个矢量结果)
+        #   变化面 SHP 统一为 #2C6FBD (GeoAI Copilot 标题色), 描边由面图层样式完成。
         polygon_layer = _build_polygon_layer_params(result, cls_tag)
-        edge_layer = _build_edge_layer_params(result, cls_tag, None)
         # ★ 原图底图层 (T1): 同步上传到 GeoServer → 前端从 WMS 加载 (支持属性查询 GetFeatureInfo)
         base_layer = _build_base_layer_params(t1_path, cls_tag)
 
@@ -741,10 +711,8 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             # ★ 主图 = T1 输入原图 URL (地图容器据此加载底图层 + 查坐标定位)
             "image_url": input_image_url,
             "caption": f"变化检测结果: {stem}",
-            # ★ 变化面: 发布到 GeoServer (polygon_layer)
+            # ★ 唯一矢量结果: 面图斑 / 变化图斑发布到 GeoServer (polygon_layer)
             "polygon_layer": polygon_layer if polygon_layer else None,
-            # ★ 边缘线: GeoServer WMS 图层 (edge_layer)
-            "edge_layer": edge_layer if edge_layer else None,
             # ★ 原图底图层: GeoServer WMS (支持属性查询; 不可用时前端回退到本地文件)
             "base_layer": base_layer if base_layer else None,
             # ★ 双时相输入影像 URL (供前端展示原图, 与结果对比)
@@ -759,9 +727,11 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             "has_crs": has_crs,
             "vector_url": vector_url,
         }
-        # ★ 掩膜 GeoTIFF 不再自动渲染叠加 (仅保留为可下载产物); artifact_path 指向掩膜供下载
-        if mask_tif_path:
-            params["artifact_path"] = mask_tif_path
+        # ★ 主产物只保留矢量（GeoJSON/Shapefile）
+        if vector_path and Path(vector_path).is_file():
+            params["artifact_path"] = vector_path
+        elif shp_path and Path(shp_path).is_file():
+            params["artifact_path"] = shp_path
 
         return {
             "type": "frontend_action",
@@ -787,8 +757,6 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 "vector_url": vector_url,
                 "change_type": change_type_info,
                 "has_crs": has_crs,
-                "mask_tif_path": mask_tif_path,
-                "mask_tif_url": mask_tif_url,
                 "polygon_layer": polygon_layer,
                 "base_layer": base_layer,
                 "shp_path": shp_path,

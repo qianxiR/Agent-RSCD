@@ -49,5 +49,11 @@ logs/
 # ZCode 会话产物
 .zcode/
 
+# 本地临时目录（构建 TEMP、脚本产物、TOTP 密钥等，不入库）
+.tmp/
+
+# 文档截图例外：双门户演示截图允许入库（覆盖上面的 *.png）
+!docs/platform/screens/*.png
+
 # 参考资料 (非本项目源码)
 GeoCD-Agent/

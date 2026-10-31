@@ -5,7 +5,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { ChatLineRound, Search, Delete, EditPen, Folder, Connection, Check, Plus, MagicStick, Box } from '@element-plus/icons-vue'
+import { Search, Delete, EditPen, Folder, Connection, Check, Plus, MagicStick, Box, Picture, User } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useConversationStore } from '@/stores/conversation'
 import { useChat } from '@/composables/useChat'
@@ -16,7 +16,7 @@ const convStore = useConversationStore()
 const { projects, grouped, activeProjectId } = storeToRefs(projectStore)
 const { activeConvId } = storeToRefs(convStore)
 const { newConversation, switchTo } = useChat()
-const emit = defineEmits(['open-layer', 'open-skills', 'open-mcp'])
+const emit = defineEmits(['open-plugins', 'open-skills', 'open-mcp', 'open-multi-agent', 'open-imagery'])
 const searchOpen = ref(false)
 const searchInputRef = ref(null)
 const searchQuery = ref('')
@@ -194,13 +194,6 @@ function onOpen(conv) {
   switchTo(conv.id)
 }
 
-function onOpenLayer() {
-  // 入参: 无
-  // 方法: 通知左栏容器切换到图层管理面板
-  // 出参: 无
-  emit('open-layer')
-}
-
 async function onDelete(conv) {
   // 入参: conv 待删除的会话摘要，必须包含有效会话 ID。
   // 方法: 使用危险操作专属弹窗明确不可恢复语义，确认后同步删除后端记录与前端状态。
@@ -261,30 +254,40 @@ function fmtTime(t) {
 <template>
   <div class="conv-sidebar shell-fade-in">
     <div class="sidebar-actions">
-      <button type="button" class="sidebar-action" @click="onNewConv">
-        <el-icon><ChatLineRound /></el-icon>
-        <span>新对话</span>
+      <button type="button" class="new-task-btn" @click="onNewConv">
+        <el-icon><Plus /></el-icon>
+        <span>新建解译任务</span>
       </button>
-      <button type="button" class="sidebar-action search-action" @click="openSearch">
-        <el-icon><Search /></el-icon>
-        <span>搜索</span>
-      </button>
-      <button type="button" class="sidebar-action" @click="onOpenLayer">
-        <el-icon><Connection /></el-icon>
-        <span>图层管理</span>
-      </button>
-      <button type="button" class="sidebar-action" @click="emit('open-skills')">
-        <el-icon><MagicStick /></el-icon>
-        <span>技能库</span>
-      </button>
-      <button type="button" class="sidebar-action" @click="emit('open-mcp')">
-        <el-icon><Box /></el-icon>
-        <span>MCP 工具</span>
-      </button>
+      <div class="tool-row">
+        <button type="button" class="tool-btn" title="搜索会话" @click="openSearch">
+          <el-icon><Search /></el-icon>
+          <span>搜索</span>
+        </button>
+        <button type="button" class="tool-btn" title="插件" @click="emit('open-plugins')">
+          <el-icon><Connection /></el-icon>
+          <span>插件</span>
+        </button>
+        <button type="button" class="tool-btn" title="MCP 工具" @click="emit('open-mcp')">
+          <el-icon><Box /></el-icon>
+          <span>MCP</span>
+        </button>
+        <button type="button" class="tool-btn" title="技能库" @click="emit('open-skills')">
+          <el-icon><MagicStick /></el-icon>
+          <span>技能</span>
+        </button>
+        <button type="button" class="tool-btn" title="多智能体管理" @click="emit('open-multi-agent')">
+          <el-icon><User /></el-icon>
+          <span>多智能体</span>
+        </button>
+        <button type="button" class="tool-btn" title="检索开源遥感影像" @click="emit('open-imagery')">
+          <el-icon><Picture /></el-icon>
+          <span>影像</span>
+        </button>
+      </div>
     </div>
 
     <div class="conv-list">
-      <div class="conv-section-header">项目</div>
+      <div class="conv-section-header">项目空间</div>
       <div v-for="g in projects" :key="g.id" class="conv-group">
         <div
           class="project-row"
@@ -321,7 +324,7 @@ function fmtTime(t) {
 
       <!-- 未分组 -->
       <template v-if="grouped.ungrouped.length">
-        <div class="conv-section-header">对话</div>
+        <div class="conv-section-header">会话记录</div>
         <div
           v-for="c in grouped.ungrouped"
           :key="c.id"
@@ -338,9 +341,11 @@ function fmtTime(t) {
         </div>
       </template>
 
-      <div v-if="!projects.length && !grouped.ungrouped.length" class="conv-empty center">
-        暂无会话，点击上方新建
-      </div>
+      <!-- 空态：没有项目也没有会话 -->
+      <template v-else-if="!projects.length">
+        <div class="conv-section-header">会话记录</div>
+        <div class="conv-empty center">暂无会话，点击上方新建</div>
+      </template>
 
       <button type="button" class="new-project-inline" @click="onNewProject">
         <el-icon><Folder /></el-icon>
@@ -421,47 +426,64 @@ function fmtTime(t) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-panel);
+  background: var(--bg-base);
   overflow: hidden;
   color: var(--text-primary);
 }
 
 .sidebar-actions {
   flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 14px 8px 12px;
+  padding: 14px 10px 8px;
+  background: transparent;
 }
 
-.sidebar-action {
+.new-task-btn {
   width: 100%;
-  height: 32px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  cursor: pointer;
+}
+.new-task-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.tool-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 8px;
+}
+
+.tool-btn {
   display: flex;
   align-items: center;
   gap: 10px;
+  height: 32px;
   padding: 0 8px;
-  border: none;
+  border: 0;
   border-radius: var(--r-md);
   background: transparent;
-  color: #2f3b49;
+  color: var(--text-secondary);
+  font-size: var(--fs-lg);
   cursor: pointer;
-  font-size: 13px;
   text-align: left;
 }
-
-.sidebar-action:hover {
+.tool-btn:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
 }
-
-.sidebar-action .el-icon {
-  width: 16px;
+.tool-btn .el-icon {
   font-size: 15px;
-  color: #303946;
-}
-
-.search-action {
-  cursor: pointer;
 }
 
 .search-overlay {
@@ -600,31 +622,29 @@ function fmtTime(t) {
 }
 
 .conv-section-header {
-  padding: 13px 8px 7px;
-  font-size: 13px;
-  color: #8f98a6;
+  padding: 14px 10px 6px;
+  font-size: var(--fs-md);
+  color: var(--text-muted);
   font-weight: 500;
   letter-spacing: 0;
-  border-top: none;
-  margin-top: 0;
 }
 
 .project-row {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  margin: 0 6px 1px;
   border-radius: var(--r-md);
   cursor: pointer;
-  color: #5e6876;
-  margin: 0 0 2px;
+  color: var(--text-primary);
 }
 .project-row:hover {
   background: var(--bg-hover);
 }
 .project-row.active {
-  background: var(--accent-soft);
+  background: #ececec;
 }
 
 .project-row.collapsed {
@@ -632,9 +652,9 @@ function fmtTime(t) {
 }
 
 .project-row-icon {
-  width: 16px;
-  font-size: 15px;
-  color: #6b7480;
+  width: 15px;
+  font-size: 14px;
+  color: var(--text-secondary);
 }
 
 .project-row-title {
@@ -672,17 +692,17 @@ function fmtTime(t) {
 }
 
 .conv-group-items {
-  padding: 1px 0 7px 24px;
+  padding: 1px 0 6px 18px;
 }
 
 .conversation-card {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 31px;
-  padding: 0 8px;
-  margin: 0;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 9px;
+  margin: 0 0 1px;
   border: none;
   border-radius: var(--r-md);
   background: transparent;
@@ -693,7 +713,7 @@ function fmtTime(t) {
   background: var(--bg-hover);
 }
 .conversation-card.active {
-  background: var(--bg-hover);
+  background: #ececec;
 }
 .conversation-card-title {
   flex: 1;
@@ -701,16 +721,16 @@ function fmtTime(t) {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 13px;
-  color: #2f3845;
+  font-size: var(--fs-lg);
+  color: var(--text-primary);
   font-weight: 400;
   line-height: 18px;
 }
 .conversation-card-time {
   flex: 0 0 auto;
   margin-left: auto;
-  font-size: 12px;
-  color: #8d97a5;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
   font-family: var(--sans);
   text-align: right;
   line-height: 18px;
@@ -734,33 +754,35 @@ function fmtTime(t) {
 
 .conv-empty {
   text-align: center;
-  font-size: 12px;
-  color: #8d97a5;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
   padding: 8px;
 }
 .conv-empty.center {
   padding-top: 40px;
+  line-height: 1.7;
 }
 
 .new-project-inline {
-  width: calc(100% - 16px);
-  height: 30px;
-  margin: 8px;
+  width: calc(100% - 12px);
+  height: 32px;
+  margin: 6px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  justify-content: center;
-  border: 1px dashed rgba(107, 116, 128, 0.45);
+  justify-content: flex-start;
+  padding: 0 9px;
+  border: none;
   border-radius: var(--r-md);
   background: transparent;
-  color: #6b7480;
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-lg);
 }
 
 .new-project-inline:hover {
   background: var(--bg-hover);
-  border-style: solid;
+  color: var(--text-primary);
 }
 
 /* ===== 新对话 → 项目选择浮层 ===== */

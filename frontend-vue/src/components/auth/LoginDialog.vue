@@ -29,11 +29,14 @@ async function handleLogin() {
   errorMsg.value = ''
   try {
     const data = await login(username.value, password.value)
-    if (data.status === 'success') {
+    if (data.status === 'success' && data.access_token) {
       user.value = getAuthUser()
       visible.value = false
       password.value = ''
       emit('auth-changed', user.value)
+    } else if (data.status === 'mfa_required' || data.status === 'mfa_setup_required') {
+      // 管理端账号强制 TOTP；工作台没有 MFA 交互，引导到管理控制台
+      errorMsg.value = '该账号已启用双因子认证，请使用管理控制台（/admin.html）登录'
     } else {
       errorMsg.value = data.msg || '登录失败'
     }
@@ -62,16 +65,17 @@ function handleLogout() {
     </template>
     <el-button v-else link size="small" @click="visible = true">登录</el-button>
 
-    <el-dialog v-model="visible" title="登录" width="340px" append-to-body>
+    <el-dialog v-model="visible" title="登录工作台" width="340px" append-to-body>
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="用户名">
-          <el-input v-model="username" placeholder="admin" autocomplete="username" />
+          <el-input v-model="username" placeholder="请输入用户名" autocomplete="username" />
         </el-form-item>
         <el-form-item label="口令">
           <el-input v-model="password" type="password" show-password autocomplete="current-password"
                     @keyup.enter="handleLogin" />
         </el-form-item>
         <div v-if="errorMsg" class="auth-error">{{ errorMsg }}</div>
+        <p class="auth-hint">管理员账号请从管理控制台（/admin.html）登录。</p>
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
@@ -95,5 +99,10 @@ function handleLogout() {
   color: var(--accent-red, #d03050);
   font-size: var(--fs-md);
   margin-bottom: 8px;
+}
+.auth-hint {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
 }
 </style>

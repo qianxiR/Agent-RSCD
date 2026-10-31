@@ -126,7 +126,7 @@
 **裁剪关键参数**：
 
 - `start_on="human"`（从 human 轮切，不切断 human→ai→tool 配对）；
-- 自定义 tiktoken 计数（ChatOpenAI 对 qwen 代理不支持原生计数）；
+- 自定义 tiktoken 计数（ChatOpenAI 经 OpenAI 兼容代理时不返回原生 token 计数）；
 - `include_system=True`（system prompt 永不裁剪）。
 
 ---
@@ -139,8 +139,8 @@
 
 **参考答案**（依据 `backend/model/tools/tool_registry.py` + `backend/agent/prompt/tool_catalog.py`）：
 
-- **统一注册表**：`@register_tool("category")` + `@tool` 装饰器（注意顺序，`tool_registry.py:8-11`），全局 `_tool_registry` 按 category→name→func 组织，全仓 47 个工具 10 大类。
-- **白名单收窄**：`_LLM_EXPOSED_TOOL_NAMES`（`tool_registry.py:27`）只有 33 个工具暴露给 LLM，`get_tools_for_llm()` 和 `get_tools_catalog_for_llm()` 用同一白名单，保证 prompt 目录和 bind_tools 一致。非白名单工具仅供内部调用。
+- **统一注册表**：`@register_tool("category")` + `@tool` 装饰器（注意顺序，`tool_registry.py:8-11`），全局 `_tool_registry` 按 category→name→func 组织，全仓 **42 个工具、10 大类**（`get_all_tools()` 实测）。
+- **白名单收窄**：`_LLM_EXPOSED_TOOL_NAMES`（`tool_registry.py:27`）当前 **38 个工具**暴露给 LLM，`get_tools_for_llm()` 和 `get_tools_catalog_for_llm()` 用同一白名单，保证 prompt 目录和 bind_tools 一致。非白名单工具仅供内部调用。
 - **决策表**（`tool_catalog.py:69` `build_decision_table`）：把"任务类型→必用工具/禁用工具/关键约束"做成 Markdown 表注入 prompt，把工具选择从"自由组合"收窄为"按任务查表"。
 - **工具目录**（`tool_catalog.py:30`）：按 13 个分类分组，每工具只输出 `name + docstring 首行`，参数 schema 由 bind_tools 注入，不重复占 prompt token。
 
@@ -148,32 +148,37 @@
 
 ---
 
-### Q8. 讲讲 SAM（Segment Anything）在本项目里的推理流程。什么是多轮迭代推理（Remote SAMsing）？
+### Q8. 讲讲 SAM（Segment Anything）在本项目里的推理流程。为什么从多轮迭代改成官方单次前向？
 
-**要点**：开放词汇 + 双头融合 + 多轮场景简化。这是算法核心题。
+**要点**：开放词汇 + 官方双头/存在性融合 + 单次前向/滑窗 + `prob_thd`。这是算法核心题。
 
-**参考答案**（依据 `backend/model/SamSeg/runner.py` + `SamSeg/infer.py`）：
+**参考答案**（依据 `backend/model/SamSeg/engine.py` + `official.py` + `runner.py`）：
 
 本项目用的是 **SegEarth-OV3 / SAM3 开放词汇分割模型**（非原版 SAM 的 points/box 提示，而是**文本提示 text prompt**）。
 
-**单视图推理流程**（`infer.py:200` `inference_single_view`）：
+**官方推理流程**（阶段 24 起，对齐 `demo.py` / `segearthov3_segmentor.py`）：
 
-1. 图像编码一次（`processor.set_image`）。
-2. 对每个类别词（含同义词展开）逐项推理，得到实例头 logits + 语义头 logits + 存在性分数。
-3. **双头融合**（`_merge_prompt_result`）：实例 logits × object_score 取 max、语义 logits 取 max、再乘 presence_score 过滤。
-4. 输出 `seg_logits`（num_queries, H, W）。
+1. **官方引擎**：`engine.py` 清理子项目旧版 `sam3/` 的路径/模块遮蔽，使用 conda 环境 site-packages 的官方 `sam3` + `sam3.pt`；`Sam3Processor(resolution=1008)`。
+2. **单图或滑窗**：图像任一边 > `slide_crop=512` 时按 512/512 滑窗，重叠区域简单平均；否则整图一次前向。
+3. **逐 query 双头融合**：
+   - 实例头：`sigmoid(pred_masks) × (sigmoid(pred_logits) × presence)`，按 `confidence_threshold=0.1` 过滤；
+   - 语义头：`sigmoid(semantic_seg) × presence`；
+   - 两者 element-wise max，写入该 query 的 `(H,W)`。
+4. **类别聚合**：同义词 query 用 one-hot 按类别取 max → `argmax` → 置信度低于 `prob_thd=0.1` 的像素压回背景。
+5. **默认不做形态学后处理**（官方流程）；需要降噪时用 `SAMSEG_POSTPROCESS=true` 打开。
 
-**多轮迭代推理 Remote SAMsing**（`infer.py:330`）——解决单轮覆盖率不足的核心算法：
+**为什么弃用旧 multipass（Remote SAMsing）**：
 
-1. **场景简化**：每轮把已分割像素涂黑，让残差区域突出。
-2. 单轮推理 → 同义词同类聚合（`aggregate_logits`）。
-3. argmax + **自适应阈值衰减**：Pass1 用基础 prob，Pass2/3 按 0.7 倍递减（前期严格后期放宽，逐步兜底）。
-4. 只填充未覆盖区域。
-5. 收敛条件：覆盖率 ≥ 0.95 或新增 < 0.1%。
+- 旧流程最多 10 轮、每轮涂黑已分割区域 + 阈值 ×0.7 衰减，单图耗时高且两期分割不一致；
+- 它绕过了官方 `prob_thd` 和滑窗，大图容易漏检/OOM；
+- 本地旧版 `sam3` 还被改成 336 输入/简化 neck，与官方权重不匹配，检测头实际为空。
+- 现保留 `mode=multipass` 入参仅为兼容旧调用，runner 会告警并强制走 official。
 
-**后处理**：形态学平滑 → 连通域过滤去碎片 → 填洞 → 实例内部填充。
+**变化检测**（官方混合策略）：
 
-**变化检测**（`compute_instance_change_map`）：两期各自分割 → 提取连通域实例 → 算实例对 IoU → 贪心匹配（阈值 0.3）→ 未匹配判消失/新增，匹配但类别不同判类别变化。
+1. **实例级**：两期前景 mask 连通域在另一期的覆盖率 < 0.3 且面积 ≥ 20 → 变化；目标 mask 先膨胀 2px 吸收配准漂移，双向并集。
+2. **语义级**：SAM3 FPN 最后一层余弦相似度 → `1-sim`；每类 `energy = max_conf × |Δlogit| × feature_change`，逐类 Otsu（下限 0.01）。
+3. **融合**：实例级 ∩ 语义级，类别取语义级结果。
 
 ---
 

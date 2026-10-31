@@ -4,13 +4,33 @@
 //   工作空间树（白名单 cd*/samseg*）+ 显隐/定位/删除 + 搜索过滤
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineRound, Delete, Folder, Location, Refresh, Search } from '@element-plus/icons-vue'
+import { ChatLineRound, Close, Delete, Folder, Location, Refresh, Search } from '@element-plus/icons-vue'
 import { getGeoServerServices, getLayerBbox, deleteGeoServerLayer, deleteWorkspace } from '@/services/api'
 import { useMap } from '@/composables/useMap'
+import { BASEMAP_OPTIONS, useBasemap } from '@/composables/useBasemap'
 import { useProjectStore } from '@/stores/project'
 import { debugLog } from '@/utils/debugLog'
+import { clearTileCache, getTileCacheCount } from '@/utils/tileCache'
 
+const props = defineProps({
+  // 悬浮在地图左上角时使用“关闭”而不是“对话管理”
+  floating: { type: Boolean, default: false },
+})
 const { hasLayer, addWmsLayer, addWfsLayer, removeLayer } = useMap()
+// 底图（第一层级）：类型 + Esri 历史时相；与卷帘共用同一份 Wayback 版本清单
+const {
+  kind: basemapKind,
+  releaseDate: basemapDate,
+  releaseYears: basemapYears,
+  loading: basemapLoading,
+  error: basemapError,
+  fallback: basemapFallback,
+  summary: basemapSummary,
+  basemapAvailable,
+  loadBasemapReleases,
+  applyBasemap,
+  applyBasemapDate,
+} = useBasemap()
 const projectStore = useProjectStore()
 const emit = defineEmits(['back'])
 
@@ -21,8 +41,13 @@ const layerSearchInputRef = ref(null)
 const layerSearchQuery = ref('')
 const collapsed = ref(new Set())
 const visibleSet = ref(new Set())
+// 底图瓦片缓存张数（Service Worker 写入的 Cache Storage），null = 统计中
+const tileCacheCount = ref(null)
 
-onMounted(() => loadTree())
+onMounted(() => {
+  loadTree()
+  refreshTileCache()
+})
 // 监听图层列表版本号：发布/删除图层后自动刷新（跨组件通信，ChatPanel 发布后 bump）
 watch(() => projectStore.layerListVersion, () => loadTree({ silent: true }))
 
@@ -243,6 +268,49 @@ function syncVisibility() {
   })
   visibleSet.value = next
 }
+
+// ==================== 底图（第一层级） ====================
+// 入参: value 底图类型 | 方法: 立即切换底图；选中 Esri 时顺带加载历史版本清单 | 出参: 无
+function chooseBasemap(value) {
+  if (!basemapAvailable(value)) {
+    ElMessage.warning('天地图底图需要先配置 VITE_TDT_KEY')
+    return
+  }
+  if (!applyBasemap(value)) {
+    ElMessage.error(basemapError.value || '底图切换失败')
+    return
+  }
+  if (value === 'esri' && !basemapYears.value.length) loadBasemapReleases()
+}
+
+// 入参: date Wayback 发布日期（'' = 最新影像） | 方法: 切换 Esri 历史底图并提示结果 | 出参: 无
+async function changeBasemapDate(date) {
+  const ok = await applyBasemapDate(date)
+  if (!ok) {
+    ElMessage.error(basemapError.value || '历史底图切换失败')
+    return
+  }
+  ElMessage.success(date ? `底图已切换为 ${date} 影像` : '底图已切换为最新影像')
+}
+
+// 入参: open 下拉是否展开 | 方法: 首次展开时懒加载历史版本，避免打开图层面板就发请求 | 出参: 无
+function onBasemapDropdown(open) {
+  if (open && !basemapYears.value.length) loadBasemapReleases()
+  if (open) refreshTileCache()
+}
+
+// ==================== 底图瓦片缓存 ====================
+// 入参: 无 | 方法: 刷新已缓存的瓦片张数（Service Worker 写的 Cache Storage） | 出参: 无
+async function refreshTileCache() {
+  tileCacheCount.value = await getTileCacheCount()
+}
+
+// 入参: 无 | 方法: 清空底图瓦片缓存（下次浏览重新回源） | 出参: 无
+async function clearTiles() {
+  const count = await clearTileCache()
+  tileCacheCount.value = 0
+  ElMessage.success(count ? `已清理 ${count} 张底图瓦片缓存` : '底图瓦片缓存已是空的')
+}
 </script>
 
 <template>
@@ -257,13 +325,87 @@ function syncVisibility() {
         <span>搜索</span>
       </button>
       <button type="button" class="layer-action" @click="goBack">
-        <el-icon><ChatLineRound /></el-icon>
-        <span>对话管理</span>
+        <el-icon><Close v-if="props.floating" /><ChatLineRound v-else /></el-icon>
+        <span>{{ props.floating ? '关闭' : '对话管理' }}</span>
       </button>
     </div>
 
     <!-- 图层树（对齐原生 .layer-tree） -->
     <div class="layer-tree">
+      <!-- 第一个层级：底图（类型 + Esri 历史时相） -->
+      <div class="layer-section-header">
+        底图
+        <span class="layer-section-meta" :title="basemapSummary">{{ basemapSummary }}</span>
+      </div>
+      <div class="basemap-list">
+        <div
+          v-for="opt in BASEMAP_OPTIONS"
+          :key="opt.value"
+          class="basemap-item"
+          :class="{ active: basemapKind === opt.value, disabled: !basemapAvailable(opt.value) }"
+        >
+          <button
+            type="button"
+            class="basemap-row"
+            :disabled="!basemapAvailable(opt.value)"
+            :title="basemapAvailable(opt.value) ? opt.hint : '未配置 VITE_TDT_KEY'"
+            @click="chooseBasemap(opt.value)"
+          >
+            <span class="basemap-radio" :class="{ checked: basemapKind === opt.value }"></span>
+            <span class="basemap-name">{{ opt.label }}</span>
+            <span class="basemap-hint">{{ opt.hint }}</span>
+          </button>
+
+          <!-- Esri 时相：默认最新影像镶嵌，可切到 Wayback 历史版本 -->
+          <div v-if="opt.value === 'esri' && basemapKind === 'esri'" class="basemap-date">
+            <el-select
+              :model-value="basemapDate"
+              size="small"
+              filterable
+              class="basemap-date-select"
+              :loading="basemapLoading"
+              placeholder="最新影像（无单一日期）"
+              @change="changeBasemapDate"
+              @visible-change="onBasemapDropdown"
+            >
+              <el-option label="最新影像（无单一日期）" value="" />
+              <el-option
+                v-for="release in basemapYears"
+                :key="release.date"
+                :label="release.date"
+                :value="release.date"
+              />
+            </el-select>
+            <div v-if="basemapLoading" class="basemap-note">正在加载 Esri 历史版本…</div>
+            <div v-else-if="basemapError" class="basemap-note error">
+              {{ basemapError }}
+              <button type="button" class="basemap-retry" @click="loadBasemapReleases({ force: true })">重试</button>
+            </div>
+            <div v-else-if="basemapFallback" class="basemap-note warn">
+              版本清单接口暂不可达，已用内置年度快照
+            </div>
+            <div v-else class="basemap-note">
+              历史时相取 Esri Wayback 发布版本（每年一版），非单景成像日期
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 瓦片缓存状态：Service Worker 首次加载后落盘，回看/平移直接命中本地 -->
+      <div class="basemap-cache-row">
+        <span class="basemap-cache-text">
+          瓦片缓存：{{ tileCacheCount === null ? '统计中…' : `${tileCacheCount} 张` }} · 已缓存区域重复浏览不再走公网
+        </span>
+        <button
+          type="button"
+          class="basemap-cache-clear"
+          :disabled="!tileCacheCount"
+          title="清空底图瓦片缓存"
+          @click="clearTiles"
+        >清理</button>
+      </div>
+
+      <!-- 第二个层级：工作空间 -->
       <div class="layer-section-header">工作空间</div>
       <div v-if="loading && !tree" class="layer-tree-empty">加载中…</div>
       <div v-else-if="!filteredWorkspaces.length" class="layer-tree-empty">
@@ -416,6 +558,138 @@ function syncVisibility() {
   color: #8f98a6;
   font-weight: 500;
   letter-spacing: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.layer-section-meta {
+  margin-left: auto;
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* ===== 底基层级（类型 + Esri 历史时相） ===== */
+.basemap-list {
+  padding: 0 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.basemap-item {
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+.basemap-item.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.basemap-item.disabled {
+  opacity: 0.55;
+}
+.basemap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.basemap-row:disabled {
+  cursor: not-allowed;
+}
+.basemap-radio {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+}
+.basemap-radio.checked {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+.basemap-name {
+  flex: none;
+  font-weight: 500;
+}
+.basemap-hint {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.basemap-date {
+  padding: 0 8px 8px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.basemap-date-select {
+  width: 100%;
+}
+.basemap-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.basemap-note.error {
+  color: var(--accent-red, #dc4c4c);
+}
+.basemap-note.warn {
+  color: #b0741a;
+}
+.basemap-retry {
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* 底图瓦片缓存：一行状态 + 清理 */
+.basemap-cache-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.basemap-cache-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.basemap-cache-clear {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+.basemap-cache-clear:disabled {
+  color: var(--text-muted);
+  cursor: default;
 }
 .layer-tree-empty {
   padding: 24px 12px;

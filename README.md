@@ -13,6 +13,8 @@
 - 🤖 **模型层**：统一工具注册表、LLM 客户端、v1.0 技能契约与选择器、SamSeg 遥感推理封装、视觉理解与连通域分析
 - 💾 **数据层**：GeoServer 空间服务、PostgreSQL 业务库、知识库骨架、掩膜分析子包、矢量化子包
 - 🖥️ **表现层**：聊天 UI + **OpenLayers 地图容器**（影像/掩膜/矢量图层叠加 + WMS + GetFeatureInfo 属性弹窗 + 图例浮层）+ 数据面板 + 富表格（排序/复制）
+- 🛰️ **影像检索**：按时间/区域/云量筛选开放卫星影像（Planetary Computer、Earth Search、Copernicus；GEE 兜底），地图瓦片预览 + AOI 裁剪 GeoTIFF 下载 → 加载/发布图层 → 解译
+- 🎯 **框选解译**：**默认 Esri 高分底图**拖框取图 → 带 CRS GeoTIFF → 当前会话 Agent → ProC-SAM3 矢量结果叠加；Esri 失败自动回退天地图
 
 > **依赖方向**（自上而下，不反向）：agent → model → data；agent 内部自洽（memory ↔ agent_db ↔ memory_tools）。
 
@@ -34,6 +36,7 @@
 | 8 | [**GeoServer 与数据集成**](./docs/platform/architecture-platform.md#8-geoserver-与数据集成) | WMS/REST/WFS 客户端 + 业务库 CRUD + 知识库骨架 | `architecture-platform.md` |
 | 9 | [**技能编排（长任务）**](./docs/platform/architecture-platform.md#9-技能编排长任务) | 契约校验、确定性单技能选择、计划检查点与失败回退 | `architecture-platform.md` |
 | 10 | [**SamSeg 遥感分析**](./docs/model/architecture-samseg.md#10-samseg-遥感分析) | 分割/变化检测/矢量化（runner·geoio·visualize 三层） | `architecture-samseg.md` |
+| 11 | [**开源影像检索**](./docs/platform/open-imagery-sources.md) | 时间/区域/云量筛选 → 瓦片预览 → AOI 裁剪下载 → 图层/解译 | `open-imagery-sources.md` |
 
 ### Agent 执行边界
 
@@ -67,7 +70,7 @@ Agent-RSCD/
 │   │   ├── tools/               #   工具箱、注册表与 LLM 暴露边界
 │   │   │   └── samseg_tools.py  #     segment_image / detect_change / understand_image (遥感解译工具)
 │   │   ├── skills/              #   三个 v1.0 技能、契约加载器与确定性选择器
-│   │   └── SamSeg/              #   🛰️ SamSeg 遥感推理封装 (SegEarth-OV3/SAM3)
+│   │   └── SamSeg/              #   🛰️ SamSeg 遥感推理封装 (ProC-SAM3/SAM3)
 │   │       ├── runner.py        #     推理层: 模型缓存 + 分割/变化检测 + 连通域统计 + 类别图注
 │   │       └── SamSeg/          #     子项目源码 (含 sam3 权重 3.3GB)
 │   └── data/                    # 💾 数据层
@@ -215,9 +218,11 @@ npm --prefix frontend-vue run dev
 - **实现**：读图 → base64 data URI → 创建视觉 LLM（`settings.vision_model`）→ 发多模态消息 → 返回解译结论
 - 单图 ≤20MB，调用 qwen-vl 视觉模型按分辨率计费
 
-### SamSeg 分割/变化检测（基于 SegEarth-OV3 / SAM 3）
+### SamSeg 分割/变化检测（ProC-SAM3 / SAM 3）
 
-- **默认 7 类**：background / building / road / water / bareland / vegetation / farmland（支持中文类别名映射）
+- **默认 6 类**：building / road / water / vegetation / farmland / bareland（英文 + 英文同义词；分号分隔类别、逗号分隔同义词）
+- **引擎**：`SAMSEG_ENGINE=proc_sam3`（默认，ProC-SAM3）；`legacy` 可回退 SegEarth-OV3
+- **解析度**：`PROC_SAM3_RESOLUTION=504`（默认，交互快）/ `1008`（精度优先，较慢）
 - **优雅降级**：torch/权重缺失时 `samseg_available()` 返回 False，工具返回明确错误，不影响其他已注册工具
 - **按需加载**：模型权重（3.3GB）首次遥感请求时才加载，启动不预加载（不做遥感时零开销），加载后全局缓存复用
 - **数据流**：前端点「🖼️ 上传分割」→ POST `/api/v1/samseg/upload` → 立即显示原图 → WS 发指令 → LLM 调 `segment_image` → runner 推理（首次加载模型）→ 上色存 PNG + 连通域统计 + 图注 → `frontend_action(render_image)` → 前端追加结果图 → LLM 据统计做定量描述

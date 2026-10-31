@@ -4,6 +4,7 @@
 GeoServer:
   1. list_geoserver_services  — 查询 GeoServer 服务与图层列表
   2. download_raster_layer   — 下载栅格影像 (显式栅格下载, 仍可用)
+  2. load_image_to_map     — 加载本地影像到地图 + 图层管理
   3. upload_raster_layer     — 上传栅格影像
   4. download_shapefile_layer — 下载矢量 Shapefile (显式矢量下载, 仍可用)
 
@@ -285,6 +286,70 @@ def upload_raster_layer(file_path: str, layer_name: str = "", workspace: str = "
         return {"type": "error", "msg": result.get("msg", "上传失败")}
     except Exception as e:
         return {"type": "error", "msg": str(e)}
+
+
+@register_tool("geoserver")
+@tool
+def load_image_to_map(file_path: str, layer_name: str = "") -> Dict[str, Any]:
+    """
+    将本地带坐标的 GeoTIFF/COG 影像加载到地图，并进入图层管理。
+
+    ★ 触发场景: 用户说“把这张影像加载到地图”“显示这张影像”“加载影像到图层管理”
+      “把上传的影像叠加到地图”等。
+    ★ 与 upload_raster_layer 的区别: 本工具发布后立即推 frontend_action，
+      地图上直接叠加 WMS 并定位；upload_raster_layer 只发布、不自动显示。
+
+    入参:
+        - file_path (str): 本地 GeoTIFF/COG 绝对路径（必须有 CRS）
+        - layer_name (str): 发布图层名，留空用文件名（自动 ASCII 化）
+    出参: frontend_action(render_image) + 图层名/工作空间/bbox
+    """
+    try:
+        from backend.data import geoserver_client as gs
+        from backend.model.SamSeg.geoio import assert_image_has_crs
+
+        if not os.path.isfile(file_path):
+            return {"type": "error", "msg": f"影像不存在: {file_path}"}
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in (".tif", ".tiff", ".cog"):
+            return {"type": "error", "msg": f"仅支持 GeoTIFF/COG 加载到地图，当前文件: {ext}"}
+        ok, reason = assert_image_has_crs(file_path)
+        if not ok:
+            return {"type": "error", "msg": f"影像无有效 CRS，无法加载到地图: {reason}"}
+        if not gs.geoserver_available():
+            return {"type": "error", "msg": "GeoServer 不可用，无法加载影像图层"}
+
+        name = (layer_name or Path(file_path).stem).strip()
+        name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "image_layer"
+        result = gs.upload_raster(file_path, name, "cd_raster")
+        if result.get("status") != "success":
+            return {"type": "error", "msg": result.get("msg", "影像发布失败")}
+
+        ws = result.get("workspace") or "cd_raster"
+        lname = result.get("layer_name") or name
+        _safe_register_image_meta(file_path, lname, ws)
+        raw_bbox = gs.get_layer_bbox(f"{ws}:{lname}")
+        bbox = None
+        if raw_bbox:
+            bbox = [
+                float(raw_bbox["minx"]), float(raw_bbox["miny"]),
+                float(raw_bbox["maxx"]), float(raw_bbox["maxy"]),
+            ]
+        return build_frontend_action(
+            action="render_image",
+            params={
+                "base_layer": {"layer_name": lname, "workspace": ws},
+                "bbox": bbox,
+                "caption": f"影像加载: {lname}",
+            },
+            summary=f"影像已加载到地图: {ws}:{lname}",
+            description=f"正在加载影像图层 {lname} 到地图…",
+            wait_for_result=False,
+            data={"artifact_path": file_path, "layer_name": lname, "workspace": ws, "bbox": bbox},
+        )
+    except Exception as e:
+        logger.error(f"[load_image_to_map] 失败: {e}", exc_info=True)
+        return {"type": "error", "msg": f"影像加载失败: {e}"}
 
 
 @register_tool("geoserver")

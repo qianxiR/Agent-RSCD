@@ -28,11 +28,6 @@ const currentProjectId = computed(() => {
   return activeProjectId.value || ''
 })
 
-const currentProjectName = computed(() => {
-  if (!currentProjectId.value) return ''
-  return projects.value.find((p) => p.id === currentProjectId.value)?.name || ''
-})
-
 // 入参: pid 目标项目 id, 空串表示移出项目
 // 方法: 按会话落库状态分流 (落库 → PATCH 后端; 未落库 → 仅本地激活项目)
 // 出参: 无
@@ -59,10 +54,12 @@ async function onChange(pid) {
 
 <template>
   <div class="conv-context-bar">
+    <span class="ctx-label">项目</span>
     <el-select
       :model-value="currentProjectId"
       size="small"
       class="project-select"
+      placeholder="未关联项目"
       @change="onChange"
     >
       <template #prefix>
@@ -71,8 +68,9 @@ async function onChange(pid) {
       <el-option label="未分组 · 不属于任何项目" value="" />
       <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
     </el-select>
-    <span v-if="currentProjectName" class="ctx-project-name">{{ currentProjectName }}</span>
-    <span v-else class="ctx-project-name muted">未关联项目</span>
+    <div class="ctx-actions">
+      <slot name="actions" />
+    </div>
   </div>
 </template>
 
@@ -82,24 +80,33 @@ async function onChange(pid) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 8px 14px;
   background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid #f0f0f0;
+}
+.ctx-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+.ctx-label {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .project-select {
-  width: 240px;
+  width: 220px;
+}
+.project-select :deep(.el-select__wrapper) {
+  min-height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+.project-select :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--accent) inset;
 }
 .project-select-icon {
   color: var(--text-secondary);
-}
-.ctx-project-name {
-  font-size: var(--fs-md);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ctx-project-name.muted {
-  color: var(--text-muted);
 }
 </style>

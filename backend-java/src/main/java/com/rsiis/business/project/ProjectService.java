@@ -68,6 +68,8 @@ public class ProjectService {
         entity.setName(req.name());
         entity.setDescription(req.description() == null ? "" : req.description());
         entity.setFolderPath(blankToNull(req.folderPath()));
+        entity.setOrgId("org_default");
+        entity.setStatus("active");
         projectMapper.insert(entity);
         log.info("[Project] 创建成功: {} name={} folder={}",
                 entity.getId(), entity.getName(), entity.getFolderPath() == null ? "-" : entity.getFolderPath());

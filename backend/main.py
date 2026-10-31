@@ -28,6 +28,7 @@ _os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import sys
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -54,7 +55,7 @@ import backend.agent.tools  # noqa: F401
 #   conversations/tasks 由 Java 代理回本服务的 /internal/*; 本服务只保留
 #   AI 相关路由 + 内部接口。
 from backend.api import (  # noqa: E402
-    conversations, files, geoserver, internal, mcp, sandbox, skills, system, tasks, ws,
+    conversations, files, geoserver, imagery, internal, mcp, sandbox, skills, system, tasks, ws,
 )
 from backend.api.deps import (  # noqa: E402
     FILE_ROOT, SAMSEG_UPLOAD, SAMSEG_OUTPUT, GEOSERVER_DL, SANDBOX_ROOT,
@@ -75,12 +76,44 @@ async def lifespan(app: FastAPI):
     _init_schema()
     _log_storage_paths()
     await _diagnose_sandbox()
+    if settings.proc_sam3_warmup:
+        threading.Thread(
+            target=_warm_proc_sam3,
+            name="proc-sam3-warmup",
+            daemon=True,
+        ).start()
 
     yield
 
     # ---------- shutdown ----------
     # 显式归还连接池, 避免连接泄漏 (原 on_event 无 shutdown, 此处补齐)。
     _close_pools()
+
+
+def _warm_proc_sam3() -> None:
+    """后台预热 ProC-SAM3，避免第一次解译等待 ~60s 权重加载。
+
+    只预热模型 + UI 默认 3 类提示；用户换类别时适配层只重建 PromptBank，不重载权重。
+    """
+    try:
+        from backend.model.ProC_SAM3 import proc_sam3_available, segment
+
+        if not proc_sam3_available():
+            logger.info("[ProC-SAM3] 预热跳过: 目录/权重不可用")
+            return
+        from PIL import Image
+
+        warmup = Path(settings.file_storage_root) / "proc_sam3" / "warmup.png"
+        warmup.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (512, 512), (128, 128, 128)).save(warmup)
+        segment(
+            str(warmup),
+            "building, house, roof, structure; water, river, lake, pond; "
+            "vegetation, tree, grass, forest",
+        )
+        logger.info("[ProC-SAM3] 后台预热完成")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ProC-SAM3] 后台预热失败: %s", exc)
 
 
 def _init_schema() -> None:
@@ -209,7 +242,7 @@ ws.set_chat_service(chat_service)
 
 # 挂载全部业务路由 (projects/workspace 由 Java 服务承载, 不再挂载;
 # conversations/tasks 保留对外端点作为迁移期回滚通道, 默认流量经 Java 代理)
-for _mod in (conversations, files, geoserver, sandbox, system, tasks, ws, internal, skills, mcp):
+for _mod in (conversations, files, geoserver, imagery, sandbox, system, tasks, ws, internal, skills, mcp):
     app.include_router(_mod.router)
 
 

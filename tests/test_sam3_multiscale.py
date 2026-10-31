@@ -1,102 +1,70 @@
-from pathlib import Path
-import sys
+"""
+SAM3 官方视觉 backbone / neck 形状回归测试（阶段 24 起对齐官方实现）。
 
+背景:
+  旧测试针对本地简化 neck（336 输入、4 层 intermediate feature、无 ConvTranspose），
+  官方 sam3.pt 实际是 1008 输入 + SimpleFPN（ConvTranspose/MaxPool + 1x1 + 3x3）。
+  本测试改为校验官方 site-packages `sam3` 的 backbone 输出，防止再次出现“权重键名
+  对不上、neck 全随机”导致推理全空的问题。
+"""
 import pytest
 import torch
-from torch import nn
-
-
-SAMSEG_ROOT = Path(__file__).resolve().parents[1] / "backend" / "model" / "SamSeg" / "SamSeg"
-if str(SAMSEG_ROOT) not in sys.path:
-    sys.path.insert(0, str(SAMSEG_ROOT))
 
 from sam3.model_builder import _create_vision_backbone
-from sam3.model.necks import Sam3DualViTDetNeck
-from sam3.model.vl_combiner import SAM3VLBackbone
 
 
 @pytest.fixture(scope="module")
 def vision_backbone():
+    """入参: 无；方法: 构建官方 vision backbone；出参: CUDA eval 模型（无 CUDA 跳过）。"""
     if not torch.cuda.is_available():
-        pytest.skip("SAM3 multiscale smoke requires CUDA")
+        pytest.skip("SAM3 neck smoke requires CUDA")
     model = _create_vision_backbone().cuda().eval()
     yield model
     del model
     torch.cuda.empty_cache()
 
 
-def test_intermediate_layers_are_four_336_tokens(vision_backbone):
-    assert vision_backbone.trunk.full_attn_ids == [7, 15, 23, 31]
-
+def test_official_neck_outputs_four_scales_at_1008(vision_backbone):
+    """
+    入参: 官方 backbone。
+    方法: 1008×1008 输入前向，检查 SimpleFPN 四个尺度。
+    出参: 形状不符时断言失败。
+    """
     with torch.inference_mode():
-        features = vision_backbone.trunk(
-            torch.zeros(1, 3, 336, 336, device="cuda")
-        )
+        features = vision_backbone(
+            torch.zeros(1, 3, 1008, 1008, device="cuda")
+        )[0]
 
     shapes = [tuple(feature.shape) for feature in features]
-    print(f"Block 8/16/24/32 captured shapes: {shapes}")
-    assert shapes == [(1, 1024, 24, 24)] * 4
-
-
-def test_single_and_double_image_feature_shapes(vision_backbone):
-    expected = [
-        (256, 96, 96),
-        (256, 48, 48),
-        (256, 24, 24),
-        (256, 12, 12),
-    ]
-
-    with torch.inference_mode():
-        single = vision_backbone(torch.zeros(1, 3, 336, 336, device="cuda"))[0]
-        double = vision_backbone(torch.zeros(2, 3, 336, 336, device="cuda"))[0]
-
-    single_shapes = [tuple(feature.shape) for feature in single]
-    double_shapes = [tuple(feature.shape) for feature in double]
-    print(f"single-image four-scale shapes: {single_shapes}")
-    print(f"double-image four-scale shapes: {double_shapes}")
-    assert [shape[1:] for shape in single_shapes] == expected
-    assert [shape[1:] for shape in double_shapes] == expected
-
-
-def test_runtime_backbone_preserves_all_four_levels(vision_backbone):
-    backbone = SAM3VLBackbone(visual=vision_backbone, text=None, scalp=0).eval()
-
-    with torch.inference_mode():
-        output = backbone.forward_image(torch.zeros(1, 3, 336, 336, device="cuda"))
-
-    shapes = [tuple(feature.shape) for feature in output["backbone_fpn"]]
-    print(f"runtime backbone_fpn shapes: {shapes}")
+    print(f"official neck shapes: {shapes}")
     assert shapes == [
-        (1, 256, 96, 96),
-        (1, 256, 48, 48),
-        (1, 256, 24, 24),
-        (1, 256, 12, 12),
+        (1, 256, 288, 288),
+        (1, 256, 144, 144),
+        (1, 256, 72, 72),
+        (1, 256, 36, 36),
     ]
 
 
-def test_neck_requires_all_intermediate_layers():
-    class ShortTrunk(nn.Module):
-        channel_list = [1024] * 4
-
-        def forward(self, tensor_list):
-            return [torch.zeros(1, 1024, 24, 24)]
-
-    neck = Sam3DualViTDetNeck(
-        trunk=ShortTrunk(),
-        position_encoding=nn.Identity(),
-        d_model=256,
-        scale_factors=[4.0, 2.0, 1.0, 0.5],
-    )
-
-    with pytest.raises(ValueError, match="Expected 4 intermediate ViT features"):
-        neck(torch.zeros(1, 3, 24, 24))
+def test_official_neck_uses_simple_fpn_ops(vision_backbone):
+    """
+    入参: 官方 backbone。
+    方法: 检查 neck 内存在 ConvTranspose2d / MaxPool2d（官方 SimpleFPN 特征）。
+    出参: 若退化成单层 1x1 conv（旧本地实现）则断言失败。
+    """
+    modules = list(vision_backbone.modules())
+    assert any(isinstance(module, torch.nn.ConvTranspose2d) for module in modules)
+    assert any(isinstance(module, torch.nn.MaxPool2d) for module in modules)
 
 
-def test_neck_has_no_simple_fpn_operators(vision_backbone):
-    operators = list(vision_backbone.modules())
-    assert not any(isinstance(module, nn.ConvTranspose2d) for module in operators)
-    assert not any(isinstance(module, nn.MaxPool2d) for module in operators)
-    assert all(
-        isinstance(module, nn.Conv2d) and module.kernel_size == (1, 1)
-        for module in vision_backbone.convs
-    )
+def test_backbone_accepts_batch_of_two(vision_backbone):
+    """
+    入参: 官方 backbone。
+    方法: batch=2 前向，确认四个尺度 batch 维一致。
+    出参: batch 维不等于 2 时断言失败。
+    """
+    with torch.inference_mode():
+        features = vision_backbone(
+            torch.zeros(2, 3, 1008, 1008, device="cuda")
+        )[0]
+
+    assert all(feature.shape[0] == 2 for feature in features)
