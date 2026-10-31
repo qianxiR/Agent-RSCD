@@ -131,8 +131,8 @@ def build_segmentation_report(
 
     try:
         from backend.data import geoserver_client as gs
-        from backend.model.tools.report_tools import generate_monitor_report
-        from backend.model.tools.vector_tools import rasterize_vector_to_png
+        from backend.agent.tools.report_tools import generate_monitor_report
+        from backend.agent.tools.vector_tools import rasterize_vector_to_png
     except ImportError as exc:
         return _build_report_payload(
             status=STATUS_FAILED,
@@ -293,4 +293,5 @@ def run_report_worker(payload: Dict[str, Any]) -> Dict[str, Any]:
         issues=[f"unsupported report task_type: {task_type}"],
         recommendation=RECOMMEND_REPORT_ERROR,
     )
+
 

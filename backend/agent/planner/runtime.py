@@ -13,15 +13,26 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.agent.planner.plan_adapter import graph_to_plan_state
-from backend.agent.planner.templates import CHANGE_DETECTION, build_graph_for_task
+from backend.agent.planner.templates import (
+    CHANGE_DETECTION,
+    GEOSERVER_PUBLISH,
+    SEMANTIC_SEGMENTATION,
+    build_graph_for_task,
+)
 from backend.agent.planner.validator import PlanValidationError, validate_plan_graph
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
+_PUBLISH_FILE_RE = re.compile(
+    r"([A-Za-z]:\\[^\s\"']+\.(?:tif|tiff|shp|geojson)|/[^\s\"']+\.(?:tif|tiff|shp|geojson))",
+    re.IGNORECASE,
+)
 
 # 常见类别提示：Plan-first 灰度只处理能确定性推断类别的请求，其余回退 ReAct。
 _CLASS_HINTS = [
@@ -73,6 +84,23 @@ def extract_change_inputs(images: List[Dict[str, Any]]) -> Optional[Dict[str, st
     }
 
 
+def extract_single_image(images: List[Dict[str, Any]]) -> Optional[str]:
+    """入参: 聊天附件。方法: 取第一张有效影像路径。出参: path 或 None。"""
+    for item in images or []:
+        if isinstance(item, dict) and str(item.get("path") or "").strip():
+            return str(item["path"])
+    return None
+
+
+def extract_publish_file(prompt: str) -> Optional[str]:
+    """入参: 用户输入。方法: 提取可发布的本地 GeoTIFF/Shapefile/GeoJSON 路径。"""
+    match = _PUBLISH_FILE_RE.search(prompt or "")
+    if not match:
+        return None
+    path = match.group(1)
+    return path if Path(path).is_file() else None
+
+
 def maybe_build_plan_first_state(
     prompt: str,
     images: List[Dict[str, Any]],
@@ -85,8 +113,9 @@ def maybe_build_plan_first_state(
       - prompt/images/conversation_id/user_id: 本轮请求上下文。
       - existing_plan: 会话已有计划；存在时不覆盖。
     方法:
-      - 仅当 AGENT_PLAN_FIRST=true 且是双时相输入时触发；
-      - 用关键词确定性推断类别，无法推断则返回 None（回退 ReAct）；
+      - 仅当 AGENT_PLAN_FIRST=true 时触发；
+      - 变化检测（双时相）/ 单图分割（类别可推断）/ GeoServer 发布（prompt 中带本地文件路径）；
+      - 无法确定任务或类别时返回 None（回退 ReAct）。
       - 构建/校验 PlanGraph，再转成现有 plan state（step_id=node_id）。
     出参:
       - plan state dict；未触发/不可用返回 None。
@@ -95,22 +124,35 @@ def maybe_build_plan_first_state(
         return None
     if existing_plan:
         return None
-    inputs = extract_change_inputs(images)
-    if not inputs:
-        return None
-    classes = infer_classes_from_prompt(prompt)
-    if not classes:
-        return None
-    for path in (inputs["t1_path"], inputs["t2_path"]):
-        if not Path(path).is_file():
+    publish_file = extract_publish_file(prompt)
+    if publish_file:
+        task_type = GEOSERVER_PUBLISH
+        graph_inputs: Dict[str, Any] = {"file_path": publish_file, "classes": ""}
+        paths = [publish_file]
+    else:
+        classes = infer_classes_from_prompt(prompt)
+        if not classes:
+            return None
+        change_inputs = extract_change_inputs(images)
+        single_image = extract_single_image(images)
+        task_type = ""
+        graph_inputs = {"classes": classes}
+        if change_inputs:
+            task_type = CHANGE_DETECTION
+            graph_inputs.update(change_inputs)
+            paths = [change_inputs["t1_path"], change_inputs["t2_path"]]
+        elif single_image:
+            task_type = SEMANTIC_SEGMENTATION
+            graph_inputs["image_path"] = single_image
+            paths = [single_image]
+        else:
             return None
 
+    if any(not Path(path).is_file() for path in paths):
+        return None
+
     try:
-        graph = build_graph_for_task(
-            CHANGE_DETECTION,
-            prompt,
-            {**inputs, "classes": classes},
-        )
+        graph = build_graph_for_task(task_type, prompt, graph_inputs)
         if graph is None:
             return None
         from backend.agent.tools.registry import (  # 延迟导入，避免启动期重依赖
@@ -126,7 +168,7 @@ def maybe_build_plan_first_state(
         return graph_to_plan_state(
             graph,
             conversation_id,
-            context_inputs={**inputs, "classes": classes},
+            context_inputs={**graph_inputs, "classes": graph_inputs.get("classes", "")},
         )
     except (PlanValidationError, OSError, ValueError) as exc:
         logger.warning(f"[Planner] Plan-first 构建失败，回退 ReAct: {exc}")

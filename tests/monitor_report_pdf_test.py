@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.model.tools.report_tools import generate_monitor_report
+from backend.agent.tools.report_tools import generate_monitor_report
 
 
 def _assert_true(condition: bool, label: str) -> None:
@@ -134,3 +134,4 @@ def run_monitor_report_pdf_test() -> None:
 if __name__ == "__main__":
     run_monitor_report_pdf_test()
     print("monitor_report_pdf_test: PASS")
+

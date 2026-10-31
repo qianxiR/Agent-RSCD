@@ -16,8 +16,8 @@ if str(ROOT) not in sys.path:
 
 from backend.agent.runtime.context_vars import set_runtime_context
 from backend.data import geoserver_client
-from backend.model.tools.report_tools import generate_monitor_report
-from backend.model.tools.vector_tools import rasterize_vector_to_png
+from backend.agent.tools.report_tools import generate_monitor_report
+from backend.agent.tools.vector_tools import rasterize_vector_to_png
 
 ARTIFACT_DIR = ROOT / "tests" / "artifacts" / "e2e_geoserver_report"
 METRICS_PATH = ROOT / "tests" / "artifacts" / "e2e_geoserver_report_metrics.json"
@@ -361,3 +361,4 @@ if __name__ == "__main__":
     result = run_e2e_geoserver_report_eval()
     print("e2e_geoserver_report_eval: PASS")
     print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+

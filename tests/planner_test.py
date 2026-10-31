@@ -19,9 +19,21 @@ from backend.agent.memory.task_state import (  # noqa: E402
     start_tool_step,
 )
 from backend.agent.planner.plan_adapter import graph_to_plan_state  # noqa: E402
-from backend.agent.planner.runtime import extract_change_inputs, infer_classes_from_prompt  # noqa: E402
+from backend.agent.planner.runtime import (  # noqa: E402
+    extract_change_inputs,
+    extract_publish_file,
+    infer_classes_from_prompt,
+)
 from backend.agent.planner.schema import PlanGraph, PlanNode  # noqa: E402
-from backend.agent.planner.templates import build_change_detection_graph  # noqa: E402
+from backend.agent.planner.templates import (  # noqa: E402
+    CHANGE_DETECTION,
+    GEOSERVER_PUBLISH,
+    SEMANTIC_SEGMENTATION,
+    build_change_detection_graph,
+    build_graph_for_task,
+    build_publish_graph,
+    build_segmentation_graph,
+)
 from backend.agent.planner.validator import (  # noqa: E402
     PlanValidationError,
     collect_plan_issues,
@@ -203,6 +215,38 @@ def test_infer_classes_from_prompt() -> None:
     assert infer_classes_from_prompt("随便看看") == ""
 
 
+def test_extract_publish_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "a.tif"
+        path.write_bytes(b"x")
+        assert extract_publish_file(f"把 {path} 发布到 GeoServer") == str(path)
+        assert extract_publish_file(f"把 {tmp}/missing.tif 发布") is None
+        assert extract_publish_file("发布这个图层") is None
+
+
+def test_segmentation_and_publish_templates() -> None:
+    seg_tools = {"segment_image", "visualize_vector"}
+    seg = build_segmentation_graph("提取建筑", "/tmp/a.tif", classes="building")
+    assert seg.task_type == SEMANTIC_SEGMENTATION
+    assert seg.node("n2_segment").tool == "segment_image"
+    assert seg.node("n3_visualize").required is False
+    validate_plan_graph(seg, available_tools=seg_tools, tool_whitelist=seg_tools)
+
+    pub_tools = {"upload_raster_layer", "load_geoserver_layer"}
+    pub = build_publish_graph("发布影像", "/tmp/a.tif", layer_name="demo")
+    assert pub.task_type == GEOSERVER_PUBLISH
+    assert pub.node("n2_upload").tool == "upload_raster_layer"
+    assert pub.node("n3_load").inputs["layer_name"] == "{{n2_upload.layer_name}}"
+    validate_plan_graph(pub, available_tools=pub_tools, tool_whitelist=pub_tools)
+
+    assert build_graph_for_task(
+        SEMANTIC_SEGMENTATION, "提取建筑", {"image_path": "/tmp/a.tif", "classes": "building"}
+    ) is not None
+    assert build_graph_for_task(
+        GEOSERVER_PUBLISH, "发布", {"file_path": "/tmp/a.tif"}
+    ) is not None
+
+
 if __name__ == "__main__":
     test_template_structure()
     test_roundtrip()
@@ -214,4 +258,6 @@ if __name__ == "__main__":
     test_change_detection_plan_runner()
     test_graph_to_plan_state()
     test_infer_classes_from_prompt()
+    test_extract_publish_file()
+    test_segmentation_and_publish_templates()
     print("planner: PASS")

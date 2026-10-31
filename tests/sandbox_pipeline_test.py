@@ -56,7 +56,7 @@ async def run():
     avail = await sandbox_manager.is_available()
     _check(avail, f"沙盒不可用: {sandbox_manager._last_unavailable_reason}")
 
-    from backend.model.tools.sandbox_tools import run_python_code
+    from backend.agent.tools.sandbox_tools import run_python_code
     code = (
         "from PIL import Image, ImageDraw\n"
         "img = Image.new('RGB', (160, 100), (30, 60, 120))\n"
@@ -78,7 +78,7 @@ async def run():
     _check(artifact.is_file(), f"环1 产物未落盘: {artifact}")
     _check(artifact.stat().st_size > 0, "环1 产物为空文件")
 
-    from backend.model.tools.sandbox_render_tools import render_sandbox_image
+    from backend.agent.tools.sandbox_render_tools import render_sandbox_image
     r2 = render_sandbox_image.invoke({"filename": FILENAME})
     _check(
         r2.get("type") == "frontend_action",
@@ -107,4 +107,5 @@ async def run():
 
 if __name__ == "__main__":
     asyncio.run(run())
+
 

@@ -20,6 +20,7 @@ from backend.data.base import (
     AssetKind,
     AssetRef,
     DataStore,
+    LocalFileRepository,
     validate_asset_ref,
 )
 from backend.data.catalog import AssetCatalog, get_catalog
@@ -29,6 +30,7 @@ __all__ = [
     "AssetKind",
     "AssetRef",
     "DataStore",
+    "LocalFileRepository",
     "validate_asset_ref",
     "AssetCatalog",
     "get_catalog",

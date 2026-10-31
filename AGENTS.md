@@ -1,14 +1,17 @@
 # Agent-RSCD 工作区说明
 
-基于 WebSocket 的遥感影像解译智能体系统（品牌名：国土智察）。双服务后端（Java 管业务 + Python 管 AI）+ Vue 3 前端，LLM（Qwen via DashScope）驱动 ReAct 推理、工具编排、三层记忆与技能编排。
+基于 WebSocket 的遥感影像解译智能体系统（品牌名：国土智察）。双服务后端（Java 管业务 + Python 管 AI）+ Vue 3 前端，LLM（GLM-5.3-Flash，DashScope 回退）驱动 ReAct 推理、工具编排、三层记忆与技能编排。
 
 ## 目录结构
 
 - `backend/` — Python AI 服务。三层子包 `agent` / `model` / `data`，外加 `api`（REST/WS 路由，含 `/internal/*` 内部接口）、`utils`；入口 `backend/main.py`，配置集中在 `backend/config.py`。
+  - `agent/`：编排层。`planner/`（PlanGraph/校验/模板）、`executor/`（ReAct + DAG）、`tools/`（全部工具实现与注册表）、`skills/`（loader/selector，Markdown 文档仍放 `model/skills`）、`memory/`、`prompt/`、`verification/`、`team/`、`runtime/`。
+  - `model/`：解译模型与 LLM 适配层。`base.py`/`registry.py` 统一协议，`segmentation/`、`change_detection/`、`understanding/` 放模型适配器；具体权重与推理实现仍在 `ProC_SAM3/`、`SamSeg/`。
+  - `data/`：数据资产与 IO。`base.py`/`catalog.py` 统一资产契约，`imagery` / `vector` / `image` / `text` / `other` 五类域，`connectors/` 放 PostGIS/GeoServer/存储连接器。
 - `backend-java/` — Java 业务服务（Spring Boot 3 + MyBatis-Plus + Spring Security/JWT，端口 8081）：项目管理（直管 `rsiis_business` 库）、登录认证、工作区浏览、会话与任务代理（转发 Python `/internal/*`）。构建运行见 `backend-java/README.md`。
 - `frontend-vue/` — 当前前端（Vue 3 + Vite + Element Plus + Pinia + OpenLayers）。
 - `frontend/` — 旧版前端，勿改。
-- `docs/` — `architecture.md` 总纲及子文档；`docs/agent/`（core / evaluation / method / roadmap）；`docs/PROGRESS.md` 阶段进度（22 个阶段的演进记录）。
+- `docs/` — `architecture.md` 总纲及子文档；`docs/agent/`（core / evaluation / method / roadmap）；`docs/PROGRESS.md` 阶段进度（阶段 60 的演进记录）。
 - `tests/` — Python 测试脚本 + `tests/e2e/`（Playwright）。
 - `deploy/nginx.conf` — 生产统一入口分流配置（开发期由 Vite proxy 等价承担）。
 - `scripts/` — 一次性/运维脚本（如 `migrate_project_to_java.py` 双服务库迁移）。
@@ -34,10 +37,10 @@ npm --prefix frontend-vue run dev                         # 前端，http://127.
 
 ## 架构边界（改动前必读）
 
-- 依赖方向严格自上而下：`agent → model → data`，不得反向导入。
+- 依赖方向：`agent → model`、`agent → data`、`model → data`；`data` 不反向依赖 `agent/model`。
 - 双服务依赖单向：Java → Python（内部 REST）；Python 不反向调用 Java。
 - 主控 Agent 是唯一决策中心和唯一用户可见回复者；仅保留确定性 `verification_agent` 与分割链路内同步调用的 `report_agent`，不新增专业 worker。
-- 工具通过 `@register_tool` 注册进统一注册表，LLM 暴露边界由工具目录控制。
+- 工具实现与注册表位于 `agent/tools/`，通过 `@register_tool` 注册；LLM 暴露边界由工具目录控制。
 - 只有 verification 为 `passed` 的 lesson 才能进入长期记忆；技能缺必填输入、契约不合格或工具越权时不执行。
 - 遥感解译默认走 **ProC-SAM3**（`backend/model/ProC_SAM3/`，外部仓库 `E:\1代码\模型\变化检测\ProC-SAM3-main`，权重 `E:\1代码\模型\权重\sam3\sam3.pt`）；`SAMSEG_ENGINE=legacy` 回退 SegEarth-OV3。SAM3 权重按需加载：启动不预加载，首次遥感请求加载后全局缓存。
 - Java 侧认证三档开关（`SECURITY_MODE`: off/observe/enforce），默认 off 保证迁移期与 E2E 兼容。

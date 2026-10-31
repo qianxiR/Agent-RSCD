@@ -23,17 +23,17 @@
 Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主线，通过数据层、模型层、智能体层、服务平台四大板块的分层解耦与协同联动，形成从底层数据资源组织、核心智能能力构建到上层自然语言交互的完整闭环。
 
 - **数据层**是基础资源层，为系统提供高质量的空间与业务语料：通过 GeoServer 统一发布 WMS/WFS/WCS 栅格与矢量图层服务，PostgreSQL 业务库以「表名作参数」的通用 CRUD 承载业务数据，并预留知识库骨架（pgvector/向量服务可选），为上层的认知与推理提供可检索、可操作的数据底座。
-- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面将 GeoServer 操作、数据库 CRUD、图层控制、**SamSeg 遥感分割/变化检测**（基于 SAM 3 的 SegEarth-OV3）、沙盒代码执行、数据预处理、报表生成等专业能力封装为 **42 个标准化工具（10 大类）**，以装饰器注册表统一调度，并辅以 Markdown 技能方案承载长任务编排——使模型能力既可被自然语言调用，又可按需演进扩展。
-- **智能体层**作为应用承载，采用 **ReAct 推理 + 工具编排**机制，将模型能力转化为可执行、可回滚的业务流程：流式输出思维链、最多 15 轮的工具调度循环、按 `conversation_id` 精确停止与消息回滚，配合**三层记忆系统**（工作记忆存完整工具调用链、短期记忆做会话摘要、长期记忆只沉淀**犯错自纠的错误案例与解决方案**，偏好/事实提取默认关闭以避免噪声）与显式上下文缓存，将大模型的「单次问答」升级为「持续推理、自主决策、长程协作」的智能体行为。
+- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面以 `model/base.py` + `model/registry.py` 统一解译模型协议，把 **ProC-SAM3 分割/变化检测**、影像理解、后续检测/分类模型做成可插拔适配器。GeoServer 操作、数据库 CRUD、图层控制、沙盒、预处理、报表等能力则作为 **50 个注册工具（14 类）** 放在 `agent/tools/`，由 `@register_tool` 统一调度；Markdown 技能方案承载长任务编排。
+- **智能体层**作为应用承载，采用 **ReAct 推理 + 工具编排 + 可选 Plan-first**机制：流式输出思维链、无硬性工具轮次上限（用户停止兜底）、按 `conversation_id` 精确停止与消息回滚；执行前可由 PlanGraph 生成 DAG（变化检测已灰度），执行中由确定性 verification/repair/completion gate 约束。配合**三层记忆系统**（工作记忆、短期摘要、长期经验/教训）与显式上下文缓存，将大模型的「单次问答」升级为「持续推理、自主决策、长程协作」的智能体行为。
 - **服务平台**面向终端用户，通过 **WebSocket 全双工通道**实现前后端协同：以 `request_id` 配对完成「智能体发指令→前端执行渲染→回传结果」的闭环，支持同一连接多对话并行；前端集成聊天交互、**OpenLayers 地图容器**（影像/掩膜/矢量图层叠加 + WMS 图层 + GetFeatureInfo 属性弹窗 + 颜色图注）、数据表格面板，以及任务日志监控。
 
 整体架构强调**数据驱动与模型、智能并重**：通过引入大模型与智能体技术，实现地理空间信息处理从**传统菜单/脚本驱动**向**认知驱动与决策驱动**的转型——用户用一句自然语言即可完成图层发布、数据库增删改查、遥感分析等跨系统的多步操作，智能体自主推理、调用工具、在地图/表格/影像上渲染结果。
 
 | 板块 | 对应代码 | 关键组件 | 体现的「转型」 |
 |------|---------|---------|---------------|
-| 数据层 | `backend/data/` | GeoServer 客户端、业务库通用 CRUD、知识库骨架 | 数据资源组织 |
-| 模型层 | `backend/model/` | LLM 客户端（GLM-5.3-Flash）、42 工具注册表、SamSeg 推理封装、技能方案 | 认知/推理/生成 + 专业技能融合 |
-| 智能体层 | `backend/agent/` | ReAct 推理引擎、三层记忆、System Prompt+缓存、WS 任务管理、运行时隔离 | 规则驱动 → 认知/决策驱动 |
+| 数据层 | `backend/data/` | AssetRef/catalog、GeoServer、业务库、五类数据域 | 数据资源组织 |
+| 模型层 | `backend/model/` | LLM 客户端、解译模型协议/registry、ProC-SAM3 适配器 | 认知/推理/生成 + 专业技能融合 |
+| 智能体层 | `backend/agent/` | ReAct/PlanGraph/DAG、工具注册表、三层记忆、System Prompt、WS 任务管理 | 规则驱动 → 认知/决策驱动 |
 | 服务平台 | `frontend-vue/` | 工作台（聊天 + OpenLayers 地图 + 图层）+ 管理控制台（`/admin` 路由）；WS 多对话路由 | 上层应用服务闭环 + 治理闭环 |
 
 ---
@@ -66,7 +66,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 ### 5.3 智能体与模型
 
 - ReAct 推理 + 工具编排，最多 15 轮；流式思维链；`request_id` 前后端闭环；按 `conversation_id` 停止/回滚。
-- 工具：42 个标准工具（10 大类），`@register_tool` 注册表统一调度；技能库（Markdown）+ MCP 服务器管理。
+- 工具：50 个注册工具（14 类），`@register_tool` 注册表统一调度；技能库（Markdown）+ MCP 服务器管理。
 - 记忆：工作记忆（完整工具链）/ 短期会话摘要 / 长期经验（仅 verification=passed 的 lesson）；偏好/事实提取默认关闭。
 - LLM：GLM-5.3-Flash（DashScope `qwen3.7-plus` 兜底），System Prompt 显式缓存。
 - 遥感：**ProC-SAM3**（Prompt-Calibrated SAM3，开放词汇；英文类别 + 英文同义词；默认 504 交互快，`PROC_SAM3_RESOLUTION=1008` 精度优先）；变化检测 = 两期 ProC 掩膜实例对比；结果矢量化写 `vector_layer`。旧 SegEarth-OV3 保留 `SAMSEG_ENGINE=legacy` 回退。
@@ -147,10 +147,11 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 
 整张图按 **智能体 / 模型 / 数据** 三层（主体自下而上）+ **平台层**（右侧承载用户交互）组织。
 
-> **★ 三层重构 (2026-06)**：按职责重新归位。
-> - **agent 层**：prompt + 推理流水线 + 连接/任务管理 + **记忆（编排 + agent_db 数据库）** + 上下文隔离 + 记忆工具
-> - **model 层**：**工具箱**（25 个具体服务/API 工具，含 SamSeg 遥感分析）+ 注册表 + LLM 客户端 + 技能文档 + SamSeg 推理封装
-> - **data 层**：GeoServer + 业务库 + 知识库（骨架）
+> **★ 三层重构 (2026-10, Backend V2)**：
+> - **agent 层**：Planner/Executor（ReAct + DAG）+ **全部工具实现与注册表** + 技能 loader/selector + 记忆 + Prompt + 连接/任务管理 + 上下文隔离
+> - **model 层**：解译模型统一协议/注册表（ProC-SAM3 分割/变化检测适配器）+ LLM 客户端 + 权重/推理实现
+> - **data 层**：AssetRef/catalog + 影像/矢量/图片/文本/other 五类域 + GeoServer/业务库连接器
+> - 依赖方向：`agent → model`、`agent → data`、`model → data`；data 不反向依赖 agent/model。
 
 ```mermaid
 graph LR
@@ -160,28 +161,34 @@ graph LR
 
         subgraph AGENT["🧠 智能体层 (Agent) — 最顶层"]
             direction LR
-            SERVICE["AgentChatService<br/>推理循环·工具调度"]
+            SERVICE["AgentChatService<br/>ReAct · 工具调度"]
+            PLANNER["planner/<br/>PlanGraph · DAG 模板"]
+            EXECUTOR["executor/<br/>ReAct + DAG"]
+            TOOLS["tools/<br/>注册表 + 工具实现"]
+            SKILLS["skills/<br/>loader · selector"]
             WS["ws_manager<br/>连接·任务管理"]
             MEMORY["memory/memory_context<br/>上下文构建·记忆编排"]
-            AGENTDB["memory/agent_db<br/>记忆数据库 (会话/消息/记忆)"]
+            AGENTDB["memory/agent_db<br/>记忆数据库"]
             PROMPT["prompt/system_prompt<br/>System Prompt"]
-            RUNTIME["runtime/context_vars<br/>运行时上下文 (ContextVar)"]
-            MEMTOOLS["tools/memory_tools<br/>记忆工具"]
+            RUNTIME["runtime/context_vars<br/>运行时上下文"]
         end
 
         subgraph MODEL["🤖 模型层 (Model)"]
             direction LR
-            LLM_CLIENT["llm_client<br/>LLM 实例构造·工具绑定"]
-            TOOLREG["tools/tool_registry<br/>42 个工具 + 注册表"]
-            SAMSEG["SamSeg/runner<br/>🛰️ 遥感推理封装"]
-            SKILLS["skills/loader<br/>技能编排方案"]
+            LLM_CLIENT["llm_client<br/>LLM 实例构造"]
+            MODELREG["model/registry<br/>capability 模型注册"]
+            ADAPTERS["segmentation / change_detection<br/>ProC-SAM3 适配器"]
+            SAMSEG["ProC_SAM3 / SamSeg<br/>🛰️ 权重与推理实现"]
         end
 
         subgraph DATA["💾 数据层 (Data) — 最底层"]
             direction LR
-            BIZ["business_db<br/>业务库 (通用 CRUD)"]
+            CATALOG["catalog<br/>AssetRef · 统一资产"]
+            IMAGE["imagery / image<br/>影像与图片"]
+            VECTOR["vector<br/>矢量"]
+            TEXT["text / other<br/>文本与其他"]
+            BIZ["business_db<br/>业务库"]
             GEOSERVER["geoserver_client<br/>图层发布·WMS/REST"]
-            KNOWLEDGE["knowledge<br/>知识库 (骨架)"]
         end
     end
 
@@ -195,23 +202,31 @@ graph LR
     end
 
     %% ========== 智能体层内部 ==========
+    SERVICE -->|"可选 Plan-first"| PLANNER
+    PLANNER -->|"PlanGraph"| EXECUTOR
+    SERVICE -->|"ReAct / DAG"| EXECUTOR
+    EXECUTOR -->|"invoke"| TOOLS
     SERVICE -->|"build_context"| MEMORY
-    SERVICE -->|"astream·invoke"| TOOLREG
     SERVICE -->|"set_runtime_context"| RUNTIME
 
     %% ========== 智能体 → 模型 ==========
-    SERVICE -->|"create_llm_with_tools"| LLM_CLIENT
+    SERVICE -->|"create_llm"| LLM_CLIENT
+    TOOLS -->|"resolve(capability)"| MODELREG
+    MODELREG --> ADAPTERS
+    ADAPTERS --> SAMSEG
     MEMORY -->|"build_system_prompt"| PROMPT
-    PROMPT -.->|"读工具目录"| TOOLREG
+    PROMPT -.->|"工具目录"| TOOLS
 
     %% ========== 智能体 → 记忆数据库 ==========
     MEMORY -->|"load/persist"| AGENTDB
-    MEMTOOLS -->|"读写记忆"| AGENTDB
 
-    %% ========== 模型工具 → 数据 ==========
-    TOOLREG -->|"查询/增删改"| BIZ
-    TOOLREG -->|"发布/下载/查属性"| GEOSERVER
-    TOOLREG -->|"segment_image/detect_change"| SAMSEG
+    %% ========== 工具 → 数据 ==========
+    TOOLS -->|"查询/增删改"| BIZ
+    TOOLS -->|"发布/下载/查属性"| GEOSERVER
+    TOOLS -->|"资产登记/检索"| CATALOG
+    CATALOG --> IMAGE
+    CATALOG --> VECTOR
+    CATALOG --> TEXT
 
     %% ========== 平台层 ↔ 智能体层 ==========
     WSCHAT <-->|"WebSocket"| WS

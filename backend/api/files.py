@@ -56,7 +56,7 @@ async def download_file(filepath: str, request: Request):
 
     # ★ 影像预览转码: 仅在 ?preview=1 且非浏览器原生格式时触发
     if request.query_params.get("preview") == "1":
-        from backend.model.tools import image_preview
+        from backend.agent.tools import image_preview
         try:
             img_bytes, mime = image_preview.render_image_to_png_bytes(file_path)
             return Response(content=img_bytes, media_type=mime)
@@ -89,7 +89,7 @@ async def serve_upload_file(filepath: str, request: Request):
 
     # ★ 影像预览转码: 仅在 ?preview=1 且非浏览器原生格式时触发
     if request.query_params.get("preview") == "1":
-        from backend.model.tools import image_preview
+        from backend.agent.tools import image_preview
         try:
             img_bytes, mime = image_preview.render_image_to_png_bytes(file_path)
             return Response(content=img_bytes, media_type=mime)
@@ -661,3 +661,4 @@ def _try_register_image_metadata(file_path: str, owner_hint: str = "study_user")
 def _rand_suffix(n: int = 4) -> str:
     """生成长度 n 的小写字母数字随机后缀 (防同会话同名文件覆盖)"""
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+

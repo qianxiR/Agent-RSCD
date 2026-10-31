@@ -86,7 +86,7 @@ from backend.agent.observability.repair_success import (
 # 确保工具模块已加载, 触发注册
 # model.tools: GeoServer/数据库/图层/遥感工具 (工具箱主体)
 # agent.tools: 记忆工具 (跟随记忆留在 agent 层)
-import backend.model.tools
+import backend.agent.tools
 import backend.agent.tools
 
 logger = logging.getLogger(__name__)
@@ -1630,6 +1630,7 @@ class AgentChatService:
                 if not ws_manager.active_tasks[session_id]:
                     del ws_manager.active_tasks[session_id]
             logger.info(f"[WS] Task cleaned up: session={session_id}, conv={conversation_id}")
+
 
 
 

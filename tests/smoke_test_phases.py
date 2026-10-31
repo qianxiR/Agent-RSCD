@@ -159,7 +159,7 @@ def main():
     section("Step 4: Phase C 数据预处理")
     # 4.1 金字塔构建 (宿主机 rasterio)
     try:
-        from backend.model.tools.preprocess_tools import build_pyramid, check_topology
+        from backend.agent.tools.preprocess_tools import build_pyramid, check_topology
         # 复制一份测试图, 避免污染原文件
         import shutil
         test_tif_for_pyramid = str(OUT_DIR / "test_pyramid_src.tif")
@@ -192,7 +192,7 @@ def main():
 
         # 5.1 统计图表 (matplotlib)
         try:
-            from backend.model.tools.report_tools import _summarize_gdf, _load_change_geojson
+            from backend.agent.tools.report_tools import _summarize_gdf, _load_change_geojson
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
@@ -222,9 +222,9 @@ def main():
 
         # 5.2 PDF 报告 (reportlab + jinja2)
         try:
-            from backend.model.tools.report_tools import generate_monitor_report
+            from backend.agent.tools.report_tools import generate_monitor_report
             # 调用工具函数 (绕过装饰器, 直接调原函数)
-            from backend.model.tools import report_tools as rt
+            from backend.agent.tools import report_tools as rt
             report_result = rt.generate_monitor_report.invoke({
                 "change_geojson_path": vec_path,
                 "output_format": "pdf",
@@ -247,7 +247,7 @@ def main():
 
         # 5.3 矢量导出 (Shapefile ZIP)
         try:
-            from backend.model.tools import report_tools as rt
+            from backend.agent.tools import report_tools as rt
             export_result = rt.export_change_vector.invoke({
                 "change_geojson_path": vec_path,
                 "output_format": "shapefile",
@@ -260,7 +260,7 @@ def main():
 
         # 5.4 Excel 导出
         try:
-            from backend.model.tools import report_tools as rt
+            from backend.agent.tools import report_tools as rt
             stats_result = rt.export_stats_table.invoke({
                 "change_geojson_path": vec_path,
                 "output_format": "excel",
@@ -284,3 +284,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

@@ -322,7 +322,7 @@ def _build_metrics(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 async def run_exploration_eval() -> Dict[str, Any]:
     """运行失败探索评估: 6 场景 × 单轮首步方向判定。"""
     import backend.agent.tools
-    import backend.model.tools
+    import backend.agent.tools
 
     cases = _exploration_cases()
     logger.info(f"[Exploration] 加载 {len(cases)} 个探索场景, 主模型={SUBJECT_MODEL}")
@@ -356,4 +356,5 @@ if __name__ == "__main__":
     result = asyncio.run(run_exploration_eval())
     print("exploration_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
 

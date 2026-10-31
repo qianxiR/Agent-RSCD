@@ -1656,7 +1656,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `backend/agent/planner/`
   - `schema.py`：`PlanGraph` / `PlanNode`（依赖、并行组、验收标准、备选工具、执行状态）；
   - `validator.py`：节点唯一、依赖存在、DAG 无环、工具注册/白名单、验收标准、预算/深度校验；
-  - `templates.py`：变化检测模板（校验输入 → detect_change → 统计图/报告），支持 `{{node.field}}` 占位符；
+  - `templates.py`：变化检测 / 单期分割 / GeoServer 发布三套 DAG 模板，支持 `{{node.field}}` 占位符；
   - `plan_adapter.py`：PlanGraph → 现有 plan state（step_id=node_id，internal 节点不进入执行步骤）；
   - `runtime.py`：Shadow 模式 + Plan-first 灰度（`AGENT_PLAN_FIRST=false`），失败/无类别回退 ReAct；
 - `backend/agent/executor/dag_executor.py`：
@@ -1664,9 +1664,10 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
   - required 失败标记 blocked 并阻断下游；optional 失败降级 skipped；
   - 预算 `max_tool_calls` 护栏；
 - Data 契约：
-  - `backend/data/base.py`：`AssetRef`（kind/uri/crs/bbox/time/metadata）、`DataStore` 协议、校验；
+  - `backend/data/base.py`：`AssetRef`（kind/uri/crs/bbox/time/metadata）、`DataStore` 协议、`LocalFileRepository`、校验；
   - `backend/data/catalog.py`：统一资产目录（kind/bbox/time/text 查询）；
   - 新建 `data/image`、`data/text`、`data/other`、`data/connectors` 域骨架；
+  - 新增 `ImageRepository` / `VectorRepository` / `TextRepository` / `OtherRepository`，共享本地文件存储与 catalog 登记；
 - Model 契约：
   - `backend/model/base.py`：`ModelRequest` / `ModelResult` / `InterpretationModel` 协议；
   - `backend/model/registry.py`：capability → 模型工厂，懒加载、单例/多例；
@@ -1682,9 +1683,9 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
   - `backend/agent/tools/registry.py`：工具注册表已实际迁入 agent 层，17 处后端导入已切换；
   - `backend/agent/tools/`：`layer_tools`、`skill_tools`、`memory_tools`、`team_tools`、`data_tools`、`analysis_tools`、`mask_tools`、`preprocess_tools`、`report_tools`、`vector_tools`、`samseg_tools`、`sandbox_*`、`image_preview` 全部迁入；
   - 共享 helper：`_result`、`_paths`、`_verification`、`_shapefile`、`sandbox_manager` 全部迁入；
-  - `backend/model/tools/`：只保留同名 shim（`from backend.agent.tools.xxx import *`），`__init__` 转发到 agent 包；
+  - `backend/model/tools/`：已删除，所有工具实现与注册表只在 `agent/tools/`；
   - `backend/agent/skills/loader.py`、`selector.py`：技能加载/选择器已迁入 agent 层；
-  - 技能 Markdown 文档仍留在 `model/skills`，loader 自动回退扫描旧目录；旧路径保留 shim。
+  - 技能 Markdown 文档仍留在 `model/skills`，loader 自动回退扫描；旧 skills shim 已删除。
 
 ### 49.3 验证
 
@@ -1693,6 +1694,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `python -m compileall backend` 通过；
 - `import backend.agent.chat_service`、`import backend.agent.tools, backend.agent.skills` 通过；
 - `python tests/skill_selector_test.py` 通过（已切到新 skills 路径）；
+- `python tests/data_repositories_test.py` 通过：vector/image/text/other 存取、catalog 查询、kind 校验；
 - 迁移后工具注册表仍为 **50 个工具**，`toggle_layer_visibility` / `lookup_skill` / `detect_change` 均可用；
 - Shadow 模式默认开启（`AGENT_PLAN_SHADOW=true`），只写日志，不影响现有聊天与 ReAct；
 - Plan-first 灰度默认关闭（`AGENT_PLAN_FIRST=false`）；真实工具注册表下可生成 3 个可执行步骤（n2/n3/n4）；
@@ -1701,7 +1703,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ### 49.4 下一步
 
-1. 清理 `model/tools/*`、`model/skills/*` 兼容 shim，把剩余直接导入切到 agent 路径；
-2. 全量回归（工具调用、分割/变化检测、沙盒、报告、GeoServer）；
-3. 扩大 Plan-first 覆盖（分割/发布），评估后再考虑默认开启；
-4. 目录迁移后的文档收尾（architecture.md / AGENTS.md）。
+1. 全量回归（工具调用、分割/变化检测、沙盒、报告、GeoServer）；
+2. 扩大 Plan-first 覆盖（发布流程的真实输入接入），评估后再考虑默认开启；
+3. 按需补充 data 域到具体仓储（远程对象存储/PostGIS）；
+4. 文档收尾与旧备份脚本清理。

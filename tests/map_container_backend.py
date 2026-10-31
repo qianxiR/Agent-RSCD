@@ -102,7 +102,7 @@ def _check_env():
 def test_segment_image():
     """① segment_image → 验证 mask_tif / geojson / shp 目录产物。"""
     _section("① segment_image 语义分割")
-    from backend.model.tools.samseg_tools import segment_image
+    from backend.agent.tools.samseg_tools import segment_image
 
     t0 = time.time()
     result = segment_image.invoke({"image_path": T1, "classes": "建筑,道路,水"})
@@ -140,7 +140,7 @@ def test_segment_image():
 def test_detect_change():
     """② detect_change → 验证变化 mask_tif / geojson / shp 产物。"""
     _section("② detect_change 变化检测")
-    from backend.model.tools.samseg_tools import detect_change
+    from backend.agent.tools.samseg_tools import detect_change
 
     t0 = time.time()
     result = detect_change.invoke({"t1_path": T1, "t2_path": T2, "classes": "建筑"})
@@ -165,7 +165,7 @@ def test_detect_change():
 def test_visualize_vector(geojson_path):
     """③ visualize_vector → GeoJSON 栅格化为 PNG + 导出 shp。"""
     _section("③ visualize_vector 矢量可视化")
-    from backend.model.tools.vector_tools import visualize_vector
+    from backend.agent.tools.vector_tools import visualize_vector
 
     result = visualize_vector.invoke({
         "geojson_path": geojson_path,
@@ -190,7 +190,7 @@ def test_visualize_vector(geojson_path):
 def test_export_change_vector(geojson_path):
     """④ export_change_vector → geojson 转 shp (extract_shp=True 验证 .shp 真实落地)。"""
     _section("④ export_change_vector GeoJSON→SHP 转换")
-    from backend.model.tools.report_tools import export_change_vector
+    from backend.agent.tools.report_tools import export_change_vector
 
     result = export_change_vector.invoke({
         "change_geojson_path": geojson_path,
@@ -212,7 +212,7 @@ def test_export_change_vector(geojson_path):
 def test_overlay_edge_on_image(source_image, mask_tif):
     """⑤ overlay_edge_on_image → 边缘叠加 PNG + GeoTIFF。"""
     _section("⑤ overlay_edge_on_image 边缘提取")
-    from backend.model.tools.mask_tools import overlay_edge_on_image
+    from backend.agent.tools.mask_tools import overlay_edge_on_image
 
     if not mask_tif or not Path(mask_tif).is_file():
         _check(False, f"跳过: 无有效 mask_tif ({mask_tif})")
@@ -318,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -33,7 +33,7 @@ from backend.model.llm_client import create_responses_llm, create_responses_llm_
 from backend.agent.tools.registry import get_tools_for_llm
 
 import backend.agent.tools
-import backend.model.tools
+import backend.agent.tools
 
 ARTIFACT_DIR = ROOT / "tests" / "artifacts"
 METRICS_PATH = ARTIFACT_DIR / "agent_behavior_metrics.json"
@@ -392,4 +392,5 @@ if __name__ == "__main__":
     result = asyncio.run(run_agent_behavior_harness_eval())
     print("agent_behavior_harness_eval: PASS")
     print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+
 

@@ -16,7 +16,7 @@ async def sandbox_download_to_host(req: SandboxDownloadRequest):
     入参: {file_path, dest_dir}
     出参: {ok: True, dest_path, size_bytes} 或 {ok: False, msg}
     """
-    from backend.model.tools.sandbox_export_tools import export_to_host
+    from backend.agent.tools.sandbox_export_tools import export_to_host
     result = export_to_host(req.file_path, req.dest_dir)
     if not result.get("ok"):
         return {"ok": False, "msg": result.get("msg", "导出失败")}
@@ -25,3 +25,4 @@ async def sandbox_download_to_host(req: SandboxDownloadRequest):
         "dest_path": result["dest_path"],
         "size_bytes": result["size_bytes"],
     }
+

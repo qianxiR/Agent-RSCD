@@ -23,10 +23,13 @@ from backend.data.vector.vectorize import (
     polygons_to_boundary_geojson,
 )
 
+from backend.data.vector.repository import VectorRepository
+
 __all__ = [
     "vectorize_available",
     "raster_to_vector",
     "mask_to_polygons",
     "polygonize_mask",
     "polygons_to_boundary_geojson",
+    "VectorRepository",
 ]

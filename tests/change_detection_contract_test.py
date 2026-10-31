@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from backend.model.SamSeg.geoio import vectorize_mask_to_geojson
-from backend.model.tools import samseg_tools
+from backend.agent.tools import samseg_tools
 
 
 T1 = ROOT / "tests" / "data" / "r000_c006_t1.tif"
@@ -120,3 +120,4 @@ if __name__ == "__main__":
     test_geojson_contract()
     test_detect_change_skips_blocking_vlm()
     print("CHANGE_DETECTION_CONTRACT_OK")
+

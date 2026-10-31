@@ -80,8 +80,8 @@ def _patch_auto_report_dependencies() -> None:
       - None。
     """
     from backend.data import geoserver_client
-    from backend.model.tools import vector_tools
-    from backend.model.tools import report_tools
+    from backend.agent.tools import vector_tools
+    from backend.agent.tools import report_tools
 
     def fake_download_geojson(layer_name: str, workspace: str = None, output_path: str = None) -> str:
         target = Path(output_path or ROOT / "tests" / "artifacts" / "segment_auto_report.geojson")
@@ -157,3 +157,4 @@ def run_segment_auto_report_test() -> None:
 if __name__ == "__main__":
     run_segment_auto_report_test()
     print("segment_auto_report_test: PASS")
+

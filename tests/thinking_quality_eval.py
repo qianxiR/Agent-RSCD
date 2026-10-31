@@ -228,7 +228,7 @@ async def _collect_subject_output(case: Dict[str, Any]) -> Dict[str, Any]:
     from backend.model.llm_client import create_responses_llm_with_tools
     from backend.agent.tools.registry import get_tools_for_llm
     import backend.agent.tools
-    import backend.model.tools
+    import backend.agent.tools
 
     llm = create_responses_llm_with_tools(get_tools_for_llm(), model=SUBJECT_MODEL)
     ai_message = await llm.ainvoke(messages)
@@ -370,4 +370,5 @@ if __name__ == "__main__":
     result = asyncio.run(run_thinking_quality_eval())
     print("thinking_quality_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
 

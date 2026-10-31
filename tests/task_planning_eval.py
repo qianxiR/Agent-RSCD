@@ -221,7 +221,7 @@ def _build_metrics(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 async def run_task_planning_eval() -> Dict[str, Any]:
     """运行任务规划评估: 3 任务 × 首步决策判定。"""
     import backend.agent.tools
-    import backend.model.tools
+    import backend.agent.tools
 
     cases = _planning_cases()
     logger.info(f"[TaskPlanning] 加载 {len(cases)} 个任务, 主模型={SUBJECT_MODEL}")
@@ -254,4 +254,5 @@ if __name__ == "__main__":
     result = asyncio.run(run_task_planning_eval())
     print("task_planning_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
 

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""文本数据域（知识库文档、报告模板、文本语料）。
+"""文本数据域（知识库、报告模板、文本语料）。"""
 
-后续放置 TextRepository：文档解析、切片、检索、模板读取。
-"""
+from backend.data.text.repository import TextRepository
+
+__all__ = ["TextRepository"]

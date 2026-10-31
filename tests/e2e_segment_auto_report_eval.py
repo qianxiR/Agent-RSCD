@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.agent.runtime.context_vars import set_runtime_context
-from backend.model.tools.samseg_tools import segment_image
+from backend.agent.tools.samseg_tools import segment_image
 
 METRICS_PATH = ROOT / "tests" / "artifacts" / "e2e_segment_auto_report_metrics.json"
 SOURCE_IMAGE_PATH = ROOT / "agent-files" / "geoserver" / "generate" / "_default" / "7ddbc1a4" / "r000_c006_t1.tif"
@@ -138,3 +138,4 @@ if __name__ == "__main__":
     result = run_e2e_segment_auto_report_eval()
     print("e2e_segment_auto_report_eval: PASS")
     print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+

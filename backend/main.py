@@ -45,9 +45,7 @@ from backend.config import settings
 from backend.utils.async_subprocess import run_subprocess
 
 # ★ 导入工具模块, 触发 @register_tool 装饰器执行, 将工具注册到全局注册表
-#   model.tools: GeoServer/数据库/图层/遥感工具 (工具箱, 主体)
-#   agent.tools: 记忆工具 (跟随记忆留在 agent 层)
-import backend.model.tools  # noqa: F401
+#   Backend V2: 工具实现与注册表均在 agent.tools
 import backend.agent.tools  # noqa: F401
 
 # 路由层 (api/__init__.py 触发 deps.py 创建存储目录 + 解析路径常量)
@@ -264,3 +262,4 @@ if __name__ == "__main__":
         reload_includes=["*.py"],
         reload_delay=1.0,
     )
+
