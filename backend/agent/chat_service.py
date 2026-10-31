@@ -50,7 +50,7 @@ from backend.model.llm_client import (
     create_responses_llm,
     create_responses_llm_with_tools,
 )
-from backend.model.tools.tool_registry import (
+from backend.agent.tools.registry import (
     get_tools_for_llm, get_tool_by_name, get_tool_category_map,
 )
 from backend.agent.ws_manager import WebSocketManager
@@ -293,7 +293,7 @@ def _summarize_task_output(tool_result: dict) -> dict:
             summary["elapsed"] = data["elapsed"]
         # ★ v2.5: 抽产物路径 (兼容新旧命名), 供任务表展示
         try:
-            from backend.model.tools._result import extract_artifact_path
+            from backend.agent.tools._result import extract_artifact_path
             artifact = extract_artifact_path(data)
             if artifact:
                 summary["artifact_path"] = artifact
@@ -367,7 +367,7 @@ def _register_tool_artifacts(
         if not items:
             data = tool_result.get("data")
             try:
-                from backend.model.tools._result import extract_artifact_path
+                from backend.agent.tools._result import extract_artifact_path
                 path = extract_artifact_path(data) if isinstance(data, dict) else None
             except ImportError:
                 path = None
@@ -1051,6 +1051,26 @@ class AgentChatService:
             )
             input_images = uploaded_images + selected_layer_images
 
+            # ★ Plan-first 灰度: 变化检测且能确定性推断类别时, 在 ReAct 前建立显式计划；
+            #   失败/未命中则保持原 ReAct 路径。默认 AGENT_PLAN_FIRST=false。
+            plan_first_state = None
+            if not current_plan:
+                from backend.agent.planner.runtime import maybe_build_plan_first_state
+                plan_first_state = maybe_build_plan_first_state(
+                    req.prompt, input_images, conversation_id, req.user_id, current_plan
+                )
+                if plan_first_state:
+                    current_plan = plan_first_state
+                    plan_task_id = persist_plan_state(
+                        conversation_id, req.user_id, current_plan, plan_task_id
+                    )
+            # Shadow 计划只用于对比；已进入 Plan-first 时不重复构建。
+            if not plan_first_state:
+                from backend.agent.planner.runtime import maybe_log_shadow_plan
+                maybe_log_shadow_plan(
+                    req.prompt, input_images, conversation_id, req.user_id
+                )
+
             # ★ 构建上下文: agent_db 历史载入 + trim 裁剪 + 当前 Human 拼装
             all_messages, new_start_idx = memory_mod.build_context_messages(
                 conversation_id,
@@ -1556,7 +1576,7 @@ class AgentChatService:
                 # ★ 会话级沙盒回收: 空会话被删, 异步停止其沙盒容器 (若有)。
                 #   全新会话首轮取消一般还没建容器, 但为对称仍挂回收; best-effort, 不阻塞回滚。
                 try:
-                    from backend.model.tools.sandbox_manager import sandbox_manager
+                    from backend.agent.tools.sandbox_manager import sandbox_manager
                     asyncio.create_task(
                         sandbox_manager.cleanup_by_conversation(conversation_id, _project_id or "")
                     )
@@ -1610,5 +1630,8 @@ class AgentChatService:
                 if not ws_manager.active_tasks[session_id]:
                     del ws_manager.active_tasks[session_id]
             logger.info(f"[WS] Task cleaned up: session={session_id}, conv={conversation_id}")
+
+
+
 
 

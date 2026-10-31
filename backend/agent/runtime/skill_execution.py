@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from backend.agent.memory.task_state import append_plan_step
 from backend.agent.runtime.task_spec import build_task_spec
-from backend.model.skills.selector import validate_skill_contract
+from backend.agent.skills.selector import validate_skill_contract
 
 
 def apply_skill_selection_to_plan(
@@ -63,3 +63,4 @@ def apply_skill_selection_to_plan(
         conversation_id=plan.get("conversation_id") or "",
     )
     return added
+

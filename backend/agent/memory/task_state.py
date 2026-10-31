@@ -72,6 +72,13 @@ def append_plan_step(
     expected_outputs: Optional[List[str]] = None,
     required: bool = True,
     tool_name: str = "",
+    *,
+    step_id: str = "",
+    depends_on: Optional[List[str]] = None,
+    parallel_group: str = "",
+    acceptance: Optional[List[str]] = None,
+    node_id: str = "",
+    capability: str = "",
 ) -> Dict[str, Any]:
     """
     入参:
@@ -80,6 +87,11 @@ def append_plan_step(
       - inputs/expected_outputs: 执行输入和客观产物要求。
       - required: 是否属于完成门必需步骤。
       - tool_name: 可选真实工具名, 用于执行匹配。
+      - step_id: 可指定稳定 ID（PlanGraph 节点 ID）；为空时自动生成 step_N。
+      - depends_on: 依赖的计划步骤 ID 列表（DAG）。
+      - parallel_group: 可并行组标记（仅审计/调度提示）。
+      - acceptance: 节点级验收标准。
+      - node_id/capability: 来自 PlanGraph 的审计字段。
     方法:
       - 追加 pending 步骤并刷新完成门, 不隐式启动执行。
     出参:
@@ -89,7 +101,7 @@ def append_plan_step(
         raise ValueError(f"不支持的计划执行者: {executor}")
     steps = plan.setdefault("steps", [])
     step = {
-        "step_id": f"step_{len(steps) + 1}",
+        "step_id": step_id or f"step_{len(steps) + 1}",
         "goal": (goal or tool_name or "执行计划步骤").strip(),
         "executor": executor,
         "status": "pending",
@@ -97,6 +109,11 @@ def append_plan_step(
         "tool_name": tool_name,
         "inputs": inputs if isinstance(inputs, dict) else {},
         "expected_outputs": expected_outputs if isinstance(expected_outputs, list) else [],
+        "depends_on": [str(item) for item in (depends_on or [])],
+        "parallel_group": str(parallel_group or ""),
+        "acceptance": [str(item) for item in (acceptance or [])],
+        "node_id": str(node_id or ""),
+        "capability": str(capability or ""),
         "evidence": [],
         "repair_plan": {},
         "next_action": tool_name or "",
@@ -129,6 +146,26 @@ def start_tool_step(
         ),
         None,
     )
+    if step is not None and step.get("depends_on"):
+        completed = {
+            item.get("step_id") for item in plan.get("steps", [])
+            if item.get("status") == "completed"
+        }
+        dependencies_ready = all(dep in completed for dep in step.get("depends_on") or [])
+        if not dependencies_ready:
+            # 优先找依赖已满足的同名步骤；没有则保持旧行为（仍激活该步骤），
+            # 由完成门在收尾时拦截未完成依赖。
+            ready = next(
+                (
+                    item for item in plan.get("steps", [])
+                    if item.get("tool_name") == tool_name
+                    and item.get("status") in {"pending", "blocked", "failed"}
+                    and all(dep in completed for dep in item.get("depends_on") or [])
+                ),
+                None,
+            )
+            if ready is not None:
+                step = ready
     if step is None:
         step = append_plan_step(
             plan,

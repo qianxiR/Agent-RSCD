@@ -15,10 +15,10 @@ from backend.agent.memory.task_state import (
     start_tool_step,
 )
 from backend.agent.runtime.skill_execution import apply_skill_selection_to_plan
-from backend.model.skills import loader
-from backend.model.skills.selector import select_skill, validate_skill_contract
-from backend.model.tools.skill_tools import lookup_skill
-from backend.model.tools.tool_registry import get_llm_exposed_tool_names
+from backend.agent.skills import loader
+from backend.agent.skills.selector import select_skill, validate_skill_contract
+from backend.agent.tools.skill_tools import lookup_skill
+from backend.agent.tools.registry import get_llm_exposed_tool_names
 
 
 def _passed_result() -> dict:
@@ -176,3 +176,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

@@ -22,7 +22,7 @@ from backend.agent.prompt.tool_decision_rules import (
     get_rules_by_task_type,
     validate_rules,
 )
-from backend.model.tools.tool_registry import get_llm_exposed_tool_names
+from backend.agent.tools.registry import get_llm_exposed_tool_names
 
 
 def test_rules_non_empty():
@@ -90,3 +90,4 @@ def test_forbidden_not_intersect_with_planning_expected():
             f"task_type={task_type} 决策表 forbidden {forbidden} "
             f"与评估 expected {expected_set} 交叉: {intersect}"
         )
+

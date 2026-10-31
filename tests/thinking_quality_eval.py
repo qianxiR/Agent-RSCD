@@ -226,7 +226,7 @@ async def _collect_subject_output(case: Dict[str, Any]) -> Dict[str, Any]:
     )
     # 用主模型 (带工具, 与运行态一致), 采集思考过程
     from backend.model.llm_client import create_responses_llm_with_tools
-    from backend.model.tools.tool_registry import get_tools_for_llm
+    from backend.agent.tools.registry import get_tools_for_llm
     import backend.agent.tools
     import backend.model.tools
 
@@ -370,3 +370,4 @@ if __name__ == "__main__":
     result = asyncio.run(run_thinking_quality_eval())
     print("thinking_quality_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+

@@ -1641,3 +1641,67 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 5. **用户说“手柄和线错位”时，先做截图像素分析**：找白线列、手柄白色区域质心、影像接缝列。三者可能两两不同；本例最终是“线/手柄对齐，影像接缝偏左”，如果只盯着手柄会修错方向。
 
 ![卷帘对齐](platform/screens/29-swipe-align.png)
+
+---
+
+## 四十九、阶段 60（2026-10-31）：PlanGraph / DAG 执行器与 Data/Model 契约骨架
+
+### 49.1 背景
+
+当前 ReAct 主循环只有“执行中追加的线性 plan”，缺少执行前 Planner/DAG。
+目标不是替换 ReAct，而是增加可选的 Plan-first 模式；先落结构与执行器，再逐步灰度。
+
+### 49.2 新增
+
+- `backend/agent/planner/`
+  - `schema.py`：`PlanGraph` / `PlanNode`（依赖、并行组、验收标准、备选工具、执行状态）；
+  - `validator.py`：节点唯一、依赖存在、DAG 无环、工具注册/白名单、验收标准、预算/深度校验；
+  - `templates.py`：变化检测模板（校验输入 → detect_change → 统计图/报告），支持 `{{node.field}}` 占位符；
+  - `plan_adapter.py`：PlanGraph → 现有 plan state（step_id=node_id，internal 节点不进入执行步骤）；
+  - `runtime.py`：Shadow 模式 + Plan-first 灰度（`AGENT_PLAN_FIRST=false`），失败/无类别回退 ReAct；
+- `backend/agent/executor/dag_executor.py`：
+  - 拓扑执行、ready 节点并发（`max_parallel`）、输入占位符解析；
+  - required 失败标记 blocked 并阻断下游；optional 失败降级 skipped；
+  - 预算 `max_tool_calls` 护栏；
+- Data 契约：
+  - `backend/data/base.py`：`AssetRef`（kind/uri/crs/bbox/time/metadata）、`DataStore` 协议、校验；
+  - `backend/data/catalog.py`：统一资产目录（kind/bbox/time/text 查询）；
+  - 新建 `data/image`、`data/text`、`data/other`、`data/connectors` 域骨架；
+- Model 契约：
+  - `backend/model/base.py`：`ModelRequest` / `ModelResult` / `InterpretationModel` 协议；
+  - `backend/model/registry.py`：capability → 模型工厂，懒加载、单例/多例；
+  - 新建 `model/segmentation`、`model/change_detection`、`model/understanding` 域骨架；
+- 真实模型适配器：
+  - `model/segmentation/proc_sam3/adapter.py`：包装 `SamSeg.runner.run_segment`；
+  - `model/change_detection/proc_sam3/adapter.py`：包装 `run_change_detection`；
+  - `model/builtins.py`：幂等注册 `proc_sam3` / `proc_sam3_change`，不预加载权重；
+- 变化检测 Plan-first 执行器：
+  - `agent/executor/change_detection_runner.py`：internal 校验 + `invoke_tool` 调用 + NodeResult 转换；
+  - 工具 `data` 字段暴露为节点 outputs，支持 `{{n2_detect_change.vector_path}}`；
+- 目录迁移：
+  - `backend/agent/tools/registry.py`：工具注册表已实际迁入 agent 层，17 处后端导入已切换；
+  - `backend/agent/tools/`：`layer_tools`、`skill_tools`、`memory_tools`、`team_tools`、`data_tools`、`analysis_tools`、`mask_tools`、`preprocess_tools`、`report_tools`、`vector_tools`、`samseg_tools`、`sandbox_*`、`image_preview` 全部迁入；
+  - 共享 helper：`_result`、`_paths`、`_verification`、`_shapefile`、`sandbox_manager` 全部迁入；
+  - `backend/model/tools/`：只保留同名 shim（`from backend.agent.tools.xxx import *`），`__init__` 转发到 agent 包；
+  - `backend/agent/skills/loader.py`、`selector.py`：技能加载/选择器已迁入 agent 层；
+  - 技能 Markdown 文档仍留在 `model/skills`，loader 自动回退扫描旧目录；旧路径保留 shim。
+
+### 49.3 验证
+
+- `python tests/planner_test.py`：模板结构、DAG 无环、工具白名单、占位符、可选失败降级、required 失败阻断、真实工具契约 runner、PlanGraph→plan state、依赖步骤激活全部通过；
+- `python tests/backend_contracts_test.py`：资产校验/目录查询、模型注册/懒加载/单例、ProC 适配器、内置模型注册全部通过；
+- `python -m compileall backend` 通过；
+- `import backend.agent.chat_service`、`import backend.agent.tools, backend.agent.skills` 通过；
+- `python tests/skill_selector_test.py` 通过（已切到新 skills 路径）；
+- 迁移后工具注册表仍为 **50 个工具**，`toggle_layer_visibility` / `lookup_skill` / `detect_change` 均可用；
+- Shadow 模式默认开启（`AGENT_PLAN_SHADOW=true`），只写日志，不影响现有聊天与 ReAct；
+- Plan-first 灰度默认关闭（`AGENT_PLAN_FIRST=false`）；真实工具注册表下可生成 3 个可执行步骤（n2/n3/n4）；
+- 真实变化检测 DAG 回归：使用已有两期 GeoTIFF 调用 `detect_change`，计划 `status=completed`，n2 输出 `vector_path/vector_stats/polygon_layer`；
+- 聊天级 Plan-first E2E（临时 8021，`AGENT_PLAN_FIRST=true`）：WebSocket 发送双时相附件 + “对比建筑变化”，计划步骤 `n2_detect_change=completed`，`n3/n4` 保持 pending（optional），工具链只调用 `detect_change`，最终 `done`。
+
+### 49.4 下一步
+
+1. 清理 `model/tools/*`、`model/skills/*` 兼容 shim，把剩余直接导入切到 agent 路径；
+2. 全量回归（工具调用、分割/变化检测、沙盒、报告、GeoServer）；
+3. 扩大 Plan-first 覆盖（分割/发布），评估后再考虑默认开启；
+4. 目录迁移后的文档收尾（architecture.md / AGENTS.md）。

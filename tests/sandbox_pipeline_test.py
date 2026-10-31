@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.agent.runtime.context_vars import set_runtime_context
-from backend.model.tools.sandbox_manager import sandbox_manager
+from backend.agent.tools.sandbox_manager import sandbox_manager
 
 CONV_ID = "sandbox-pipeline-verify-0001"
 PROJECT_ID = "smoke"
@@ -107,3 +107,4 @@ async def run():
 
 if __name__ == "__main__":
     asyncio.run(run())
+

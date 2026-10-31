@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter
 
-from backend.model.skills import loader as skills_loader
+from backend.agent.skills import loader as skills_loader
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,3 +28,4 @@ async def list_skills():
     except Exception as e:
         logger.error(f"列出技能失败: {e}")
         return {"status": "error", "msg": f"技能加载失败: {e}"}
+

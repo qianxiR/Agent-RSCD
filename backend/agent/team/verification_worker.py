@@ -20,8 +20,8 @@ from backend.agent.team.result_contract import (
     build_worker_result,
 )
 from backend.agent.team.repair_policy import build_repair_plan
-from backend.model.tools._result import extract_artifact_path
-from backend.model.tools._verification import verify_by_path
+from backend.agent.tools._result import extract_artifact_path
+from backend.agent.tools._verification import verify_by_path
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -183,3 +183,6 @@ def run_verification(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     validation["repair_plan"] = build_repair_plan(validation, tool_name, tool_result, safe_payload.get("user_goal") or "")
     return validation
+
+
+

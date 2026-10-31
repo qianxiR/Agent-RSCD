@@ -32,7 +32,7 @@ from backend.agent.prompt import build_system_prompt
 from backend.agent.prompt.tool_decision_rules import get_forbidden_tools
 from backend.config import settings
 from backend.model.llm_client import create_responses_llm_with_tools
-from backend.model.tools.tool_registry import get_tools_for_llm
+from backend.agent.tools.registry import get_tools_for_llm
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 logger = logging.getLogger(__name__)
@@ -254,3 +254,4 @@ if __name__ == "__main__":
     result = asyncio.run(run_task_planning_eval())
     print("task_planning_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+

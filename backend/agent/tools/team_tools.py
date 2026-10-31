@@ -15,7 +15,7 @@ from backend.agent.runtime.context_vars import (
 )
 import backend.agent.team.task_manager as task_manager
 from backend.agent.team.agent_roles import VERIFICATION_AGENT, is_supported_agent_role
-from backend.model.tools.tool_registry import register_tool
+from backend.agent.tools.registry import register_tool
 
 
 @register_tool("agent_team")
@@ -116,3 +116,4 @@ async def cancel_agent_task(task_id: int, reason: str = "") -> Dict[str, Any]:
         - error: 任务不存在。
     """
     return await task_manager.cancel_agent_task(task_id, reason=reason)
+

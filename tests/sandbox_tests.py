@@ -39,7 +39,7 @@ def check(cond, msg):
 
 async def main():
     overall_ok = True
-    from backend.model.tools.sandbox_manager import sandbox_manager
+    from backend.agent.tools.sandbox_manager import sandbox_manager
     from backend.model.tools.sandbox_tools import _get_client_and_work_dir
 
     # ==================== 测试 1: 可用性检测 ====================
@@ -229,3 +229,4 @@ print('COG_DONE')
 if __name__ == "__main__":
     rc = asyncio.run(main())
     sys.exit(rc)
+

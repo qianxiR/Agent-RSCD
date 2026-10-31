@@ -33,7 +33,7 @@ def _attach_path_verification(tool_result: Dict[str, Any]) -> Dict[str, Any]:
     data = tool_result.get("data")
     if isinstance(data, dict):
         try:
-            from backend.model.tools._result import extract_artifact_path
+            from backend.agent.tools._result import extract_artifact_path
             output_path = extract_artifact_path(data)
         except ImportError:
             output_path = data.get("output_path") or data.get("geojson_path")
@@ -42,7 +42,7 @@ def _attach_path_verification(tool_result: Dict[str, Any]) -> Dict[str, Any]:
         return tool_result
 
     try:
-        from backend.model.tools._verification import verify_by_path
+        from backend.agent.tools._verification import verify_by_path
         tool_result["verification"] = verify_by_path(output_path)
     except Exception as err:
         logger.debug(f"[Verify] 兜底校验跳过 {output_path}: {err}")
@@ -145,3 +145,6 @@ def should_disable_tools_for_next_repair_turn(tool_result: Any) -> bool:
         return False
     card = tool_result.get("repair_execution_card")
     return bool(isinstance(card, dict) and card.get("must_not_call_tool") is True)
+
+
+

@@ -19,7 +19,7 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.tools import tool
-from backend.model.tools.tool_registry import register_tool
+from backend.agent.tools.registry import register_tool
 from backend.agent.runtime.context_vars import (
     get_current_conversation_id,
     get_current_user_id,
@@ -244,3 +244,4 @@ def clear_conversation_summary(confirm: bool = False) -> Dict[str, Any]:
         return {"type": "error", "msg": "清空摘要失败, 数据库写入异常"}
     except Exception as e:
         return {"type": "error", "msg": f"清空会话摘要失败: {e}"}
+

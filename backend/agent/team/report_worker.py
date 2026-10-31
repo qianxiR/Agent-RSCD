@@ -18,7 +18,7 @@ from backend.agent.team.result_contract import (
     build_worker_result,
 )
 from backend.config import settings
-from backend.model.tools._paths import rand_suffix, session_subpath, short_conv
+from backend.agent.tools._paths import rand_suffix, session_subpath, short_conv
 
 
 def _layer_full_name(layer: Dict[str, Any]) -> str:
@@ -293,3 +293,4 @@ def run_report_worker(payload: Dict[str, Any]) -> Dict[str, Any]:
         issues=[f"unsupported report task_type: {task_type}"],
         recommendation=RECOMMEND_REPORT_ERROR,
     )
+

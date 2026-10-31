@@ -38,7 +38,7 @@ def build_tools_catalog() -> str:
     出参:
       - str, 可直接拼入 system prompt 的工具能力目录。
     """
-    from backend.model.tools.tool_registry import get_tools_catalog_for_llm, get_tool_category_map
+    from backend.agent.tools.registry import get_tools_catalog_for_llm, get_tool_category_map
 
     all_tools = get_tools_catalog_for_llm()
     cat_map = get_tool_category_map()
@@ -98,3 +98,4 @@ def build_decision_table() -> str:
             f"| {rule['task_pattern']} | {required} | {forbidden} | {constraint} |"
         )
     return header + "\n" + "\n".join(rows)
+

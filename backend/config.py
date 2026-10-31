@@ -206,6 +206,18 @@ class Settings:
     # 单轮最多提取的记忆条数 (避免 LLM 一次吐太多噪声)
     long_term_memory_max_items: int = 5
 
+    # ==================== Plan-first / PlanGraph ====================
+    # Shadow 模式: 只构建并校验 PlanGraph、写日志, 不改变现有 ReAct 执行。
+    # 后续 DAG Executor 切换时用同一开关灰度, 默认开启便于积累真实计划样本。
+    agent_plan_shadow_enabled: bool = field(
+        default_factory=lambda: _env("AGENT_PLAN_SHADOW", "true").lower() == "true"
+    )
+    # Plan-first 灰度: 变化检测请求在 ReAct 前先生成显式 plan state。
+    # 默认关闭；开启后失败/无类别仍回退 ReAct，不改变其他任务。
+    agent_plan_first_enabled: bool = field(
+        default_factory=lambda: _env("AGENT_PLAN_FIRST", "false").lower() == "true"
+    )
+
     # ==================== WebSocket ====================
     ws_heartbeat_interval: int = 30
     ws_frontend_result_timeout: int = 120

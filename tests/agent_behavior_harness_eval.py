@@ -30,7 +30,7 @@ from backend.agent.team.validation_stage import build_validation_observation
 from backend.agent.team.verification_worker import run_verification
 from backend.config import settings
 from backend.model.llm_client import create_responses_llm, create_responses_llm_with_tools
-from backend.model.tools.tool_registry import get_tools_for_llm
+from backend.agent.tools.registry import get_tools_for_llm
 
 import backend.agent.tools
 import backend.model.tools
@@ -392,3 +392,4 @@ if __name__ == "__main__":
     result = asyncio.run(run_agent_behavior_harness_eval())
     print("agent_behavior_harness_eval: PASS")
     print(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
+

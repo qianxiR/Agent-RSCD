@@ -8,7 +8,7 @@
 from typing import Any, Dict, Optional
 
 from backend.agent.team.verification_worker import run_verification
-from backend.model.tools._result import extract_artifact_path
+from backend.agent.tools._result import extract_artifact_path
 
 
 def should_run_validation_stage(tool_result: Dict[str, Any]) -> bool:
@@ -194,3 +194,5 @@ def apply_validation_to_tool_result(
             if current_summary else observation_text
         )
     return tool_result
+
+

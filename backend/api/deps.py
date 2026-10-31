@@ -21,7 +21,7 @@ for _d in [FILE_ROOT, SAMSEG_UPLOAD, SAMSEG_OUTPUT, GEOSERVER_DL, SANDBOX_ROOT]:
 from backend.agent.memory import agent_db  # noqa: E402
 from backend.data import business_db  # noqa: E402
 from backend.data import geoserver_client  # noqa: E402
-from backend.model.tools.sandbox_manager import sandbox_manager  # noqa: E402
+from backend.agent.tools.sandbox_manager import sandbox_manager  # noqa: E402
 
 __all__ = [
     "FILE_ROOT",
@@ -34,3 +34,4 @@ __all__ = [
     "geoserver_client",
     "sandbox_manager",
 ]
+

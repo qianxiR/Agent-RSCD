@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 
 from backend.config import settings
-from backend.model.tools._paths import (
+from backend.agent.tools._paths import (
     safe_id, PROJECT_FALLBACK, CONVERSATION_FALLBACK, ID_SHORT_LEN,
 )
 
@@ -134,3 +134,4 @@ def cleanup_conversation_files(conversation_id: str, project_id: str = "") -> di
         f"删除 {len(removed)} 个目录, 跳过 {len(skipped)} 个"
     )
     return {"removed": removed, "skipped": skipped}
+

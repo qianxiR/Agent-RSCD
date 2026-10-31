@@ -34,7 +34,7 @@ from backend.agent.runtime.observation_builder import (
 )
 from backend.config import settings
 from backend.model.llm_client import create_responses_llm, create_responses_llm_with_tools
-from backend.model.tools.tool_registry import get_tools_for_llm
+from backend.agent.tools.registry import get_tools_for_llm
 
 import importlib.util as _ilu
 
@@ -356,3 +356,4 @@ if __name__ == "__main__":
     result = asyncio.run(run_exploration_eval())
     print("exploration_eval:", "PASS" if result.get("pass") else "CHECK")
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
