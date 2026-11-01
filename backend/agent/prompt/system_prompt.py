@@ -12,6 +12,16 @@ from backend.agent.prompt.static_template import SYSTEM_PROMPT_TEMPLATE
 from backend.agent.prompt.tool_catalog import build_decision_table, build_tools_catalog
 
 
+def _system_template_text() -> str:
+    """优先使用 prompt_store 中的 system 模板文件；未配置时回退代码模板。"""
+    from backend.agent.prompt_store import get_prompt_store
+
+    template = get_prompt_store().get("system")
+    if template is not None and template.path:
+        return template.text
+    return SYSTEM_PROMPT_TEMPLATE
+
+
 def build_system_prompt(
     conversation_summary: str = None,
     user_profile: str = None,
@@ -30,7 +40,7 @@ def build_system_prompt(
     出参:
       - str, 完整 system prompt 字符串。
     """
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    return _system_template_text().format(
         tools_catalog=build_tools_catalog(),
         decision_table=build_decision_table(),
         dynamic_section=build_dynamic_section(conversation_summary, user_profile, task_state, plan_state),
@@ -55,7 +65,7 @@ def build_system_prompt_blocks(
     出参:
       - list[dict], OpenAI content-blocks 格式的 system prompt 内容。
     """
-    static_text = SYSTEM_PROMPT_TEMPLATE.format(
+    static_text = _system_template_text().format(
         tools_catalog=build_tools_catalog(),
         decision_table=build_decision_table(),
         dynamic_section="",
@@ -74,3 +84,4 @@ def build_system_prompt_blocks(
             "cache_control": {"type": "ephemeral"},
         },
     ]
+

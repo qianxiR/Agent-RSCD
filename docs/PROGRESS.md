@@ -1744,12 +1744,13 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 - `backend/agent/harness/base.py`：`HarnessContext` / `HarnessEvent` / `AgentHarness`；
 - `backend/agent/harness/chat_harness.py`：`ChatHarness` 适配现有 ChatService；
-- `backend/agent/harness/registry.py`：Harness 注册表。
+- `backend/agent/harness/registry.py`：Harness 注册表；
+- `backend/api/ws.py` 已改为通过 `ChatHarness.run(HarnessContext)` 启动对话，WS 路由不再直接拼 ToolChatRequest。
 
 ### 50.5 Prompt / Context / Memory 分离
 
-- Prompt：`backend/agent/prompt_store/` 文件模板 + 版本，缺文件回退现有代码模板；
-- Context：`backend/agent/context/builder.py` 统一构建入口，不再让调用方直接依赖 memory_context；
+- Prompt：`backend/agent/prompt_store/` 文件模板 + 版本；`system_prompt.py` 优先读取文件模板，缺文件回退代码模板；
+- Context：`backend/agent/context/builder.py` 统一构建入口；ChatService 已改为通过 ContextBuilder 构建/持久化消息；
 - Memory：`backend/agent/memory/stores.py` 拆出 Working/Summary/LongTerm 三个 store，memory_context 保留编排职责。
 
 ### 50.6 验证
@@ -1760,4 +1761,5 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - MCP stdio demo：`add` 调用返回 `5`；动态注册/调用通过；
 - 外部工具实测：`external_raster_info`、`external_spatial_operation` 返回 success；
 - 全量工具注册：**54**；`python -m compileall backend` 通过；
-- 8020 服务重启后 `/docs` 200，聊天 smoke 返回 `done`。
+- 8020 服务重启后 `/docs` 200，聊天 smoke 经 ChatHarness 路由返回 `done`；
+- `GET /api/v1/mcp/tools` 返回空列表；`POST /api/v1/mcp/refresh` 返回 `refreshed`。

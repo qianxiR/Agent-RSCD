@@ -25,7 +25,7 @@ class FakeService:
     def __init__(self):
         self.calls = []
 
-    async def tool_chat_ws(self, req, session_id, ws_manager):
+    async def tool_chat_ws(self, req, session_id, ws_manager, checkpoint_id=None):
         self.calls.append((req.prompt, session_id))
 
 
@@ -53,7 +53,11 @@ def test_chat_harness() -> None:
     async def run():
         await harness.run(HarnessContext(
             session_id="s1", conversation_id="c1", user_id="u1",
-            prompt="提取建筑", metadata={"images": [{"path": "/tmp/a.tif"}]},
+            prompt="提取建筑",
+            metadata={
+                "images": [{"path": "/tmp/a.tif"}],
+                "emit_started": True,
+            },
         ), emit)
         return await harness.stop("c1")
 

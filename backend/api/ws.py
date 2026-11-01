@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from backend.agent.chat_service import ToolChatRequest
+from backend.agent.harness import ChatHarness, HarnessContext
 from backend.agent.ws_manager import get_ws_manager
 from backend.api.deps import agent_db
 from backend.config import settings
@@ -124,24 +124,32 @@ async def websocket_chat(websocket: WebSocket, session_id: str = None, token: st
                     "conversation_id": conv_id,
                 })
 
-                req = ToolChatRequest(
-                    prompt=prompt_text,
-                    model=data.get("model", settings.chat_model),
-                    temperature=data.get("temperature", settings.default_temperature),
-                    conversation_id=conv_id,
-                    user_id=user_id,
-                    project_id=project_id,  # ★ 所属分组 (沙盒 work_dir 来源)
-                    images=images,
-                    selected_layers=selected_layers,
-                    multi_round=data.get("multi_round", True),
-                )
-
                 # ★ 记录 checkpoint (本轮开始前的最后一条消息 id, 供停止回滚用)
                 checkpoint_id = agent_db.get_last_message_id(conv_id)
 
+                # ★ 统一 Harness 入口：聊天控制不再直接拼 ToolChatRequest
+                async def _noop_emit(event):
+                    return None
+
+                context = HarnessContext(
+                    session_id=sid,
+                    conversation_id=conv_id,
+                    user_id=user_id,
+                    prompt=prompt_text,
+                    project_id=project_id or "",
+                    metadata={
+                        "model": data.get("model", settings.chat_model),
+                        "temperature": data.get("temperature", settings.default_temperature),
+                        "images": images,
+                        "selected_layers": selected_layers,
+                        "multi_round": data.get("multi_round", True),
+                        "checkpoint_id": checkpoint_id,
+                    },
+                )
+
                 # ★ v2.1: 在后台任务中执行 Agent 推理, 注册 task (带 conversation_id) 以供取消
                 task = asyncio.create_task(
-                    _chat_service.tool_chat_ws(req, sid, ws_manager, checkpoint_id=checkpoint_id)
+                    ChatHarness(_chat_service, ws_manager).run(context, _noop_emit)
                 )
                 ws_manager.register_task(sid, conv_id, task)
                 logger.info(f"[WS] Task started: session={sid}, conv={conv_id}, "

@@ -7,6 +7,7 @@ from typing import Optional
 
 from backend.agent.harness.base import AgentHarness, HarnessContext, HarnessEmitter, HarnessEvent
 from backend.agent.mcp.registry import ensure_mcp_tools_loaded
+from backend.config import settings
 
 
 class ChatHarness(AgentHarness):
@@ -25,22 +26,31 @@ class ChatHarness(AgentHarness):
     async def run(self, context: HarnessContext, emit: HarnessEmitter) -> None:
         """执行一次聊天运行；事件仍由 ChatService 通过 ws_manager 推送。"""
         await ensure_mcp_tools_loaded()
-        await emit(HarnessEvent(
-            "session_started",
-            {"conversation_id": context.conversation_id},
-            conversation_id=context.conversation_id,
-        ))
+        if context.metadata.get("emit_started"):
+            await emit(HarnessEvent(
+                "session_started",
+                {"conversation_id": context.conversation_id},
+                conversation_id=context.conversation_id,
+            ))
         from backend.agent.chat_service import ToolChatRequest
 
         req = ToolChatRequest(
             prompt=context.prompt,
+            model=context.metadata.get("model") or settings.chat_model,
+            temperature=context.metadata.get("temperature", settings.default_temperature),
             conversation_id=context.conversation_id,
             user_id=context.user_id,
             project_id=context.project_id or None,
             images=context.metadata.get("images") or [],
             selected_layers=context.metadata.get("selected_layers") or [],
+            multi_round=context.metadata.get("multi_round", True),
         )
-        await self._service.tool_chat_ws(req, context.session_id, self._ws_manager)
+        await self._service.tool_chat_ws(
+            req,
+            context.session_id,
+            self._ws_manager,
+            checkpoint_id=context.metadata.get("checkpoint_id"),
+        )
 
     async def stop(self, conversation_id: str, session_id: str = "") -> int:
         """停止指定会话；未给 session 时遍历活跃 session 精确匹配对话。"""

@@ -54,6 +54,7 @@ from backend.agent.tools.registry import (
     get_tools_for_llm, get_tool_by_name, get_tool_category_map,
 )
 from backend.agent.ws_manager import WebSocketManager
+from backend.agent.context.builder import get_context_builder
 from backend.agent.memory import memory_context as memory_mod
 from backend.agent.memory import agent_db
 from backend.agent.memory import pattern_tracker
@@ -967,7 +968,7 @@ class AgentChatService:
                 current_human_content = content
                 break
         try:
-            new_msgs, new_idx = memory_mod.build_context_messages(
+            new_msgs, new_idx = get_context_builder().build(
                 conversation_id, current_human_content, llm
             )
         except Exception as e:
@@ -1074,7 +1075,7 @@ class AgentChatService:
                 )
 
             # ★ 构建上下文: agent_db 历史载入 + trim 裁剪 + 当前 Human 拼装
-            all_messages, new_start_idx = memory_mod.build_context_messages(
+            all_messages, new_start_idx = get_context_builder().build(
                 conversation_id,
                 req.prompt,
                 llm,
@@ -1126,7 +1127,7 @@ class AgentChatService:
                     content=content,
                     additional_kwargs={"thinking_content": content},
                 ))
-                memory_mod.persist_turn(conversation_id, all_messages, new_start_idx + 1)
+                get_context_builder().persist_turn(conversation_id, all_messages, new_start_idx + 1)
                 agent_db.update_conversation_status(conversation_id, "completed")
                 await ws_manager.send_to_session(session_id, {
                     "type": "done",
@@ -1282,7 +1283,7 @@ class AgentChatService:
                         content=content,
                         additional_kwargs={"thinking_content": ai_message.content or content},
                     ))
-                    memory_mod.persist_turn(conversation_id, all_messages, new_start_idx + 1)
+                    get_context_builder().persist_turn(conversation_id, all_messages, new_start_idx + 1)
                     # ★ 聊天图片持久化: 把本轮 chat_image 图片挂到刚落库的最终 assistant 消息, 刷新后回填
                     if _turn_images:
                         agent_db.set_last_assistant_images(conversation_id, _turn_images)
@@ -1632,6 +1633,7 @@ class AgentChatService:
                 if not ws_manager.active_tasks[session_id]:
                     del ws_manager.active_tasks[session_id]
             logger.info(f"[WS] Task cleaned up: session={session_id}, conv={conversation_id}")
+
 
 
 
