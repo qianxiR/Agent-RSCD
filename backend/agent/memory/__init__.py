@@ -19,6 +19,13 @@
   from backend.agent.memory import agent_db
 """
 from backend.agent.memory import agent_db
+from backend.agent.memory.stores import (
+    LongTermMemoryStore,
+    MemoryStores,
+    SummaryMemoryStore,
+    WorkingMemoryStore,
+    get_memory_stores,
+)
 from backend.agent.memory.memory_context import (
     build_context_messages,
     persist_user_message,
@@ -31,6 +38,11 @@ from backend.agent.memory.memory_context import (
 
 __all__ = [
     "agent_db",
+    "WorkingMemoryStore",
+    "SummaryMemoryStore",
+    "LongTermMemoryStore",
+    "MemoryStores",
+    "get_memory_stores",
     "build_context_messages",
     "persist_user_message",
     "persist_turn",

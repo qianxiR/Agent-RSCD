@@ -298,6 +298,22 @@ class Settings:
     gee_key_file: str = field(default_factory=lambda: _env("GEE_KEY_FILE", ""))
     gee_project: str = field(default_factory=lambda: _env("GEE_PROJECT", ""))
 
+    # ==================== 外部工具箱 (E:\1代码\系统\Tools) ====================
+    # 复用现有遥感数据处理/后处理/知识服务工具包；路径加入 sys.path 后按需导入。
+    external_tools_root: str = field(default_factory=lambda: _env(
+        "EXTERNAL_TOOLS_ROOT", r"E:\1代码\系统"))
+    external_tools_enabled: bool = field(
+        default_factory=lambda: _env("EXTERNAL_TOOLS_ENABLED", "true").lower() == "true"
+    )
+
+    # ==================== MCP 客户端 ====================
+    mcp_enabled: bool = field(
+        default_factory=lambda: _env("MCP_ENABLED", "true").lower() == "true"
+    )
+    mcp_timeout_seconds: float = field(
+        default_factory=lambda: float(_env("MCP_TIMEOUT_SECONDS", "8"))
+    )
+
     # ==================== 统一文件存储 (v2.4 按来源维度组织) ====================
     # ★ 所有文件统一收归 agent-files/, 按数据来源作为一级目录:
     #   agent-files/

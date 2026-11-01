@@ -23,6 +23,7 @@ _TOOL_CATEGORY_LABELS = {
     "skill": ("长任务技能", "按需检索标准化长任务编排方案, 拿到步骤后逐步执行"),
     "memory": ("记忆管理", "查看/清空长期记忆与会话摘要 (AI 自身的记忆系统)"),
     "agent_team": ("专业 Worker 调度", "派发 verification_agent 做客观验收; report_agent 由系统在分割完成后自动派发, 主控用 query_agent_task 查阅报告产物; 查询或取消 worker 任务"),
+    "external": ("外部工具箱", "复用 E:\\1代码\\系统\\Tools 的栅格元信息、光谱指数、掩膜矢量化与空间分析能力"),
     "demo": ("演示工具", "本地测试工具 (时间/数学/UI面板等, 不依赖外部服务)"),
 }
 

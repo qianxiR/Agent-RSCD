@@ -1026,7 +1026,9 @@ class AgentChatService:
         set_runtime_context(conversation_id, req.user_id, _project_id or "")
 
         try:
-            # 获取工具并绑定 LLM
+            # 获取工具并绑定 LLM（MCP 工具按 TTL 懒加载，失败不阻断聊天）
+            from backend.agent.mcp.registry import ensure_mcp_tools_loaded
+            await ensure_mcp_tools_loaded()
             tools = get_tools_for_llm()
             llm = create_responses_llm_with_tools(tools, req.model, req.temperature)
             llm_without_tools = create_responses_llm(req.model, req.temperature)

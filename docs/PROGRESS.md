@@ -1707,3 +1707,57 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 2. 扩大 Plan-first 覆盖（发布流程的真实输入接入），评估后再考虑默认开启；
 3. 按需补充 data 域到具体仓储（远程对象存储/PostGIS）；
 4. 文档收尾与旧备份脚本清理。
+
+---
+
+## 五十、阶段 61（2026-11-01）：外部 Tools / MCP / Skills / Harness / Prompt 分离
+
+### 50.1 外部 Tools 接入
+
+- `backend/integrations/external_tools.py`：按需导入 `E:\1代码\系统\Tools`，不阻塞启动；
+- 新增 4 个标准工具：
+  - `external_raster_info`：投影/尺寸/波段；
+  - `external_spectral_index`：NDVI/NDWI 统计；
+  - `external_raster_to_vector`：掩膜转 Shapefile；
+  - `external_spatial_operation`：buffer / intersection / erase。
+- 配置：`EXTERNAL_TOOLS_ROOT`、`EXTERNAL_TOOLS_ENABLED`；
+- 工具注册表从 50 → **54**，工具目录新增 `external` 分类。
+
+### 50.2 MCP 客户端
+
+- `backend/agent/mcp/client.py`：SSE / stdio 连接，`list_tools` / `call_tool`；
+- `backend/agent/mcp/registry.py`：把启用服务器的远程工具动态注册为 `mcp__<server>__<tool>`；
+- 刷新时先移除旧 MCP 工具；聊天前按 300s TTL 懒加载，失败不阻断；
+- API：
+  - `POST /api/v1/mcp/refresh`
+  - `GET /api/v1/mcp/tools`
+- 已用本地 FastMCP stdio demo 验证：`add(2,3)=5`，动态工具 `mcp__demo__add` 可调用。
+
+### 50.3 标准 Skills
+
+- `backend/agent/skills/spec.py`：`SkillSpec` + 校验；
+- `backend/agent/skills/catalog.py`：5 个标准业务技能：
+  - 地物提取、变化检测、GeoServer 发布、外部空间分析、栅格质量/光谱检查；
+- 每个技能声明触发词、必填输入、工具序列、验收标准、失败回退。
+
+### 50.4 标准 Harness
+
+- `backend/agent/harness/base.py`：`HarnessContext` / `HarnessEvent` / `AgentHarness`；
+- `backend/agent/harness/chat_harness.py`：`ChatHarness` 适配现有 ChatService；
+- `backend/agent/harness/registry.py`：Harness 注册表。
+
+### 50.5 Prompt / Context / Memory 分离
+
+- Prompt：`backend/agent/prompt_store/` 文件模板 + 版本，缺文件回退现有代码模板；
+- Context：`backend/agent/context/builder.py` 统一构建入口，不再让调用方直接依赖 memory_context；
+- Memory：`backend/agent/memory/stores.py` 拆出 Working/Summary/LongTerm 三个 store，memory_context 保留编排职责。
+
+### 50.6 验证
+
+- `python tests/skills_catalog_test.py`：5 技能字段/工具依赖全部通过；
+- `python tests/harness_test.py`：run/stop 生命周期通过；
+- `python tests/agent_storage_test.py`：PromptStore、ContextBuilder、MemoryStores 通过；
+- MCP stdio demo：`add` 调用返回 `5`；动态注册/调用通过；
+- 外部工具实测：`external_raster_info`、`external_spatial_operation` 返回 success；
+- 全量工具注册：**54**；`python -m compileall backend` 通过；
+- 8020 服务重启后 `/docs` 200，聊天 smoke 返回 `done`。

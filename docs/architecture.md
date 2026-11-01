@@ -240,9 +240,9 @@ graph LR
     classDef dataLayer fill:#fce4ec,stroke:#c62828,stroke-width:2px,color:#b71c1c
     classDef platformLayer fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1
 
-    class SERVICE,WS,MEMORY,AGENTDB,PROMPT,RUNTIME,MEMTOOLS agentLayer
-    class LLM_CLIENT,TOOLREG,SAMSEG,SKILLS modelLayer
-    class BIZ,GEOSERVER,KNOWLEDGE dataLayer
+    class SERVICE,WS,MEMORY,AGENTDB,PROMPT,RUNTIME,PLANNER,EXECUTOR,TOOLS,SKILLS agentLayer
+    class LLM_CLIENT,MODELREG,ADAPTERS,SAMSEG modelLayer
+    class CATALOG,IMAGE,VECTOR,TEXT,BIZ,GEOSERVER dataLayer
     class UI,MAP,DATAPANEL,WSCHAT platformLayer
 ```
 
@@ -250,9 +250,10 @@ graph LR
 
 | 方向 | 说明 |
 |------|------|
-| agent → model | 推理调 LLM、读工具注册表 ✅ |
-| agent 内部自洽 | memory ↔ agent_db ↔ memory_tools 均在 agent 层 ✅ |
-| model → data | 工具调业务库/GeoServer ✅ |
+| agent → model | 推理调 LLM、按 capability 取解译模型 ✅ |
+| agent → data | 工具通过 data catalog/仓储读写影像/矢量/图片/文本 ✅ |
+| agent 内部自洽 | memory ↔ agent_db ↔ stores、prompt/prompt_store、context 均在 agent 层 ✅ |
+| model → data | 模型适配器读取 AssetRef/栅格数据 ✅ |
 | data → 无上层 | 仅读 config ✅ |
 | platform ↔ agent | 通过 WebSocket 双向交互（见 [communication.md](platform/communication.md)） |
 
@@ -263,3 +264,18 @@ graph LR
 > ★ 架构演进：本文档随项目迭代持续更新。最新两轮重大改造见 [PROGRESS.md](./PROGRESS.md)：
 >   - 阶段 21：OpenLayers 地图容器（撤销阶段 14 移除地图引擎的决策）
 >   - 阶段 22：矢量渲染增强 + 端到端测试体系
+
+---
+
+## 外部工具、MCP、Skills 与 Harness（2026-11）
+
+| 能力 | 位置 | 说明 |
+|---|---|---|
+| 外部 Tools 适配 | `backend/integrations/external_tools.py` | 栅格元信息、NDVI/NDWI、掩膜转矢量、buffer/intersection/erase；`EXTERNAL_TOOLS_ROOT` 配置 |
+| MCP 客户端 | `backend/agent/mcp/` | SSE/stdio 连接、`list_tools`/`call_tool`、动态注册 `mcp__server__tool` |
+| MCP API | `POST /api/v1/mcp/refresh`、`GET /api/v1/mcp/tools` | 刷新已启用服务器工具，聊天前按 TTL 懒加载 |
+| 标准业务技能 | `backend/agent/skills/catalog.py` | 地物提取/变化检测/发布/空间分析/栅格 QA 的结构化 SkillSpec |
+| 标准 Harness | `backend/agent/harness/` | `HarnessContext` / `HarnessEvent` / `AgentHarness`，ChatHarness 适配现有 ChatService |
+| Prompt 独立存储 | `backend/agent/prompt_store/` | 文件模板 + 版本；缺文件回退 `prompt/static_template.py` |
+| Context 独立构建 | `backend/agent/context/builder.py` | 调用方只依赖 ContextBuilder，不直接依赖 memory_context |
+| Memory 独立存储 | `backend/agent/memory/stores.py` | Working/Summary/LongTerm 三层 store，memory_context 只做编排 |

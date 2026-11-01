@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, field_validator
 
 from backend.agent.memory import agent_db
+from backend.agent.mcp.registry import list_mcp_tools, refresh_mcp_tools
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -78,3 +79,17 @@ async def delete_server(server_id: str):
     if agent_db.delete_mcp_server(server_id):
         return {"status": "success"}
     return {"status": "error", "msg": "服务器不存在或数据库不可用"}
+
+
+@router.post("/api/v1/mcp/refresh")
+async def refresh_tools():
+    """连接已启用 MCP 服务器，动态注册/刷新远程工具。"""
+    result = await refresh_mcp_tools(force=True)
+    return {"status": "success", **result}
+
+
+@router.get("/api/v1/mcp/tools")
+async def list_tools():
+    """列出当前已注册的 MCP 工具。"""
+    tools = list_mcp_tools()
+    return {"status": "success", "count": len(tools), "tools": tools}

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Agent 技能层（Backend V2）。
 
-loader/selector 已迁入本目录；技能 Markdown 文档仍留在 backend/model/skills，
-loader 会自动回退扫描旧目录；model/skills 保留兼容转发。
+- loader/selector：Markdown 技能文档的加载与选择（文档仍在 model/skills）；
+- catalog/spec：标准业务技能的结构化规格与确定性匹配。
 """
 
-from backend.agent.skills import loader, selector  # noqa: F401
+from backend.agent.skills import catalog, loader, selector, spec  # noqa: F401
 
-__all__ = ["loader", "selector"]
+__all__ = ["catalog", "loader", "selector", "spec"]

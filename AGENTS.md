@@ -4,14 +4,15 @@
 
 ## 目录结构
 
-- `backend/` — Python AI 服务。三层子包 `agent` / `model` / `data`，外加 `api`（REST/WS 路由，含 `/internal/*` 内部接口）、`utils`；入口 `backend/main.py`，配置集中在 `backend/config.py`。
-  - `agent/`：编排层。`planner/`（PlanGraph/校验/模板）、`executor/`（ReAct + DAG）、`tools/`（全部工具实现与注册表）、`skills/`（loader/selector，Markdown 文档仍放 `model/skills`）、`memory/`、`prompt/`、`verification/`、`team/`、`runtime/`。
+- `backend/` — Python AI 服务。三层子包 `agent` / `model` / `data`，外加 `api`（REST/WS 路由，含 `/internal/*` 内部接口）、`integrations`（外部 Tools / MCP 适配）、`utils`；入口 `backend/main.py`，配置集中在 `backend/config.py`。
+  - `agent/`：编排层。`planner/`（PlanGraph/校验/模板）、`executor/`（ReAct + DAG）、`harness/`（标准运行生命周期）、`tools/`（全部工具实现与注册表）、`skills/`（loader/selector + 标准业务目录）、`mcp/`（MCP 客户端与动态工具）、`memory/`（三层 store + 编排）、`prompt/` + `prompt_store/`（提示词代码与文件模板分离）、`context/`（上下文构建）、`verification/`、`team/`、`runtime/`。
   - `model/`：解译模型与 LLM 适配层。`base.py`/`registry.py` 统一协议，`segmentation/`、`change_detection/`、`understanding/` 放模型适配器；具体权重与推理实现仍在 `ProC_SAM3/`、`SamSeg/`。
   - `data/`：数据资产与 IO。`base.py`/`catalog.py` 统一资产契约，`imagery` / `vector` / `image` / `text` / `other` 五类域，`connectors/` 放 PostGIS/GeoServer/存储连接器。
+- 外部工具箱 `E:\1代码\系统\Tools` 通过 `backend/integrations/external_tools.py` 按需接入（栅格元信息、光谱指数、掩膜矢量化、空间分析），路径由 `EXTERNAL_TOOLS_ROOT` 配置。
 - `backend-java/` — Java 业务服务（Spring Boot 3 + MyBatis-Plus + Spring Security/JWT，端口 8081）：项目管理（直管 `rsiis_business` 库）、登录认证、工作区浏览、会话与任务代理（转发 Python `/internal/*`）。构建运行见 `backend-java/README.md`。
 - `frontend-vue/` — 当前前端（Vue 3 + Vite + Element Plus + Pinia + OpenLayers）。
 - `frontend/` — 旧版前端，勿改。
-- `docs/` — `architecture.md` 总纲及子文档；`docs/agent/`（core / evaluation / method / roadmap）；`docs/PROGRESS.md` 阶段进度（阶段 60 的演进记录）。
+- `docs/` — `architecture.md` 总纲及子文档；`docs/agent/`（core / evaluation / method / roadmap）；`docs/PROGRESS.md` 阶段进度（阶段 61 的演进记录）。
 - `tests/` — Python 测试脚本 + `tests/e2e/`（Playwright）。
 - `deploy/nginx.conf` — 生产统一入口分流配置（开发期由 Vite proxy 等价承担）。
 - `scripts/` — 一次性/运维脚本（如 `migrate_project_to_java.py` 双服务库迁移）。

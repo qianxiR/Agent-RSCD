@@ -75,11 +75,19 @@ _LLM_EXPOSED_TOOL_NAMES = {
     "assign_agent_task",
     "query_agent_task",
     "cancel_agent_task",
+    # 外部工具箱（E:\1代码\系统\Tools）
+    "external_raster_info",
+    "external_spectral_index",
+    "external_raster_to_vector",
+    "external_spatial_operation",
 }
 
 _AGENT_ROLE_EXPOSED_TOOL_NAMES = {
     "verification_agent": set(),
 }
+
+# MCP 动态工具暴露名（刷新时增删，不污染静态白名单）
+_DYNAMIC_EXPOSED_TOOL_NAMES: set[str] = set()
 
 
 def register_tool(category: str):
@@ -120,7 +128,8 @@ def get_tools_for_llm() -> list:
     出参: 已收窄的 StructuredTool 列表; 未注册的白名单项会被自然跳过, 支持可选依赖降级。
     """
     all_tools = get_all_tools()
-    return [tool for name, tool in all_tools.items() if name in _LLM_EXPOSED_TOOL_NAMES]
+    exposed = _LLM_EXPOSED_TOOL_NAMES | _DYNAMIC_EXPOSED_TOOL_NAMES
+    return [tool for name, tool in all_tools.items() if name in exposed]
 
 
 def get_tools_catalog_for_llm() -> Dict[str, Callable]:
@@ -131,7 +140,8 @@ def get_tools_catalog_for_llm() -> Dict[str, Callable]:
     出参: {tool_name: StructuredTool} 映射, 仅包含当前允许 LLM 主动选择的工具。
     """
     all_tools = get_all_tools()
-    return {name: tool for name, tool in all_tools.items() if name in _LLM_EXPOSED_TOOL_NAMES}
+    exposed = _LLM_EXPOSED_TOOL_NAMES | _DYNAMIC_EXPOSED_TOOL_NAMES
+    return {name: tool for name, tool in all_tools.items() if name in exposed}
 
 
 def get_llm_exposed_tool_names() -> set:
@@ -141,7 +151,7 @@ def get_llm_exposed_tool_names() -> set:
     方法: 返回白名单副本, 供诊断脚本或测试核对工具收窄范围。
     出参: set[str], 修改返回值不会影响注册表全局配置。
     """
-    return set(_LLM_EXPOSED_TOOL_NAMES)
+    return set(_LLM_EXPOSED_TOOL_NAMES) | set(_DYNAMIC_EXPOSED_TOOL_NAMES)
 
 
 def get_tools_for_agent_role(agent_role: str) -> list:
@@ -163,3 +173,34 @@ def get_tools_for_agent_role(agent_role: str) -> list:
 def get_tool_by_name(name: str) -> Optional[Callable]:
     """按名称获取工具函数"""
     return get_all_tools().get(name)
+
+
+def register_dynamic_tool(tool: Callable, category: str = "mcp", expose: bool = True) -> str:
+    """注册运行时动态工具（MCP 等），返回工具名。"""
+    tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "dynamic_tool")
+    register_tool(category)(tool)
+    if expose:
+        _DYNAMIC_EXPOSED_TOOL_NAMES.add(tool_name)
+    return tool_name
+
+
+def unregister_tool(name: str) -> bool:
+    """从注册表和动态白名单移除工具。"""
+    removed = False
+    for bucket in _tool_registry.values():
+        if name in bucket:
+            bucket.pop(name, None)
+            removed = True
+    _tool_category_map.pop(name, None)
+    _DYNAMIC_EXPOSED_TOOL_NAMES.discard(name)
+    return removed
+
+
+def expose_tool_to_llm(name: str) -> None:
+    """把动态工具加入 LLM 暴露集合。"""
+    _DYNAMIC_EXPOSED_TOOL_NAMES.add(name)
+
+
+def unexpose_tool_from_llm(name: str) -> None:
+    """把动态工具移出 LLM 暴露集合（保留注册）。"""
+    _DYNAMIC_EXPOSED_TOOL_NAMES.discard(name)
