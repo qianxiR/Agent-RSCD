@@ -271,7 +271,7 @@ graph LR
 
 | 能力 | 位置 | 说明 |
 |---|---|---|
-| 外部 Tools 适配 | `backend/integrations/external_tools.py` | 栅格元信息、NDVI/NDWI、掩膜转矢量、buffer/intersection/erase；`EXTERNAL_TOOLS_ROOT` 配置 |
+| 外部 Tools 适配 | `backend/integrations/external_tools.py` + `vendor/` | 栅格元信息、NDVI/NDWI、掩膜转矢量、buffer/intersection/erase、知识检索；代码已 vendored，无权重/数据依赖 |
 | MCP 客户端 | `backend/agent/mcp/` | SSE/stdio 连接、`list_tools`/`call_tool`、动态注册 `mcp__server__tool` |
 | MCP API | `POST /api/v1/mcp/refresh`、`GET /api/v1/mcp/tools` | 刷新已启用服务器工具，聊天前按 TTL 懒加载 |
 | 标准业务技能 | `backend/agent/skills/catalog.py` | 地物提取/变化检测/发布/空间分析/栅格 QA 的结构化 SkillSpec |

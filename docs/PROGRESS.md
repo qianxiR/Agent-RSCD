@@ -1714,14 +1714,17 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ### 50.1 外部 Tools 接入
 
-- `backend/integrations/external_tools.py`：按需导入 `E:\1代码\系统\Tools`，不阻塞启动；
+- `backend/integrations/vendor/`：从 `E:\1代码\系统\Tools` 复制**最小代码子集**（无权重、无数据，约 260KB）：
+  - `raster_io.py`、`spectral/`、`spatial/`、`mask_postprocess/` 必要模块；
+  - `knowledge/` 下的知识条目、解决方案案例、工具说明 md。
+- `backend/integrations/external_tools.py`：改为直接导入 vendored 代码，不再把外部路径加入 `sys.path`；
 - 新增 5 个标准工具：
   - `external_raster_info`：投影/尺寸/波段；
   - `external_spectral_index`：NDVI/NDWI 统计；
   - `external_raster_to_vector`：掩膜转 Shapefile；
-  - `external_spatial_operation`：buffer / intersection / erase。
-  - `external_knowledge_query`：检索 KnowledgeRAG 本地知识条目/案例（无向量库也可用）。
-- 配置：`EXTERNAL_TOOLS_ROOT`、`EXTERNAL_TOOLS_ENABLED`；
+  - `external_spatial_operation`：buffer / intersection / erase；
+  - `external_knowledge_query`：检索 vendored 知识条目/案例。
+- 配置：`EXTERNAL_TOOLS_ENABLED`；
 - 工具注册表从 50 → **55**，工具目录新增 `external` 分类。
 
 ### 50.2 MCP 客户端
@@ -1760,7 +1763,8 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `python tests/harness_test.py`：run/stop 生命周期通过；
 - `python tests/agent_storage_test.py`：PromptStore、ContextBuilder、MemoryStores 通过；
 - MCP stdio demo：`add` 调用返回 `5`；动态注册/调用通过；
-- 外部工具实测：`external_raster_info`、`external_spatial_operation`、`external_knowledge_query` 返回 success；
+- 外部工具实测：`external_raster_info`、`external_spatial_operation`、`external_knowledge_query`、`external_raster_to_vector` 返回 success；
+- `python tests/external_tools_vendor_test.py` 通过：不依赖外部 Tools 路径、spatial/knowledge 命中、GDAL 环境栅格读取；
 - 全量工具注册：**55**；`python -m compileall backend` 通过；
 - 8020 服务重启后 `/docs` 200，聊天 smoke 经 ChatHarness 路由返回 `done`；
 - `GET /api/v1/mcp/tools` 返回空列表；`POST /api/v1/mcp/refresh` 返回 `refreshed`。

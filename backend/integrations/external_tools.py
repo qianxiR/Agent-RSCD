@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,14 +22,6 @@ from langchain_core.tools import tool
 from backend.agent.tools._result import build_error, build_success
 from backend.agent.tools.registry import register_tool
 from backend.config import settings
-
-
-def _ensure_tools_path() -> Path:
-    """把外部 Tools 的父目录加入 sys.path，并返回父目录。"""
-    root = Path(settings.external_tools_root).expanduser().resolve()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    return root
 
 
 def _load_geojson(value: Any) -> Dict[str, Any]:
@@ -61,8 +52,7 @@ def external_raster_info(file_path: str) -> Dict[str, Any]:
     if not Path(file_path).is_file():
         return build_error(f"栅格不存在: {file_path}")
     try:
-        _ensure_tools_path()
-        from Tools.DataProcessing.raster_io import get_geo_info
+        from backend.integrations.vendor.raster_io import get_geo_info
         import rasterio
 
         projection, geotransform = get_geo_info(file_path)
@@ -111,10 +101,9 @@ def external_spectral_index(
         return build_error("index 仅支持 ndvi / ndwi")
     bands = [red_band, nir_band] if key == "ndvi" else [green_band, nir_band]
     try:
-        _ensure_tools_path()
         import numpy as np
-        from Tools.DataProcessing.raster_io import read_geotiff
-        from Tools.DataProcessing.spectral import calculate_ndvi, calculate_ndwi
+        from backend.integrations.vendor.raster_io import read_geotiff
+        from backend.integrations.vendor.spectral import calculate_ndvi, calculate_ndwi
 
         image, _, _, _ = read_geotiff(file_path, selected_bands=bands)
         array = np.asarray(image)
@@ -164,8 +153,7 @@ def external_raster_to_vector(
     if not Path(mask_path).is_file():
         return build_error(f"掩膜不存在: {mask_path}")
     try:
-        _ensure_tools_path()
-        from Tools.PostProcessing.mask_postprocess import raster_to_vector
+        from backend.integrations.vendor.mask_postprocess import raster_to_vector
 
         result = raster_to_vector(
             mask_path,
@@ -173,7 +161,8 @@ def external_raster_to_vector(
             min_area=min_area,
             source_image_path=source_image_path or None,
         )
-        shp_path = str(result) if result else output_shp_path
+        # 外部实现可能返回 GeoDataFrame / 路径 / None，不能直接做布尔判断
+        shp_path = str(result) if isinstance(result, (str, Path)) else output_shp_path
         if not Path(shp_path).exists():
             return build_error(f"矢量化未生成产物: {shp_path}")
         return build_success(
@@ -198,7 +187,7 @@ def external_knowledge_query(question: str, top_k: int = 3) -> Dict[str, Any]:
     """
     if not settings.external_tools_enabled:
         return build_error("外部工具箱未启用（EXTERNAL_TOOLS_ENABLED=false）")
-    root = Path(settings.external_tools_root).expanduser().resolve() / "Tools" / "KnowledgeRAG" / "rag" / "space"
+    root = Path(__file__).resolve().parent / "vendor" / "knowledge"
     if not root.is_dir():
         return build_error(f"知识库目录不存在: {root}")
     terms = [part.lower() for part in str(question or "").replace("，", " ").replace("？", " ").split() if part.strip()]
@@ -254,8 +243,7 @@ def external_spatial_operation(
         return build_error("外部工具箱未启用（EXTERNAL_TOOLS_ENABLED=false）")
     op = (operation or "intersection").lower()
     try:
-        _ensure_tools_path()
-        from Tools.DataProcessing import spatial
+        from backend.integrations.vendor import spatial
 
         first = _load_geojson(geojson_a)
         if op == "buffer":
@@ -274,3 +262,4 @@ def external_spatial_operation(
         )
     except Exception as exc:
         return build_error(f"空间分析失败: {exc}")
+

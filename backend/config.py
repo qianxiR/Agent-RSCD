@@ -298,10 +298,9 @@ class Settings:
     gee_key_file: str = field(default_factory=lambda: _env("GEE_KEY_FILE", ""))
     gee_project: str = field(default_factory=lambda: _env("GEE_PROJECT", ""))
 
-    # ==================== 外部工具箱 (E:\1代码\系统\Tools) ====================
-    # 复用现有遥感数据处理/后处理/知识服务工具包；路径加入 sys.path 后按需导入。
-    external_tools_root: str = field(default_factory=lambda: _env(
-        "EXTERNAL_TOOLS_ROOT", r"E:\1代码\系统"))
+    # ==================== 外部工具箱 (vendored) ====================
+    # 数据处理/后处理/知识检索代码已复制到 backend/integrations/vendor，
+    # 不再依赖 E:\1代码\系统\Tools 运行时路径；仅保留总开关。
     external_tools_enabled: bool = field(
         default_factory=lambda: _env("EXTERNAL_TOOLS_ENABLED", "true").lower() == "true"
     )
