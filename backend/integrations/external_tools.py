@@ -187,6 +187,53 @@ def external_raster_to_vector(
 
 @register_tool("external")
 @tool
+def external_knowledge_query(question: str, top_k: int = 3) -> Dict[str, Any]:
+    """
+    检索外部 KnowledgeRAG 本地知识库（知识条目 + 解决方案案例）。
+
+    入参:
+        - question (str): 自然语言问题。
+        - top_k (int): 返回条数。
+    出参: success/error；data.matches 为 [{title, path, snippet, score}]。
+    """
+    if not settings.external_tools_enabled:
+        return build_error("外部工具箱未启用（EXTERNAL_TOOLS_ENABLED=false）")
+    root = Path(settings.external_tools_root).expanduser().resolve() / "Tools" / "KnowledgeRAG" / "rag" / "space"
+    if not root.is_dir():
+        return build_error(f"知识库目录不存在: {root}")
+    terms = [part.lower() for part in str(question or "").replace("，", " ").replace("？", " ").split() if part.strip()]
+    if not terms:
+        terms = [str(question or "").strip().lower()]
+
+    matches = []
+    for path in sorted(root.rglob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lowered = text.lower()
+        score = sum(lowered.count(term) for term in terms)
+        if score <= 0:
+            continue
+        matches.append({
+            "title": path.stem,
+            "path": str(path),
+            "snippet": text.strip()[:600],
+            "score": score,
+        })
+    matches.sort(key=lambda item: item["score"], reverse=True)
+    top = matches[: max(1, min(int(top_k or 3), 10))]
+    if not top:
+        return build_success("知识库未命中，可换关键词重试", data={"matches": [], "question": question})
+    return build_success(
+        f"知识库命中 {len(top)} 条",
+        data={"question": question, "matches": top},
+        verification={"status": "passed", "evidence": f"{len(top)} matches"},
+    )
+
+
+@register_tool("external")
+@tool
 def external_spatial_operation(
     geojson_a: str,
     operation: str = "intersection",

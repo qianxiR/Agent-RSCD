@@ -88,6 +88,20 @@ STANDARD_SKILLS: List[SkillSpec] = [
         ],
         acceptance=["projection/width/height 返回", "光谱统计 min/max/mean 返回"],
     ),
+    SkillSpec(
+        skill_id="external_knowledge_query",
+        name="知识库问答",
+        description="检索 KnowledgeRAG 本地知识条目与解决方案案例。",
+        triggers=["知识库", "案例", "方案", "knowledge", "RAG", "植被恢复", "土壤恢复"],
+        required_inputs=["question"],
+        tools=["external_knowledge_query"],
+        steps=[
+            "抽取问题关键词",
+            "检索 knowledge / solution_cases",
+            "返回命中条目与摘要",
+        ],
+        acceptance=["matches 返回", "命中条目含 path/snippet"],
+    ),
 ]
 
 

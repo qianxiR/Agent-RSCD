@@ -80,6 +80,7 @@ _LLM_EXPOSED_TOOL_NAMES = {
     "external_spectral_index",
     "external_raster_to_vector",
     "external_spatial_operation",
+    "external_knowledge_query",
 }
 
 _AGENT_ROLE_EXPOSED_TOOL_NAMES = {

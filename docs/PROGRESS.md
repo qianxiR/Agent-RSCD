@@ -1715,13 +1715,14 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 ### 50.1 外部 Tools 接入
 
 - `backend/integrations/external_tools.py`：按需导入 `E:\1代码\系统\Tools`，不阻塞启动；
-- 新增 4 个标准工具：
+- 新增 5 个标准工具：
   - `external_raster_info`：投影/尺寸/波段；
   - `external_spectral_index`：NDVI/NDWI 统计；
   - `external_raster_to_vector`：掩膜转 Shapefile；
   - `external_spatial_operation`：buffer / intersection / erase。
+  - `external_knowledge_query`：检索 KnowledgeRAG 本地知识条目/案例（无向量库也可用）。
 - 配置：`EXTERNAL_TOOLS_ROOT`、`EXTERNAL_TOOLS_ENABLED`；
-- 工具注册表从 50 → **54**，工具目录新增 `external` 分类。
+- 工具注册表从 50 → **55**，工具目录新增 `external` 分类。
 
 ### 50.2 MCP 客户端
 
@@ -1736,8 +1737,8 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 ### 50.3 标准 Skills
 
 - `backend/agent/skills/spec.py`：`SkillSpec` + 校验；
-- `backend/agent/skills/catalog.py`：5 个标准业务技能：
-  - 地物提取、变化检测、GeoServer 发布、外部空间分析、栅格质量/光谱检查；
+- `backend/agent/skills/catalog.py`：6 个标准业务技能：
+  - 地物提取、变化检测、GeoServer 发布、外部空间分析、栅格质量/光谱检查、知识库问答；
 - 每个技能声明触发词、必填输入、工具序列、验收标准、失败回退。
 
 ### 50.4 标准 Harness
@@ -1759,7 +1760,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `python tests/harness_test.py`：run/stop 生命周期通过；
 - `python tests/agent_storage_test.py`：PromptStore、ContextBuilder、MemoryStores 通过；
 - MCP stdio demo：`add` 调用返回 `5`；动态注册/调用通过；
-- 外部工具实测：`external_raster_info`、`external_spatial_operation` 返回 success；
-- 全量工具注册：**54**；`python -m compileall backend` 通过；
+- 外部工具实测：`external_raster_info`、`external_spatial_operation`、`external_knowledge_query` 返回 success；
+- 全量工具注册：**55**；`python -m compileall backend` 通过；
 - 8020 服务重启后 `/docs` 200，聊天 smoke 经 ChatHarness 路由返回 `done`；
 - `GET /api/v1/mcp/tools` 返回空列表；`POST /api/v1/mcp/refresh` 返回 `refreshed`。
