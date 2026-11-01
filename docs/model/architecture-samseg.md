@@ -86,7 +86,7 @@ flowchart LR
 
 ### 10.4.1 ProC-SAM3（当前默认）
 
-- 适配层：[`backend/model/ProC_SAM3/engine.py`](../../backend/model/ProC_SAM3/engine.py)，外部仓库 `E:\1代码\模型\变化检测\ProC-SAM3-main`；
+- 适配层：[`backend/model/ProC_SAM3/engine.py`](../../backend/model/ProC_SAM3/engine.py)，运行时代码已 vendored 到 `backend/model/ProC_SAM3/vendor/`（不含权重）；权重仍外置 `PROC_SAM3_WEIGHTS_ROOT/sam3/sam3.pt`；
 - 模型：`CachedSAM3OpenSegmentor` + `configs/cfg_vaihingen.py`，默认 `processor_resolution=504`（交互快）；`PROC_SAM3_RESOLUTION=1008` 精度优先；
 - 类别：**英文 + 英文同义词**，格式 `building, house, roof; water, river, lake`（分号分隔类别、逗号分隔同义词）；首行自动补 `background, other` 并固定索引 0；
 - 分割：ProC `predict` → 类别索引掩膜，沿用 runner 的上色/统计/GeoTIFF/GeoJSON/SHP 后处理；

@@ -1,8 +1,10 @@
 """ProC-SAM3 适配层。
 
-把 `E:\\1代码\\模型\\变化检测\\ProC-SAM3-main` 的 CachedSAM3OpenSegmentor 接到
+把 vendored `backend/model/ProC_SAM3/vendor` 的 CachedSAM3OpenSegmentor 接到
 现有 `run_segment` 契约上：输入影像 + 英文类别（可带同义词），输出类别索引掩膜。
 
+- 代码：默认 `backend/model/ProC_SAM3/vendor`，可用 `PROC_SAM3_ROOT` 覆盖；
+- 权重：仍外置，`PROC_SAM3_WEIGHTS_ROOT/sam3/sam3.pt`；
 - 类别格式：`building, house, roof; water, river, lake`（分号分组，逗号同义词）
 - 首类自动补 `background, other`，并固定为索引 0
 - 模型按「类别文件 + 分辨率」缓存；换类别会重载（SAM3 权重加载较慢）

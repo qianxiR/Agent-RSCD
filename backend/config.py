@@ -379,8 +379,11 @@ class Settings:
     # 类别使用英文 + 英文同义词；旧引擎保留但默认不启用。
     samseg_engine: str = field(default_factory=lambda: _env(
         "SAMSEG_ENGINE", "proc_sam3").lower())
+    # 代码已 vendor 到 backend/model/ProC_SAM3/vendor；权重仍通过 PROC_SAM3_WEIGHTS_ROOT 外置
     proc_sam3_root: str = field(default_factory=lambda: _env(
-        "PROC_SAM3_ROOT", r"E:\1代码\模型\变化检测\ProC-SAM3-main"))
+        "PROC_SAM3_ROOT",
+        str(Path(__file__).resolve().parent / "model" / "ProC_SAM3" / "vendor"),
+    ))
     proc_sam3_weights_root: str = field(default_factory=lambda: _env(
         "PROC_SAM3_WEIGHTS_ROOT", r"E:\1代码\模型\权重"))
     # 504 为交互默认：显存占用低、单次推理 ~5-8s；精度优先可设 1008

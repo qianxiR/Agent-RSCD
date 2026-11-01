@@ -43,7 +43,7 @@ npm --prefix frontend-vue run dev                         # 前端，http://127.
 - 主控 Agent 是唯一决策中心和唯一用户可见回复者；仅保留确定性 `verification_agent` 与分割链路内同步调用的 `report_agent`，不新增专业 worker。
 - 工具实现与注册表位于 `agent/tools/`，通过 `@register_tool` 注册；LLM 暴露边界由工具目录控制。
 - 只有 verification 为 `passed` 的 lesson 才能进入长期记忆；技能缺必填输入、契约不合格或工具越权时不执行。
-- 遥感解译默认走 **ProC-SAM3**（`backend/model/ProC_SAM3/`，外部仓库 `E:\1代码\模型\变化检测\ProC-SAM3-main`，权重 `E:\1代码\模型\权重\sam3\sam3.pt`）；`SAMSEG_ENGINE=legacy` 回退 SegEarth-OV3。SAM3 权重按需加载：启动不预加载，首次遥感请求加载后全局缓存。
+- 遥感解译默认走 **ProC-SAM3**：运行时代码已 vendored 到 `backend/model/ProC_SAM3/vendor/`（不含权重），权重仍外置 `E:\1代码\模型\权重\sam3\sam3.pt`（`PROC_SAM3_WEIGHTS_ROOT`）；`SAMSEG_ENGINE=legacy` 回退 SegEarth-OV3。SAM3 权重按需加载：启动不预加载，首次遥感请求加载后全局缓存。
 - Java 侧认证三档开关（`SECURITY_MODE`: off/observe/enforce），默认 off 保证迁移期与 E2E 兼容。
 
 ## 文档阅读顺序

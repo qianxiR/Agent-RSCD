@@ -1768,3 +1768,31 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - 全量工具注册：**55**；`python -m compileall backend` 通过；
 - 8020 服务重启后 `/docs` 200，聊天 smoke 经 ChatHarness 路由返回 `done`；
 - `GET /api/v1/mcp/tools` 返回空列表；`POST /api/v1/mcp/refresh` 返回 `refreshed`。
+
+---
+
+## 五十一、阶段 62（2026-11-01）：ProC-SAM3 代码入库
+
+### 51.1 入库范围
+
+- 复制到 `backend/model/ProC_SAM3/vendor/`：
+  - `sam3_segmentor_cached.py`、`sam3_segmentor.py`、`config_qwen3_sam3.py`、`mask_postprocess.py`、`palettes.py`；
+  - `configs/`、`core/`、`sam3/`、`mmseg/`、`mmengine/`、`_vendor/mmcv/`；
+  - 运行所需 yaml/txt/gz（tokenizer 词表等）。
+- **不包含**：`sam3.pt` 权重、`QwSAM3TestData/`、`demo_out/`、`assets/`、GUI/demo/eval/训练脚本、`__pycache__`；
+- 约 **690 个文件 / 8.7MB**。
+
+### 51.2 路径切换
+
+- `PROC_SAM3_ROOT` 默认改为 `backend/model/ProC_SAM3/vendor`；
+- 权重仍由 `PROC_SAM3_WEIGHTS_ROOT` 外置（默认 `E:\1代码\模型\权重`），文件 `sam3/sam3.pt`；
+- `engine._ensure_paths()` 把 vendor 根目录与 `_vendor` 加入 `sys.path`，导入本地 `mmseg` / `mmengine` / `mmcv` / `sam3` / `configs` / `core`。
+
+### 51.3 验证
+
+- `proc_sam3_available()` 为 True；
+- vendor 下 `CachedSAM3OpenSegmentor` 可导入；
+- `mmseg` / `sam3` / `mmengine` / `mmcv` 均解析到 `backend/model/ProC_SAM3/vendor`；
+- `Config.fromfile(vendor/configs/cfg_vaihingen.py)` 读取成功；
+- `python tests/proc_sam3_vendor_test.py` 通过；
+- 真实推理回归：`engine.segment(agent-files/test_official_seg.tif, "building")` 成功输出 `(512, 512) int64` 掩膜，类别行 `background, other` / `building, house, roof, structure`。
