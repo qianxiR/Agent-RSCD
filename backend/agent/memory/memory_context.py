@@ -54,6 +54,7 @@ from langchain_core.messages import (
 
 from backend.config import settings
 from backend.agent.memory import agent_db
+from backend.agent.memory.stores import get_memory_stores
 from backend.agent.prompt import build_system_prompt, build_system_prompt_blocks
 from backend.agent.memory.task_state import (
     build_plan_context_text,
@@ -255,7 +256,7 @@ def build_context_messages(
     user_profile_text = build_user_profile_text(user_id)
     summary_data = None
     if _is_db_mode():
-        summary_data = agent_db.load_summary(conversation_id)
+        summary_data = get_memory_stores().summary.load(conversation_id)
 
     summary_text = (summary_data or {}).get("summary") if summary_data else None
     summarized_upto = (summary_data or {}).get("summarized_upto") if summary_data else 0
@@ -263,7 +264,7 @@ def build_context_messages(
     if _is_db_mode():
         # 先加载近期历史, 再基于“摘要 + 历史 + 当前输入”提炼工作记忆状态卡。
         # 这样做是为了把隐式上下文压成显式状态, 减少多步任务中途跑偏。
-        history = agent_db.load_messages_since(conversation_id, summarized_upto or 0, settings.history_load_limit)
+        history = get_memory_stores().working.load_since(conversation_id, summarized_upto or 0, settings.history_load_limit)
     else:
         history = list(_mem_fallback.get(conversation_id, []))
 
@@ -577,7 +578,7 @@ async def maybe_summarize(
         return False  # 内存模式不做摘要
 
     # 查当前压缩级别 (决定从哪级开始检查)
-    summary_data = agent_db.load_summary(conversation_id) or {}
+    summary_data = get_memory_stores().summary.load(conversation_id) or {}
     current_level = summary_data.get("compress_level", 0)
 
     # 估算当前历史 + 本轮新消息的总 token
@@ -611,7 +612,7 @@ async def maybe_summarize(
         # 记录 Level 1 状态 (不改 content, fold 在 build_context_messages 实时做)
         level1_summary = summary_data.get("summary", "")
         summarized_upto = summary_data.get("summarized_upto") or 0
-        agent_db.save_summary(conversation_id, level1_summary, summarized_upto, compress_level=1)
+        get_memory_stores().summary.save(conversation_id, level1_summary, summarized_upto, compress_level=1)
         logger.info(
             f"[Memory] Level 1 记录 conv={conversation_id}: "
             f"fold 后 token={folded_tokens} (原始={total_tokens})"
@@ -663,9 +664,9 @@ async def maybe_summarize(
         return current_level >= 1
 
     # 保存摘要 + 删除旧消息 (Level 2 不可逆)
-    ok = agent_db.save_summary(conversation_id, summary_text, summarized_upto, compress_level=2)
+    ok = get_memory_stores().summary.save(conversation_id, summary_text, summarized_upto, compress_level=2)
     if ok:
-        deleted = agent_db.delete_messages_upto(conversation_id, summarized_upto)
+        deleted = get_memory_stores().working.delete_upto(conversation_id, summarized_upto)
         logger.info(
             f"[Memory] Level 2 完成 conv={conversation_id} summary_len={len(summary_text)} "
             f"summarized_upto={summarized_upto} deleted_old={deleted}"
@@ -685,31 +686,8 @@ def _align_to_safe_boundary(messages: List[BaseMessage], idx: int) -> int:
 
 
 def _compute_summarized_upto(conversation_id: str, remaining_count: int):
-    """
-    推算被摘要覆盖的最大 message.id。
-    方法: 查询会话的总消息数, 用 倒数 remaining_count 条的最小 id - 1 作为 summarized_upto。
-    返回 None 表示无法计算。
-    """
-    from backend.agent.memory.agent_db import get_conn
-    with get_conn() as conn:
-        if conn is None:
-            return None
-        try:
-            with conn.cursor() as cur:
-                # 取剩余部分的第一条 id (按时间正序的第 remaining_count+1 条之前的边界)
-                cur.execute(
-                    """SELECT id FROM message
-                       WHERE conversation_id = %s
-                       ORDER BY id DESC
-                       LIMIT 1 OFFSET %s""",
-                    (conversation_id, remaining_count),
-                )
-                row = cur.fetchone()
-                # 该 id 是"被摘要的最后一条", summarized_upto = 这个 id
-                return row[0] if row else None
-        except Exception as e:
-            logger.error(f"计算 summarized_upto 失败 conv={conversation_id}: {e}")
-            return None
+    """推算被摘要覆盖的最大 message.id；由 SummaryMemoryStore 负责存取。"""
+    return get_memory_stores().summary.compute_summarized_upto(conversation_id, remaining_count)
 
 
 def _format_messages_for_summary(messages: List[BaseMessage]) -> str:
@@ -815,7 +793,7 @@ async def extract_and_save_long_term_memory(
         category = category or "preference"
         if not key or not value:
             continue
-        if agent_db.save_user_memory(user_id, key, value, category):
+        if get_memory_stores().long_term.save(user_id, key, value, category):
             saved += 1
 
     if saved:
@@ -872,9 +850,9 @@ def build_user_profile_text(user_id: str) -> str:
     if not _is_db_mode():
         return ""
     # 1. 当前用户的偏好/实体/事实记忆
-    memories = agent_db.load_user_memory(user_id)
+    memories = get_memory_stores().long_term.load(user_id)
     # 2. 全局教训记忆 (跨用户共享, 自纠捕捉器写入, 融入长期记忆)
-    global_memories = agent_db.load_user_memory("global")
+    global_memories = get_memory_stores().long_term.load("global")
     memories = (memories or []) + (global_memories or [])
     if not memories:
         return ""
@@ -954,3 +932,4 @@ def debug_dump_history(conversation_id: str) -> List[str]:
         else:
             result.append(f"[Unknown] {str(m)[:60]}")
     return result
+

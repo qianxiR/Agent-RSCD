@@ -1450,6 +1450,70 @@ def get_last_message_id(conversation_id: str) -> Optional[int]:
             return None
 
 
+def compute_summarized_upto(conversation_id: str, remaining_count: int):
+    """推算被摘要覆盖的最大 message.id；返回 None 表示无法计算。"""
+    with get_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id FROM message
+                       WHERE conversation_id = %s
+                       ORDER BY id DESC
+                       LIMIT 1 OFFSET %s""",
+                    (conversation_id, remaining_count),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"计算 summarized_upto 失败 conv={conversation_id}: {e}")
+            return None
+
+
+def rollback_to_checkpoint(conversation_id: str, checkpoint_id: int) -> int:
+    """
+    回滚到指定消息 checkpoint：软删除之后消息，并把 active_leaf_node 回退到 checkpoint。
+    返回被隐藏的消息数；数据库不可用返回 0。
+    """
+    if checkpoint_id is None:
+        return 0
+    with get_conn() as conn:
+        if conn is None:
+            return 0
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT node_id FROM message WHERE conversation_id = %s AND id = %s",
+                    (conversation_id, checkpoint_id),
+                )
+                row = cur.fetchone()
+                checkpoint_node = str(row[0]) if row and row[0] else None
+                cur.execute(
+                    """UPDATE message SET is_active = FALSE
+                       WHERE conversation_id = %s AND id > %s
+                       AND (is_active = TRUE OR is_active IS NULL)""",
+                    (conversation_id, checkpoint_id),
+                )
+                affected = cur.rowcount
+                cur.execute(
+                    """UPDATE conversation
+                       SET active_leaf_node = %s, updated_at = now()
+                       WHERE id = %s""",
+                    (checkpoint_node, conversation_id),
+                )
+            conn.commit()
+            logger.info(
+                f"回滚到 checkpoint [{conversation_id}]: 隐藏 {affected} 条 (id > {checkpoint_id}), "
+                f"active_leaf_node={checkpoint_node}"
+            )
+            return affected
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"checkpoint 回滚失败 [{conversation_id}, after={checkpoint_id}]: {e}")
+            return 0
+
+
 def delete_messages_after(conversation_id: str, after_msg_id: int) -> int:
     """
     ★ v2.5 改为软删除: 把 id > after_msg_id 的消息标记 is_active=FALSE (替代物理 DELETE)。

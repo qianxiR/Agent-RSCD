@@ -23,6 +23,12 @@ class WorkingMemoryStore:
     def load(self, conversation_id: str, limit: int = 50) -> List[Any]:
         return agent_db.load_messages(conversation_id, limit=limit)
 
+    def load_since(self, conversation_id: str, since_id: int, limit: int = 50) -> List[Any]:
+        return agent_db.load_messages_since(conversation_id, since_id, limit=limit)
+
+    def delete_upto(self, conversation_id: str, upto_id: int) -> int:
+        return agent_db.delete_messages_upto(conversation_id, upto_id)
+
     def last_message_id(self, conversation_id: str) -> int:
         return agent_db.get_last_message_id(conversation_id)
 
@@ -43,6 +49,9 @@ class SummaryMemoryStore:
         return agent_db.save_summary(
             conversation_id, summary, summarized_upto, compress_level=compress_level
         )
+
+    def compute_summarized_upto(self, conversation_id: str, remaining_count: int):
+        return agent_db.compute_summarized_upto(conversation_id, remaining_count)
 
 
 class LongTermMemoryStore:

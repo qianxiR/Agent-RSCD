@@ -1855,3 +1855,39 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
   - tool schema 约 28,594 → **2,239 tokens**；
   - 完整 system prompt 约 **2,932 tokens**；
 - 验证：`tests/tool_discovery_test.py` 通过；`build_system_prompt(tool_names=...)` 正常。
+
+---
+
+## 五十六、阶段 67（2026-11-02）：记忆边界修复与运行时断点续存
+
+### 56.1 记忆 store 边界
+
+- `WorkingMemoryStore` 增加 `load_since` / `delete_upto`；
+- `SummaryMemoryStore` 增加 `compute_summarized_upto`；
+- `memory_context` 的摘要、历史、长期记忆读写全部改为走 `get_memory_stores()`；
+- `chat_service` 的全局 lesson 读取与偏好即时写入也改为走 stores；
+- `agent_db` 保留为 store 层的数据访问实现。
+
+### 56.2 checkpoint 回滚修复
+
+- 新增 `agent_db.rollback_to_checkpoint()`：软删除 checkpoint 之后消息，同时把 `conversation.active_leaf_node` 回退到 checkpoint 节点；
+- `chat_service` 停止回滚改用该函数；
+- 修复回滚后 active leaf 仍指向隐藏节点、新消息挂错父节点的问题。
+
+### 56.3 模型运行时快照
+
+- 新增 `agent/runtime/run_state.py` 与 `agent_run` 表：
+  - `run_id` / `conversation_id` / `session_id`
+  - `status` / `iteration` / `checkpoint_id` / `persist_start_idx`
+  - `active_tool_names` / `plan` / `messages` / `last_tool` / `error`
+- 每个工具批次结束后保存快照；
+- `resume_chat` WebSocket 命令：加载最近 `running/paused` 快照，恢复消息、计划、工具绑定和迭代轮次；
+- 正常完成标记 `completed`，停止标记 `stopped`，异常标记 `failed`；
+- 快照包含模型消息链、工具结果、计划状态，不再只依赖聊天消息。
+
+### 56.4 验证
+
+- `python tests/run_state_test.py`：快照 UPSERT/恢复/状态切换、checkpoint 回滚 active leaf；
+- `resume_chat` 快照恢复 smoke：`session_started → thinking → content → done`；
+- 普通聊天快照落库：`agent_run.status=completed`；
+- `memory_context` 不再直接调用 `agent_db` 的摘要/历史/长期记忆方法。

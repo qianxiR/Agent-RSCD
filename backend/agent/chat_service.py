@@ -58,6 +58,7 @@ from backend.agent.context.builder import get_context_builder
 from backend.agent.memory import memory_context as memory_mod
 from backend.agent.memory import agent_db
 from backend.agent.memory import pattern_tracker
+from backend.agent.memory.stores import get_memory_stores
 from backend.agent.memory.task_state import (
     apply_step_observation,
     build_plan_context_text,
@@ -105,6 +106,7 @@ class ToolChatRequest(BaseModel):
     images: List[Dict[str, Any]] = Field(default_factory=list)
     selected_layers: List[Dict[str, Any]] = Field(default_factory=list)
     multi_round: bool = True
+    resume: bool = False
 
 
 def _safe_attachment_name(value: str) -> str:
@@ -1029,18 +1031,43 @@ class AgentChatService:
         try:
             # 获取工具并绑定 LLM（MCP 工具按 TTL 懒加载，失败不阻断聊天）
             from backend.agent.mcp.registry import ensure_mcp_tools_loaded
+            from backend.agent.runtime.run_state import (
+                RunSnapshot,
+                deserialize_message,
+                load_resumable,
+                mark_status,
+                save_snapshot,
+                serialize_message,
+            )
             from backend.agent.tools.discovery import select_initial_tool_names
 
             await ensure_mcp_tools_loaded()
-            selected_tool_names = select_initial_tool_names(req.prompt, req.images)
+            resume_state = load_resumable(conversation_id) if req.resume else None
+            if req.resume and resume_state is None:
+                await ws_manager.send_to_session(session_id, {
+                    "type": "error",
+                    "msg": "没有可恢复的运行快照",
+                    "conversation_id": conversation_id,
+                })
+                return
+
+            if resume_state is not None:
+                selected_tool_names = list(resume_state.active_tool_names or [])
+                # 快照至少保留核心解译与发现工具
+                for name in ("search_tools", "load_tool"):
+                    if name not in selected_tool_names:
+                        selected_tool_names.append(name)
+            else:
+                selected_tool_names = select_initial_tool_names(req.prompt, req.images)
             active_tool_names = set(selected_tool_names)
             tools = get_tools_for_llm(
                 selected_tool_names,
                 compact=settings.agent_dynamic_tools_enabled,
             )
             logger.info(
-                "[Tools] dynamic=%s selected=%s",
+                "[Tools] dynamic=%s resume=%s selected=%s",
                 settings.agent_dynamic_tools_enabled,
+                bool(resume_state),
                 selected_tool_names,
             )
             llm = create_responses_llm_with_tools(tools, req.model, req.temperature)
@@ -1050,10 +1077,12 @@ class AgentChatService:
             pending_repair_audit = None
             pending_repair_attempt = None
             current_plan, plan_task_id = load_plan_state(conversation_id)
+            if resume_state is not None and resume_state.plan:
+                current_plan = resume_state.plan
             if current_plan and current_plan.get("status") == "completed":
                 current_plan, plan_task_id = None, None
             accepted_lessons = parse_accepted_lesson_contracts(
-                agent_db.load_user_memory("global", category="lesson")
+                get_memory_stores().long_term.load("global", category="lesson")
             )
             # ★ 本轮聊天图片收集: chat_image action 产生的图片, 待最终回复落库时挂到最后一条 assistant 消息
             _turn_images = []
@@ -1070,7 +1099,7 @@ class AgentChatService:
             # ★ Plan-first 灰度: 变化检测且能确定性推断类别时, 在 ReAct 前建立显式计划；
             #   失败/未命中则保持原 ReAct 路径。默认 AGENT_PLAN_FIRST=false。
             plan_first_state = None
-            if not current_plan:
+            if not current_plan and resume_state is None:
                 from backend.agent.planner.runtime import maybe_build_plan_first_state
                 plan_first_state = maybe_build_plan_first_state(
                     req.prompt, input_images, conversation_id, req.user_id, current_plan
@@ -1081,30 +1110,43 @@ class AgentChatService:
                         conversation_id, req.user_id, current_plan, plan_task_id
                     )
             # Shadow 计划只用于对比；已进入 Plan-first 时不重复构建。
-            if not plan_first_state:
+            if not plan_first_state and resume_state is None:
                 from backend.agent.planner.runtime import maybe_log_shadow_plan
                 maybe_log_shadow_plan(
                     req.prompt, input_images, conversation_id, req.user_id
                 )
 
-            # ★ 构建上下文: agent_db 历史载入 + trim 裁剪 + 当前 Human 拼装
-            all_messages, new_start_idx = get_context_builder().build(
-                conversation_id,
-                req.prompt,
-                llm,
-                user_id=req.user_id,
-                images=input_images,
-                tool_names=selected_tool_names,
-            )
+            if resume_state is not None:
+                # ★ 从运行时快照恢复：直接复用上轮消息、计划和工具绑定
+                all_messages = [
+                    deserialize_message(item) for item in (resume_state.messages or [])
+                ]
+                if not all_messages:
+                    await ws_manager.send_to_session(session_id, {
+                        "type": "error",
+                        "msg": "运行快照没有可恢复消息",
+                        "conversation_id": conversation_id,
+                    })
+                    return
+                new_start_idx = max(0, (resume_state.persist_start_idx or 1) - 1)
+                persist_start_idx = resume_state.persist_start_idx or (new_start_idx + 1)
+                checkpoint_id = resume_state.checkpoint_id or agent_db.get_last_message_id(conversation_id)
+            else:
+                # ★ 构建上下文: agent_db 历史载入 + trim 裁剪 + 当前 Human 拼装
+                all_messages, new_start_idx = get_context_builder().build(
+                    conversation_id,
+                    req.prompt,
+                    llm,
+                    user_id=req.user_id,
+                    images=input_images,
+                    tool_names=selected_tool_names,
+                )
 
-            # ★ v2.3: 立即持久化用户消息, 防止停止时丢失上下文
-            #   原架构中 HumanMessage 与 AI/Tool 在 persist_turn 统一落库,
-            #   但用户中途停止 → CancelledError → 回滚 → HumanMessage 未入库 → 丢失。
-            #   现在提前落库, 停止回滚只删 AI/Tool 消息, 用户请求不丢失。
-            memory_mod.persist_user_message(conversation_id, all_messages, new_start_idx)
-            # checkpoint 重新获取: 现在包含了刚持久化的 HumanMessage,
-            # 停止回滚时 HumanMessage 会被保留, 用户说"继续"能识别上下文
-            checkpoint_id = agent_db.get_last_message_id(conversation_id)
+                # ★ v2.3: 立即持久化用户消息, 防止停止时丢失上下文
+                memory_mod.persist_user_message(conversation_id, all_messages, new_start_idx)
+                # checkpoint 重新获取: 现在包含了刚持久化的 HumanMessage
+                checkpoint_id = agent_db.get_last_message_id(conversation_id)
+                persist_start_idx = new_start_idx + 1
 
             existing_report_download = _find_latest_report_download(all_messages)
             if not existing_report_download:
@@ -1154,7 +1196,24 @@ class AgentChatService:
             #   安全出口: ① LLM 返回无 tool_calls 的最终回复 → 正常 done; ② LLM 调用异常 → return;
             #   ③ 用户停止 → asyncio.CancelledError → 回滚。死循环时由用户手动停止兜底。
             #   iteration 仅用于日志计数 (无上限), 不再作为终止条件。
-            iteration = 0
+            iteration = resume_state.iteration if resume_state is not None else 0
+            run_snapshot = resume_state or RunSnapshot.new(conversation_id, session_id)
+            run_snapshot.status = "running"
+
+            def _save_run_state(status: str = "running", last_tool=None, error: str = "") -> None:
+                """保存模型运行时快照（消息 + 计划 + 工具 + 迭代位置）。"""
+                run_snapshot.status = status
+                run_snapshot.iteration = iteration
+                run_snapshot.checkpoint_id = checkpoint_id
+                run_snapshot.persist_start_idx = persist_start_idx
+                run_snapshot.active_tool_names = sorted(active_tool_names)
+                run_snapshot.plan = current_plan
+                run_snapshot.messages = [serialize_message(m) for m in all_messages]
+                run_snapshot.last_tool = last_tool
+                run_snapshot.error = error
+                save_snapshot(run_snapshot)
+
+            _save_run_state()
             while True:
                 iteration += 1
                 logger.info(f"[WS] Iteration {iteration}, conv={conversation_id}")
@@ -1298,6 +1357,7 @@ class AgentChatService:
                         additional_kwargs={"thinking_content": ai_message.content or content},
                     ))
                     get_context_builder().persist_turn(conversation_id, all_messages, new_start_idx + 1)
+                    _save_run_state(status="completed")
                     # ★ 聊天图片持久化: 把本轮 chat_image 图片挂到刚落库的最终 assistant 消息, 刷新后回填
                     if _turn_images:
                         agent_db.set_last_assistant_images(conversation_id, _turn_images)
@@ -1468,7 +1528,7 @@ class AgentChatService:
                             pref = pattern_tracker.record(req.user_id, tool_name, tool_args)
                             if pref:
                                 # 即时落库 (不等收尾), 用户能更快感知
-                                agent_db.save_user_memory(
+                                get_memory_stores().long_term.save(
                                     req.user_id, pref["key"], pref["value"], pref["category"]
                                 )
                                 # 通知前端弹轻提示
@@ -1600,12 +1660,15 @@ class AgentChatService:
                     )
                     tools_dirty = False
 
+                # ★ 工具批次结束：保存运行时快照，进程重启后可从下一轮 LLM 继续
+                _save_run_state()
+
         except asyncio.CancelledError:
             # ★ v2.1: 被用户停止 → 回滚到 checkpoint, 不向上传播 (避免影响同 session 其他对话)
             logger.info(f"[WS] Task cancelled by user: conv={conversation_id}, checkpoint={checkpoint_id}")
             if checkpoint_id is not None:
-                deleted = agent_db.delete_messages_after(conversation_id, checkpoint_id)
-                logger.info(f"[WS] Rollback: deleted {deleted} messages after id={checkpoint_id}")
+                deleted = agent_db.rollback_to_checkpoint(conversation_id, checkpoint_id)
+                logger.info(f"[WS] Rollback: hidden {deleted} messages after id={checkpoint_id}")
             else:
                 # 全新会话且无任何已保存消息 → 删除空的会话记录
                 agent_db.delete_conversation(conversation_id)
@@ -1621,6 +1684,11 @@ class AgentChatService:
                     logger.warning(f"[WS] 沙盒回收调度失败 conv={conversation_id}: {sb_err}")
 
             agent_db.update_conversation_status(conversation_id, "stopped")
+            if "run_snapshot" in locals():
+                try:
+                    _save_run_state(status="stopped")
+                except Exception as snap_err:
+                    logger.warning(f"[RunState] 标记停止快照失败 conv={conversation_id}: {snap_err}")
 
             # ★ 对话结束时提取一次长期记忆 (全量分析; 取代每轮提取, 降低 LLM 调用成本)
             #   与下面 _async_self_correction_scan 并行两路: 本路偏好/事实, 自纠路错误案例.
@@ -1651,6 +1719,11 @@ class AgentChatService:
         except Exception as e:
             # ★ 捕获其他未预期的错误, 通知前端
             logger.error(f"[WS] Unexpected error in tool_chat_ws: conv={conversation_id}, err={e}", exc_info=True)
+            if "run_snapshot" in locals():
+                try:
+                    _save_run_state(status="failed", error=str(e))
+                except Exception as snap_err:
+                    logger.warning(f"[RunState] 标记失败快照失败 conv={conversation_id}: {snap_err}")
             try:
                 await ws_manager.send_to_session(session_id, {
                     "type": "error",

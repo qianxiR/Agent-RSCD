@@ -44,6 +44,7 @@ class ChatHarness(AgentHarness):
             images=context.metadata.get("images") or [],
             selected_layers=context.metadata.get("selected_layers") or [],
             multi_round=context.metadata.get("multi_round", True),
+            resume=bool(context.metadata.get("resume", False)),
         )
         await self._service.tool_chat_ws(
             req,

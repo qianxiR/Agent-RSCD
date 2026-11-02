@@ -155,6 +155,42 @@ async def websocket_chat(websocket: WebSocket, session_id: str = None, token: st
                 logger.info(f"[WS] Task started: session={sid}, conv={conv_id}, "
                            f"active_count={ws_manager.get_task_count(sid)}")
 
+            elif msg_type == "resume_chat":
+                # ★ 从运行时快照恢复（工具批次边界），不需要重新发送用户 prompt
+                conv_id = data.get("conversation_id")
+                if not conv_id:
+                    await ws_manager.send_to_session(sid, {
+                        "type": "error",
+                        "msg": "resume_chat 缺少 conversation_id",
+                    })
+                else:
+                    await ws_manager.send_to_session(sid, {
+                        "type": "session_started",
+                        "conversation_id": conv_id,
+                    })
+                    checkpoint_id = agent_db.get_last_message_id(conv_id)
+                    context = HarnessContext(
+                        session_id=sid,
+                        conversation_id=conv_id,
+                        user_id=data.get("user_id") or "study_user",
+                        prompt="",
+                        project_id=data.get("project_id") or "",
+                        metadata={
+                            "resume": True,
+                            "checkpoint_id": checkpoint_id,
+                            "multi_round": True,
+                        },
+                    )
+
+                    async def _noop_resume_emit(event):
+                        return None
+
+                    task = asyncio.create_task(
+                        ChatHarness(_chat_service, ws_manager).run(context, _noop_resume_emit)
+                    )
+                    ws_manager.register_task(sid, conv_id, task)
+                    logger.info("[WS] Resume task started: session=%s, conv=%s", sid, conv_id)
+
             elif msg_type == "stop_chat":
                 # ★ v2.1: 支持按 conversation_id 精确停止, 不传则停止全部
                 conv_id = data.get("conversation_id")

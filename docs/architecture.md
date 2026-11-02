@@ -279,6 +279,7 @@ graph LR
 | 标准 Harness | `backend/agent/harness/` | `HarnessContext` / `HarnessEvent` / `AgentHarness`，ChatHarness 适配现有 ChatService |
 | Prompt 独立存储 | `backend/agent/prompt_store/` | 唯一静态模板 `static_template2.md`；缺失直接报错，无代码兜底 |
 | 按需工具注入 | `backend/agent/tools/discovery.py` + `discovery_tools.py` | `AGENT_DYNAMIC_TOOLS=true` 时首轮只绑定少量工具；`search_tools` 检索、`load_tool` 加载完整 schema 后重绑 |
+| 运行时快照 | `backend/agent/runtime/run_state.py` | `agent_run` 保存消息、计划、工具、迭代位置；`resume_chat` 从工具批次边界恢复 |
 | 工具 schema 压缩 | `backend/agent/tools/schema.py` | 绑定时使用短 description；`load_tool` 返回完整参数 schema |
 | Context 独立构建 | `backend/agent/context/builder.py` | 调用方只依赖 ContextBuilder，不直接依赖 memory_context |
 | Memory 独立存储 | `backend/agent/memory/stores.py` | Working/Summary/LongTerm 三层 store，memory_context 只做编排 |
