@@ -1,25 +1,24 @@
 """
 智能体系统提示词构建器 (Agent 层 / Prompt)
 
-本模块只负责编排静态模板、工具目录和动态上下文。
+本模块只负责编排唯一静态模板、工具目录和动态上下文。
 """
-
-from backend.agent.prompt.dynamic_context import (
-    DYNAMIC_SECTION_TEMPLATE,
-    build_dynamic_section,
-)
-from backend.agent.prompt.static_template import SYSTEM_PROMPT_TEMPLATE
+from backend.agent.prompt.dynamic_context import build_dynamic_section
 from backend.agent.prompt.tool_catalog import build_decision_table, build_tools_catalog
 
+STATIC_TEMPLATE_NAME = "static_template2"
 
-def _system_template_text() -> str:
-    """优先使用 prompt_store 中的 system 模板文件；未配置时回退代码模板。"""
+
+def _static_template_text() -> str:
+    """读取唯一静态模板；不存在时直接报错，不做代码兜底。"""
     from backend.agent.prompt_store import get_prompt_store
 
-    template = get_prompt_store().get("system")
-    if template is not None and template.path:
-        return template.text
-    return SYSTEM_PROMPT_TEMPLATE
+    template = get_prompt_store().get(STATIC_TEMPLATE_NAME)
+    if template is None:
+        raise RuntimeError(
+            f"静态提示词模板缺失: prompt_store/templates/{STATIC_TEMPLATE_NAME}.md"
+        )
+    return template.text
 
 
 def build_system_prompt(
@@ -40,7 +39,7 @@ def build_system_prompt(
     出参:
       - str, 完整 system prompt 字符串。
     """
-    return _system_template_text().format(
+    return _static_template_text().format(
         tools_catalog=build_tools_catalog(),
         decision_table=build_decision_table(),
         dynamic_section=build_dynamic_section(conversation_summary, user_profile, task_state, plan_state),
@@ -65,7 +64,7 @@ def build_system_prompt_blocks(
     出参:
       - list[dict], OpenAI content-blocks 格式的 system prompt 内容。
     """
-    static_text = _system_template_text().format(
+    static_text = _static_template_text().format(
         tools_catalog=build_tools_catalog(),
         decision_table=build_decision_table(),
         dynamic_section="",
@@ -84,4 +83,5 @@ def build_system_prompt_blocks(
             "cache_control": {"type": "ephemeral"},
         },
     ]
+
 

@@ -19,7 +19,9 @@ def test_prompt_store() -> None:
         store.put("greeting", "你好，{name}", version="1.0")
         assert "greeting" in store.list_templates()
         assert store.render("greeting", name="解译员") == "你好，解译员"
-        assert store.get("system") is not None
+        assert store.get("missing") is None
+        from backend.agent.prompt_store import get_prompt_store
+        assert get_prompt_store().get("static_template2") is not None
 
 
 def test_context_builder_delegates() -> None:

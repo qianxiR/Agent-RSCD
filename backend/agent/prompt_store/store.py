@@ -49,10 +49,6 @@ class PromptStore:
                     version=version,
                     path=str(candidate),
                 )
-        if name == "system":
-            # 兼容旧代码：尚未拆成文件时回退内置模板
-            from backend.agent.prompt.static_template import SYSTEM_PROMPT_TEMPLATE
-            return PromptTemplate(name="system", text=SYSTEM_PROMPT_TEMPLATE)
         return None
 
     def render(self, template_name: str, version: str = "1.0", **kwargs) -> str:

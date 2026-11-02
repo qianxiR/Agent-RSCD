@@ -5,7 +5,7 @@
 ## 目录结构
 
 - `backend/` — Python AI 服务。三层子包 `agent` / `model` / `data`，外加 `api`（REST/WS 路由，含 `/internal/*` 内部接口）、`integrations`（外部 Tools / MCP 适配）、`utils`；入口 `backend/main.py`，配置集中在 `backend/config.py`。
-  - `agent/`：编排层。`planner/`（PlanGraph/校验/模板）、`executor/`（ReAct + DAG）、`harness/`（标准运行生命周期）、`tools/`（全部工具实现与注册表）、`skills/`（loader/selector + 标准业务目录）、`mcp/`（MCP 客户端与动态工具）、`memory/`（三层 store + 编排）、`prompt/` + `prompt_store/`（提示词代码与文件模板分离）、`context/`（上下文构建）、`verification/`、`team/`、`runtime/`。
+  - `agent/`：编排层。`planner/`（PlanGraph/校验/模板）、`executor/`（ReAct + DAG）、`harness/`（标准运行生命周期）、`tools/`（全部工具实现与注册表）、`skills/`（loader/selector + 标准业务目录）、`mcp/`（MCP 客户端与动态工具）、`memory/`（三层 store + 编排）、`prompt/`（构建器/工具目录）+ `prompt_store/`（唯一静态模板 `static_template2.md`）、`context/`（上下文构建）、`verification/`、`team/`、`runtime/`。
   - `model/`：解译模型与 LLM 适配层。`base.py`/`registry.py` 统一协议，`segmentation/`、`change_detection/`、`understanding/` 放模型适配器；具体权重与推理实现仍在 `ProC_SAM3/`、`SamSeg/`。
   - `data/`：数据资产与 IO。`base.py`/`catalog.py` 统一资产契约，`imagery` / `vector` / `image` / `text` / `other` 五类域，`connectors/` 放 PostGIS/GeoServer/存储连接器。
 - `backend/integrations/vendor/`：从 `E:\1代码\系统\Tools` 复制的数据处理/后处理/知识库代码子集（raster_io、spectral、spatial、mask_postprocess、knowledge md），**不含权重和数据**；运行时不再依赖外部 Tools 路径。
@@ -43,7 +43,7 @@ npm --prefix frontend-vue run dev                         # 前端，http://127.
 - 主控 Agent 是唯一决策中心和唯一用户可见回复者；仅保留确定性 `verification_agent` 与分割链路内同步调用的 `report_agent`，不新增专业 worker。
 - 工具实现与注册表位于 `agent/tools/`，通过 `@register_tool` 注册；LLM 暴露边界由工具目录控制。
 - 只有 verification 为 `passed` 的 lesson 才能进入长期记忆；技能缺必填输入、契约不合格或工具越权时不执行。
-- 遥感解译默认走 **ProC-SAM3**：运行时代码已 vendored 到 `backend/model/ProC_SAM3/vendor/`（不含权重），权重仍外置 `E:\1代码\模型\权重\sam3\sam3.pt`（`PROC_SAM3_WEIGHTS_ROOT`）；`SAMSEG_ENGINE=legacy` 回退 SegEarth-OV3。SAM3 权重按需加载：启动不预加载，首次遥感请求加载后全局缓存。
+- 遥感解译默认走 **ProC-SAM3**：运行时代码已 vendored 到 `backend/model/ProC_SAM3/vendor/`（不含权重）；权重已复制到 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（**仅本地提交，不推送 GitHub**），也可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；`SAMSEG_ENGINE=legacy` 回退 SegEarth-OV3。SAM3 权重按需加载：启动不预加载，首次遥感请求加载后全局缓存。
 - Java 侧认证三档开关（`SECURITY_MODE`: off/observe/enforce），默认 off 保证迁移期与 E2E 兼容。
 
 ## 文档阅读顺序

@@ -385,7 +385,9 @@ class Settings:
         str(Path(__file__).resolve().parent / "model" / "ProC_SAM3" / "vendor"),
     ))
     proc_sam3_weights_root: str = field(default_factory=lambda: _env(
-        "PROC_SAM3_WEIGHTS_ROOT", r"E:\1代码\模型\权重"))
+        "PROC_SAM3_WEIGHTS_ROOT",
+        str(Path(__file__).resolve().parent / "model" / "ProC_SAM3" / "weights"),
+    ))
     # 504 为交互默认：显存占用低、单次推理 ~5-8s；精度优先可设 1008
     proc_sam3_resolution: int = field(default_factory=lambda: int(
         _env("PROC_SAM3_RESOLUTION", "504")))

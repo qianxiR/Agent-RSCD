@@ -21,6 +21,9 @@ output
 *.log
 *.png
 *.pt
+# ProC-SAM3 本地权重：不入库、不推送 GitHub（见 README）
+backend/model/ProC_SAM3/weights/*
+!backend/model/ProC_SAM3/weights/README.md
 
 # Windows reserved filenames
 nul

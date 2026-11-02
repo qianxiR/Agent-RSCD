@@ -1753,7 +1753,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ### 50.5 Prompt / Context / Memory 分离
 
-- Prompt：`backend/agent/prompt_store/` 文件模板 + 版本；`system_prompt.py` 优先读取文件模板，缺文件回退代码模板；
+- Prompt：唯一静态模板 `backend/agent/prompt_store/templates/static_template2.md`；`system_prompt.py` 缺失模板直接报错，不再回退代码模板；
 - Context：`backend/agent/context/builder.py` 统一构建入口；ChatService 已改为通过 ContextBuilder 构建/持久化消息；
 - Memory：`backend/agent/memory/stores.py` 拆出 Working/Summary/LongTerm 三个 store，memory_context 保留编排职责。
 
@@ -1785,7 +1785,8 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 ### 51.2 路径切换
 
 - `PROC_SAM3_ROOT` 默认改为 `backend/model/ProC_SAM3/vendor`；
-- 权重仍由 `PROC_SAM3_WEIGHTS_ROOT` 外置（默认 `E:\1代码\模型\权重`），文件 `sam3/sam3.pt`；
+- 权重默认改为 `backend/model/ProC_SAM3/weights`，文件 `sam3/sam3.pt`；可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；
+- 权重 3.45GB，仅本地 Git 提交、不推送 GitHub（单文件超过 GitHub 100MB/LFS 2GB 限制）；
 - `engine._ensure_paths()` 把 vendor 根目录与 `_vendor` 加入 `sys.path`，导入本地 `mmseg` / `mmengine` / `mmcv` / `sam3` / `configs` / `core`。
 
 ### 51.3 验证
@@ -1796,3 +1797,26 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `Config.fromfile(vendor/configs/cfg_vaihingen.py)` 读取成功；
 - `python tests/proc_sam3_vendor_test.py` 通过；
 - 真实推理回归：`engine.segment(agent-files/test_official_seg.tif, "building")` 成功输出 `(512, 512) int64` 掩膜，类别行 `background, other` / `building, house, roof, structure`。
+
+---
+
+## 五十二、阶段 63（2026-11-01）：SAM3 权重本地入库
+
+- 复制 `E:\1代码\模型\权重\sam3\` 到 `backend/model/ProC_SAM3/weights/sam3/`；
+- 包含 `sam3.pt`（3,450,062,241 bytes / 3.45GB）及 tokenizer/config/LICENSE；
+- `sam3.pt` SHA256：`9999E2341CEEF5E136DAA386EECB55CB414446A00AC2B55EB2DFD2F7C3CF8C9E`；
+- `PROC_SAM3_WEIGHTS_ROOT` 默认改为 `backend/model/ProC_SAM3/weights`；
+- `.gitignore` 对 `sam3.pt` 做单文件例外，允许本地 Git 提交；
+- **仅本地提交，不推送 GitHub**：GitHub 普通 Git 单文件 100MB、LFS/Releases 单文件 2GB，均无法承载 3.45GB；
+- 验证：`proc_sam3_available()` 为 True，权重路径指向仓库内。
+
+---
+
+## 五十三、阶段 64（2026-11-02）：提示词收敛为唯一静态模板
+
+- 新增唯一静态模板 `backend/agent/prompt_store/templates/static_template2.md`；
+- `system_prompt.py` 固定读取 `static_template2`，缺失直接抛 `RuntimeError`；
+- 删除 `backend/agent/prompt/static_template.py` 与 `templates/role.md`，移除代码兜底；
+- `PromptStore` 不再对 `system` 做内置模板回退；
+- 动态上下文（任务状态 / 计划 / 摘要 / 用户画像）保持不变；
+- 验证：`build_system_prompt()` 可生成完整 prompt；模板缺失时明确报错；`agent_storage_test.py` 通过。

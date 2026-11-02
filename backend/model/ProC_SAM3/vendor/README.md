@@ -36,8 +36,8 @@ _vendor/mmcv/                 mmcv 兼容层代码
 ## 配置
 
 - 代码路径：默认 `backend/model/ProC_SAM3/vendor`，可用 `PROC_SAM3_ROOT` 覆盖；
-- 权重路径：仍由 `PROC_SAM3_WEIGHTS_ROOT` 指向外部目录，默认 `E:\1代码\模型\权重`；
-- 权重文件：`<PROC_SAM3_WEIGHTS_ROOT>/sam3/sam3.pt`。
+- 权重路径：默认 `backend/model/ProC_SAM3/weights`，可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；
+- 权重文件：`<PROC_SAM3_WEIGHTS_ROOT>/sam3/sam3.pt`，本机已复制（仅本地提交，不推 GitHub）。
 
 ## 修改
 

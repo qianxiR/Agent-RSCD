@@ -150,7 +150,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 > **★ 三层重构 (2026-10, Backend V2)**：
 > - **agent 层**：Planner/Executor（ReAct + DAG）+ **全部工具实现与注册表** + 技能 loader/selector + 记忆 + Prompt + 连接/任务管理 + 上下文隔离
 > - **model 层**：解译模型统一协议/注册表（ProC-SAM3 分割/变化检测适配器）+ LLM 客户端 + 权重/推理实现
-> - **ProC-SAM3**：运行时代码在 `backend/model/ProC_SAM3/vendor/`（不含权重）；权重仍外置 `PROC_SAM3_WEIGHTS_ROOT/sam3/sam3.pt`
+> - **ProC-SAM3**：运行时代码在 `backend/model/ProC_SAM3/vendor/`；权重在 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（仅本地提交，不推 GitHub），可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖
 > - **data 层**：AssetRef/catalog + 影像/矢量/图片/文本/other 五类域 + GeoServer/业务库连接器
 > - 依赖方向：`agent → model`、`agent → data`、`model → data`；data 不反向依赖 agent/model。
 
@@ -277,6 +277,6 @@ graph LR
 | MCP API | `POST /api/v1/mcp/refresh`、`GET /api/v1/mcp/tools` | 刷新已启用服务器工具，聊天前按 TTL 懒加载 |
 | 标准业务技能 | `backend/agent/skills/catalog.py` | 地物提取/变化检测/发布/空间分析/栅格 QA 的结构化 SkillSpec |
 | 标准 Harness | `backend/agent/harness/` | `HarnessContext` / `HarnessEvent` / `AgentHarness`，ChatHarness 适配现有 ChatService |
-| Prompt 独立存储 | `backend/agent/prompt_store/` | 文件模板 + 版本；缺文件回退 `prompt/static_template.py` |
+| Prompt 独立存储 | `backend/agent/prompt_store/` | 唯一静态模板 `static_template2.md`；缺失直接报错，无代码兜底 |
 | Context 独立构建 | `backend/agent/context/builder.py` | 调用方只依赖 ContextBuilder，不直接依赖 memory_context |
 | Memory 独立存储 | `backend/agent/memory/stores.py` | Working/Summary/LongTerm 三层 store，memory_context 只做编排 |
