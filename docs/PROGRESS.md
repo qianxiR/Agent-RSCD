@@ -1786,7 +1786,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 - `PROC_SAM3_ROOT` 默认改为 `backend/model/ProC_SAM3/vendor`；
 - 权重默认改为 `backend/model/ProC_SAM3/weights`，文件 `sam3/sam3.pt`；可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；
-- 权重 3.45GB，仅本地 Git 提交、不推送 GitHub（单文件超过 GitHub 100MB/LFS 2GB 限制）；
+- 权重 3.45GB，本地副本；`.gitignore` 排除整个 weights 目录，不进入 Git 历史、不推送 GitHub（单文件超过 GitHub 100MB/LFS 2GB 限制）；
 - `engine._ensure_paths()` 把 vendor 根目录与 `_vendor` 加入 `sys.path`，导入本地 `mmseg` / `mmengine` / `mmcv` / `sam3` / `configs` / `core`。
 
 ### 51.3 验证
@@ -1800,14 +1800,14 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ---
 
-## 五十二、阶段 63（2026-11-01）：SAM3 权重本地入库
+## 五十二、阶段 63（2026-11-01）：SAM3 权重本地副本（不入库）
 
 - 复制 `E:\1代码\模型\权重\sam3\` 到 `backend/model/ProC_SAM3/weights/sam3/`；
 - 包含 `sam3.pt`（3,450,062,241 bytes / 3.45GB）及 tokenizer/config/LICENSE；
 - `sam3.pt` SHA256：`9999E2341CEEF5E136DAA386EECB55CB414446A00AC2B55EB2DFD2F7C3CF8C9E`；
 - `PROC_SAM3_WEIGHTS_ROOT` 默认改为 `backend/model/ProC_SAM3/weights`；
-- `.gitignore` 对 `sam3.pt` 做单文件例外，允许本地 Git 提交；
-- **仅本地提交，不推送 GitHub**：GitHub 普通 Git 单文件 100MB、LFS/Releases 单文件 2GB，均无法承载 3.45GB；
+- `.gitignore` 排除整个 `backend/model/ProC_SAM3/weights/*`，仅 `README.md` 入库；权重不进入 Git 历史；
+- **本地副本，不推送 GitHub**：GitHub 普通 Git 单文件 100MB、LFS/Releases 单文件 2GB，均无法承载 3.45GB；
 - 验证：`proc_sam3_available()` 为 True，权重路径指向仓库内。
 
 ---

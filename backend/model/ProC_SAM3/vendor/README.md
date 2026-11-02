@@ -37,7 +37,7 @@ _vendor/mmcv/                 mmcv 兼容层代码
 
 - 代码路径：默认 `backend/model/ProC_SAM3/vendor`，可用 `PROC_SAM3_ROOT` 覆盖；
 - 权重路径：默认 `backend/model/ProC_SAM3/weights`，可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；
-- 权重文件：`<PROC_SAM3_WEIGHTS_ROOT>/sam3/sam3.pt`，本机已复制（仅本地提交，不推 GitHub）。
+- 权重文件：`<PROC_SAM3_WEIGHTS_ROOT>/sam3/sam3.pt`，本机已复制但被 `.gitignore` 排除，不进入 Git 历史。
 
 ## 修改
 

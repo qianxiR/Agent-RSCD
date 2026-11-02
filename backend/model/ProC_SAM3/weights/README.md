@@ -1,6 +1,6 @@
-# SAM3 权重（仅本机入库）
+# SAM3 权重（本地副本，不入库）
 
-本目录保存 ProC-SAM3 所需的 SAM3 权重，**只提交到本地 Git，不推送 GitHub**。
+本目录保存 ProC-SAM3 所需的 SAM3 权重。权重文件由 `.gitignore` 排除，**不进入 Git 历史，也不推送 GitHub**；本 README 入库仅作说明。
 
 ## 文件
 
@@ -43,5 +43,5 @@ backend/model/ProC_SAM3/weights/sam3/sam3.pt
 ## 注意
 
 - GitHub 普通 Git 单文件上限 100MB、LFS/Releases 单文件上限 2GB，本文件 3.45GB，**不能推送 GitHub**；
-- 仅本机/内网使用时，保留本地提交即可；
-- 若以后要迁移到 GitHub，请改用外部制品（OSS/S3/NAS/内网 HTTP）+ 下载校验脚本，不要直接推该文件。
+- 权重文件只保留在本机工作区，`.gitignore` 已排除，不进入 Git 历史；
+- 若以后要迁移到其他机器，请改用外部制品（OSS/S3/NAS/内网 HTTP）+ 下载校验脚本，不要直接提交该文件。

@@ -150,7 +150,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 > **★ 三层重构 (2026-10, Backend V2)**：
 > - **agent 层**：Planner/Executor（ReAct + DAG）+ **全部工具实现与注册表** + 技能 loader/selector + 记忆 + Prompt + 连接/任务管理 + 上下文隔离
 > - **model 层**：解译模型统一协议/注册表（ProC-SAM3 分割/变化检测适配器）+ LLM 客户端 + 权重/推理实现
-> - **ProC-SAM3**：运行时代码在 `backend/model/ProC_SAM3/vendor/`；权重在 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（仅本地提交，不推 GitHub），可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖
+> - **ProC-SAM3**：运行时代码在 `backend/model/ProC_SAM3/vendor/`；权重在 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（本地副本，`.gitignore` 排除，不进入 Git 历史），可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖
 > - **data 层**：AssetRef/catalog + 影像/矢量/图片/文本/other 五类域 + GeoServer/业务库连接器
 > - 依赖方向：`agent → model`、`agent → data`、`model → data`；data 不反向依赖 agent/model。
 
