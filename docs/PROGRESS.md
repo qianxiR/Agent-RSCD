@@ -1820,3 +1820,16 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `PromptStore` 不再对 `system` 做内置模板回退；
 - 动态上下文（任务状态 / 计划 / 摘要 / 用户画像）保持不变；
 - 验证：`build_system_prompt()` 可生成完整 prompt；模板缺失时明确报错；`agent_storage_test.py` 通过。
+
+---
+
+## 五十四、阶段 65（2026-11-02）：静态提示词精简重构
+
+- 重写 `static_template2.md`，收敛为 7 个稳定区块：
+  - 成功标准 / 行为红线 / 执行协议 / 工具与数据约定 / 记忆使用 / 输出契约 / 能力边界；
+- 静态模板从约 **4,957 tokens 降到约 2,094 tokens**；
+- 完整 system prompt 从约 **7,391 tokens 降到约 4,530 tokens**；
+- 合并重复的 `agent_validation`、repair、记忆、输出规则，建立唯一证据优先级链；
+- 工具参数、具体路径、前端实现细节改为引用工具契约与 `path_map`，减少静态耦合；
+- 动态上下文结构、顺序、来源不变；
+- 验证：`build_system_prompt()` / `build_system_prompt_blocks()` 正常，关键区块齐全。
