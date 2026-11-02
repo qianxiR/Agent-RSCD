@@ -1,6 +1,6 @@
 import { useConversationStore } from '@/stores/conversation'
 import { useProjectStore } from '@/stores/project'
-import { getTasks } from '@/services/api'
+import { getResumeState, getTasks } from '@/services/api'
 
 // ==================== WebSocket 传输层（composable）====================
 // ★ 对应原生 core/ws-chat.js 的 WsChatClient + core/ws-send.js 的 initWsClient
@@ -29,6 +29,7 @@ let _manualDisconnect = false
 // 任务轮询定时器：convId → setInterval handle
 const _taskPollers = {}
 const _layerRefreshPending = new Set()
+const _resumedRuns = new Set()
 
 const RECONNECT_BASE_DELAY = 1000
 const RECONNECT_MAX_DELAY = 10000
@@ -192,18 +193,21 @@ function handleConvMessage(convId, data) {
       store.appendContent(convId, data.content || '')
       break
     case 'error':
+      _resumedRuns.delete(convId)
       store.finishAssistant(convId, 'error', data.content || '未知错误')
       finishLayerRefresh(convId, 'failed')
       stopTaskPolling(convId)
       store.clearActiveTask(convId)
       break
     case 'done':
+      _resumedRuns.delete(convId)
       store.finishAssistant(convId, 'done')
       finishLayerRefresh(convId, 'done')
       stopTaskPolling(convId)
       store.clearActiveTask(convId)
       break
     case 'chat_stopped':
+      _resumedRuns.delete(convId)
       store.finishAssistant(convId, 'stopped')
       finishLayerRefresh(convId, 'cancelled')
       stopTaskPolling(convId)
@@ -242,6 +246,31 @@ function scheduleReconnect() {
   }, delay)
 }
 
+// 入参: conversationId
+// 方法: 查询后端是否存在 paused/running 快照；有则自动发送 resume_chat
+// 出参: Promise<boolean> 是否发起了恢复
+async function tryResume(conversationId) {
+  if (!conversationId || _resumedRuns.has(conversationId)) return false
+  if (!isConnected()) return false
+  try {
+    const state = await getResumeState(conversationId)
+    if (!state?.resumable) return false
+    _resumedRuns.add(conversationId)
+    const store = getStore()
+    store.beginAssistant(conversationId)
+    const sent = sendRaw({
+      type: 'resume_chat',
+      conversation_id: conversationId,
+      user_id: 'study_user',
+    })
+    if (!sent) _resumedRuns.delete(conversationId)
+    return sent
+  } catch (e) {
+    console.warn('[WS] 恢复检查失败:', conversationId, e)
+    return false
+  }
+}
+
 // 入参: 无
 // 方法: 建立唯一 WS 连接，绑定 onopen/onmessage/onclose/onerror
 // 出参: 无（状态写入 store.wsStatus）
@@ -266,6 +295,8 @@ function connect() {
     console.log('[WS] 已连接')
     _reconnectAttempt = 0
     store.setWsStatus('connected')
+    const activeId = getStore().activeConvId
+    if (activeId) tryResume(activeId)
   }
   socket.onmessage = (event) => handleRawMessage(event.data)
   socket.onclose = () => {
@@ -350,5 +381,7 @@ export function useWebSocket() {
     sendChat,
     sendStop,
     sendToolResult,
+    tryResume,
   }
 }
+

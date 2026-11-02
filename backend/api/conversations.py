@@ -23,6 +23,24 @@ logger = logging.getLogger(__name__)
 
 # ==================== 会话历史查询 (HTTP, 供前端侧栏) ====================
 
+@router.get("/api/v1/conversations/{conversation_id}/resume")
+async def get_conversation_resume(conversation_id: str):
+    """查询会话是否存在可恢复的 Agent 运行时快照。"""
+    from backend.agent.runtime.run_state import load_resumable
+
+    state = load_resumable(conversation_id)
+    if state is None:
+        return {"status": "success", "resumable": False}
+    return {
+        "status": "success",
+        "resumable": True,
+        "run_id": state.run_id,
+        "iteration": state.iteration,
+        "status_text": state.status,
+        "active_tool_names": state.active_tool_names,
+    }
+
+
 @router.get("/api/v1/conversations")
 async def list_conversations(user_id: str = "study_user", project_id: str = None):
     """

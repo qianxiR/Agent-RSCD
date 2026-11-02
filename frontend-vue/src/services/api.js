@@ -133,6 +133,10 @@ export function getConvMessages(convId) {
   return request(`/api/v1/conversations/${convId}/messages`)
 }
 
+export function getResumeState(convId) {
+  return request(`/api/v1/conversations/${convId}/resume`)
+}
+
 // ==================== 对话 CRUD ====================
 
 // 修改对话标题或所属项目

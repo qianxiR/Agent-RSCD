@@ -49,6 +49,7 @@ async function ensureHistoryLoaded(convId) {
   try {
     const data = await getConvMessages(convId)
     store.loadHistory(convId, data.messages || [])
+    useWebSocket().tryResume(convId)
   } catch (e) {
     console.warn('[chat] 历史加载失败:', convId, e)
   }

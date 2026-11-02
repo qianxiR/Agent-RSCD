@@ -32,11 +32,16 @@ def test_snapshot_roundtrip() -> None:
         snapshot.persist_start_idx = 2
         snapshot.active_tool_names = ["search_tools", "load_tool"]
         snapshot.messages = [serialize_message(HumanMessage(content="恢复测试"))]
+        snapshot.tasks = [{"id": 1, "status": "running"}]
+        snapshot.stream_state = {"content": "partial", "chunks": ["par", "tial"], "tool_calls": []}
         assert save_snapshot(snapshot)
         loaded = load_resumable(cid)
         assert loaded is not None
         assert loaded.run_id == snapshot.run_id
         assert loaded.messages[0]["content"] == "恢复测试"
+        assert loaded.tasks[0]["status"] == "running"
+        assert loaded.stream_state["content"] == "partial"
+        assert loaded.stream_state["chunks"] == ["par", "tial"]
         assert mark_status(snapshot.run_id, "completed")
         assert load_resumable(cid) is None
     finally:

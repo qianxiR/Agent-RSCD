@@ -35,7 +35,7 @@ import logging
 import asyncio
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 from pydantic import BaseModel, Field
 
 from langchain_core.messages import (
@@ -838,6 +838,17 @@ def _classify_llm_error(exc: Exception) -> str:
     return "others"
 
 
+def _json_safe_tool_chunks(chunks: List[Any]) -> List[Dict[str, Any]]:
+    """把 LangChain tool_call_chunks 转成可 JSON 化的 dict 列表。"""
+    result = []
+    for item in chunks or []:
+        try:
+            result.append(dict(item))
+        except Exception:
+            result.append({"raw": str(item)})
+    return result
+
+
 class AgentChatService:
     """
     Agent 聊天服务 - 核心引擎
@@ -866,31 +877,38 @@ class AgentChatService:
         session_id: str,
         conversation_id: str,
         ws_manager: WebSocketManager,
+        on_partial: Optional[Callable[[str, list, list], None]] = None,
     ) -> AIMessage:
         """
         流式调用 LLM 并实时推送 thinking token (WebSocket 模式)
         - 入参: llm 实例、消息列表、session_id、conversation_id、ws_manager
         - 方法: astream 逐 chunk 推送 thinking 事件
         - 出参: 累积完成的 AIMessage (含 content + tool_calls)
-
-        流式处理逻辑:
-          LLM 的 astream 会按 token 生成 AIMessageChunk:
-          - 每个 chunk 含 content (文本片段) 或 tool_call_chunks (工具调用片段)
-          - 将所有 chunk 累积, 最终合并为完整的 AIMessage
-          - 在累积过程中, 每个 content chunk 都作为 thinking 推送到前端
         """
         collected_chunks: List[AIMessageChunk] = []
+        partial_content = ""
+        partial_chunks: List[str] = []
+        partial_tool_calls: List[Any] = []
 
         async for chunk in llm.astream(all_messages):
             collected_chunks.append(chunk)
 
-            # 推送 thinking token (LLM 当前生成的文本片段)
             if chunk.content:
+                partial_content += chunk.content
+                partial_chunks.append(chunk.content)
                 await ws_manager.send_to_session(session_id, {
                     "type": "thinking",
                     "content": chunk.content,
-                    "conversation_id": conversation_id,  # ★ 多对话路由
+                    "conversation_id": conversation_id,
                 })
+
+            tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
+            if tool_chunks:
+                partial_tool_calls.extend(_json_safe_tool_chunks(tool_chunks))
+
+            # 每 8 个 chunk 持久化一次原始流式 token，供断点恢复/排查
+            if on_partial is not None and len(collected_chunks) % 8 == 0:
+                on_partial(partial_content, partial_tool_calls, partial_chunks)
 
             # ★ 每个 chunk 之间显式检查是否被取消 (httpx 底层可能不检测)
             await asyncio.sleep(0)
@@ -1199,6 +1217,7 @@ class AgentChatService:
             iteration = resume_state.iteration if resume_state is not None else 0
             run_snapshot = resume_state or RunSnapshot.new(conversation_id, session_id)
             run_snapshot.status = "running"
+            stream_buffer: Dict[str, Any] = {"content": "", "chunks": [], "tool_calls": []}
 
             def _save_run_state(status: str = "running", last_tool=None, error: str = "") -> None:
                 """保存模型运行时快照（消息 + 计划 + 工具 + 迭代位置）。"""
@@ -1209,9 +1228,32 @@ class AgentChatService:
                 run_snapshot.active_tool_names = sorted(active_tool_names)
                 run_snapshot.plan = current_plan
                 run_snapshot.messages = [serialize_message(m) for m in all_messages]
+                run_snapshot.stream_state = dict(stream_buffer)
+                try:
+                    run_snapshot.tasks = agent_db.list_tasks(conversation_id, limit=10)
+                except Exception:
+                    run_snapshot.tasks = []
                 run_snapshot.last_tool = last_tool
                 run_snapshot.error = error
                 save_snapshot(run_snapshot)
+
+            def _on_stream_partial(content: str, tool_calls: list, chunks: list) -> None:
+                """流式 token 快照：每 8 个 chunk 更新一次，供断点回放。"""
+                stream_buffer["content"] = content
+                stream_buffer["chunks"] = chunks
+                stream_buffer["tool_calls"] = tool_calls
+                _save_run_state()
+
+            # 如果恢复时存在未完成的流式 token，先回放给前端，再重新生成该轮
+            if resume_state is not None:
+                partial = (resume_state.stream_state or {}).get("content") or ""
+                if partial:
+                    await ws_manager.send_to_session(session_id, {
+                        "type": "thinking",
+                        "content": partial,
+                        "conversation_id": conversation_id,
+                    })
+                stream_buffer = {"content": "", "chunks": [], "tool_calls": []}
 
             _save_run_state()
             while True:
@@ -1232,8 +1274,12 @@ class AgentChatService:
                         active_llm = llm_without_tools if disable_tools_next_turn else llm
                         disable_tools_next_turn = False
                         ai_message = await self._stream_llm_thinking_ws(
-                            active_llm, all_messages, session_id, conversation_id, ws_manager
+                            active_llm, all_messages, session_id, conversation_id, ws_manager,
+                            on_partial=_on_stream_partial,
                         )
+                        stream_buffer["content"] = ""
+                        stream_buffer["chunks"] = []
+                        stream_buffer["tool_calls"] = []
                         if pending_repair_audit:
                             actual_decision = extract_actual_decision(ai_message)
                             audit = audit_repair_plan_following(
@@ -1664,36 +1710,49 @@ class AgentChatService:
                 _save_run_state()
 
         except asyncio.CancelledError:
-            # ★ v2.1: 被用户停止 → 回滚到 checkpoint, 不向上传播 (避免影响同 session 其他对话)
-            logger.info(f"[WS] Task cancelled by user: conv={conversation_id}, checkpoint={checkpoint_id}")
-            if checkpoint_id is not None:
-                deleted = agent_db.rollback_to_checkpoint(conversation_id, checkpoint_id)
-                logger.info(f"[WS] Rollback: hidden {deleted} messages after id={checkpoint_id}")
+            # ★ 区分“用户主动停止”和“连接断开”：断开保留 paused 快照供 resume_chat 恢复
+            cancel_reason = ws_manager.get_cancel_reason(session_id, conversation_id)
+            paused_run = cancel_reason == "disconnect"
+            logger.info(
+                "[WS] Task cancelled: conv=%s, reason=%s, checkpoint=%s",
+                conversation_id, cancel_reason, checkpoint_id,
+            )
+
+            if not paused_run:
+                # 用户主动停止：回滚到 checkpoint，标记 stopped
+                if checkpoint_id is not None:
+                    deleted = agent_db.rollback_to_checkpoint(conversation_id, checkpoint_id)
+                    logger.info(f"[WS] Rollback: hidden {deleted} messages after id={checkpoint_id}")
+                else:
+                    # 全新会话且无任何已保存消息 → 删除空的会话记录
+                    agent_db.delete_conversation(conversation_id)
+                    logger.info(f"[WS] Rollback: deleted empty conversation {conversation_id}")
+                    try:
+                        from backend.agent.tools.sandbox_manager import sandbox_manager
+                        asyncio.create_task(
+                            sandbox_manager.cleanup_by_conversation(conversation_id, _project_id or "")
+                        )
+                    except Exception as sb_err:
+                        logger.warning(f"[WS] 沙盒回收调度失败 conv={conversation_id}: {sb_err}")
+                agent_db.update_conversation_status(conversation_id, "stopped")
+                if "run_snapshot" in locals():
+                    try:
+                        _save_run_state(status="stopped")
+                    except Exception as snap_err:
+                        logger.warning(f"[RunState] 标记停止快照失败 conv={conversation_id}: {snap_err}")
             else:
-                # 全新会话且无任何已保存消息 → 删除空的会话记录
-                agent_db.delete_conversation(conversation_id)
-                logger.info(f"[WS] Rollback: deleted empty conversation {conversation_id}")
-                # ★ 会话级沙盒回收: 空会话被删, 异步停止其沙盒容器 (若有)。
-                #   全新会话首轮取消一般还没建容器, 但为对称仍挂回收; best-effort, 不阻塞回滚。
-                try:
-                    from backend.agent.tools.sandbox_manager import sandbox_manager
-                    asyncio.create_task(
-                        sandbox_manager.cleanup_by_conversation(conversation_id, _project_id or "")
-                    )
-                except Exception as sb_err:
-                    logger.warning(f"[WS] 沙盒回收调度失败 conv={conversation_id}: {sb_err}")
+                # 连接断开：不删除已提交消息，快照置 paused，等待前端重连 resume_chat
+                if checkpoint_id is not None:
+                    agent_db.rollback_to_checkpoint(conversation_id, checkpoint_id)
+                agent_db.update_conversation_status(conversation_id, "paused")
+                if "run_snapshot" in locals():
+                    try:
+                        _save_run_state(status="paused")
+                    except Exception as snap_err:
+                        logger.warning(f"[RunState] 标记暂停快照失败 conv={conversation_id}: {snap_err}")
 
-            agent_db.update_conversation_status(conversation_id, "stopped")
-            if "run_snapshot" in locals():
-                try:
-                    _save_run_state(status="stopped")
-                except Exception as snap_err:
-                    logger.warning(f"[RunState] 标记停止快照失败 conv={conversation_id}: {snap_err}")
-
-            # ★ 对话结束时提取一次长期记忆 (全量分析; 取代每轮提取, 降低 LLM 调用成本)
-            #   与下面 _async_self_correction_scan 并行两路: 本路偏好/事实, 自纠路错误案例.
-            #   enable_preference_extraction 默认 true; 设 false 时本路跳过, 只留错误案例学习.
-            if checkpoint_id is not None:
+            # ★ 只有用户主动停止才做全量长期记忆提取；断开留待恢复后完成
+            if not paused_run and checkpoint_id is not None:
                 try:
                     saved = await memory_mod.extract_and_save_long_term_memory(
                         conversation_id, req.user_id, all_messages, 0
@@ -1706,7 +1765,6 @@ class AgentChatService:
                         )
                 except Exception as e:
                     logger.error(f"[Memory] 对话结束长期记忆提取失败 conv={conversation_id}: {e}", exc_info=True)
-                # ★ 自纠捕捉: 中断停止也要扫描 (用户可能在 Agent 自纠过程中停止)
                 try:
                     asyncio.create_task(_async_self_correction_scan(
                         conversation_id, req.user_id, list(all_messages),
@@ -1735,11 +1793,13 @@ class AgentChatService:
 
         finally:
             # ★ 清理: 从 ws_manager 移除已完成/已取消的任务注册
+            ws_manager.clear_cancel_reason(session_id, conversation_id)
             if session_id in ws_manager.active_tasks:
                 ws_manager.active_tasks[session_id].pop(conversation_id, None)
                 if not ws_manager.active_tasks[session_id]:
                     del ws_manager.active_tasks[session_id]
             logger.info(f"[WS] Task cleaned up: session={session_id}, conv={conversation_id}")
+
 
 
 

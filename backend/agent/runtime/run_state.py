@@ -89,6 +89,8 @@ class RunSnapshot:
     active_tool_names: List[str] = field(default_factory=list)
     plan: Optional[Dict[str, Any]] = None
     messages: List[Dict[str, Any]] = field(default_factory=list)
+    tasks: List[Dict[str, Any]] = field(default_factory=list)
+    stream_state: Dict[str, Any] = field(default_factory=dict)
     last_tool: Optional[Dict[str, Any]] = None
     error: str = ""
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -126,6 +128,8 @@ def _ensure_table() -> bool:
                         active_tool_names JSONB,
                         plan              JSONB,
                         messages          JSONB,
+                        tasks             JSONB,
+                        stream_state      JSONB,
                         last_tool         JSONB,
                         error             TEXT,
                         updated_at        TIMESTAMPTZ DEFAULT now()
@@ -135,6 +139,8 @@ def _ensure_table() -> bool:
                     CREATE INDEX IF NOT EXISTS idx_agent_run_conv
                     ON agent_run(conversation_id, updated_at DESC)
                 """)
+                cur.execute("ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS tasks JSONB")
+                cur.execute("ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS stream_state JSONB")
             conn.commit()
             _TABLE_READY = True
             return True
@@ -159,8 +165,8 @@ def save_snapshot(snapshot: RunSnapshot) -> bool:
                     """INSERT INTO agent_run (
                            run_id, conversation_id, session_id, status, iteration,
                            checkpoint_id, persist_start_idx, active_tool_names,
-                           plan, messages, last_tool, error, updated_at
-                       ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                           plan, messages, tasks, stream_state, last_tool, error, updated_at
+                       ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
                        ON CONFLICT (run_id) DO UPDATE SET
                            status = EXCLUDED.status,
                            iteration = EXCLUDED.iteration,
@@ -169,6 +175,8 @@ def save_snapshot(snapshot: RunSnapshot) -> bool:
                            active_tool_names = EXCLUDED.active_tool_names,
                            plan = EXCLUDED.plan,
                            messages = EXCLUDED.messages,
+                           tasks = EXCLUDED.tasks,
+                           stream_state = EXCLUDED.stream_state,
                            last_tool = EXCLUDED.last_tool,
                            error = EXCLUDED.error,
                            updated_at = now()""",
@@ -177,6 +185,7 @@ def save_snapshot(snapshot: RunSnapshot) -> bool:
                         snapshot.status, snapshot.iteration, snapshot.checkpoint_id,
                         snapshot.persist_start_idx, Json(snapshot.active_tool_names),
                         Json(snapshot.plan or {}), Json(snapshot.messages),
+                        Json(snapshot.tasks), Json(snapshot.stream_state or {}),
                         Json(snapshot.last_tool or {}), snapshot.error,
                     ),
                 )
@@ -199,7 +208,7 @@ def load_resumable(conversation_id: str) -> Optional[RunSnapshot]:
                 cur.execute(
                     """SELECT run_id, conversation_id, session_id, status, iteration,
                               checkpoint_id, persist_start_idx, active_tool_names,
-                              plan, messages, last_tool, error, updated_at
+                              plan, messages, tasks, stream_state, last_tool, error, updated_at
                        FROM agent_run
                        WHERE conversation_id = %s AND status IN ('running', 'paused')
                        ORDER BY updated_at DESC LIMIT 1""",
@@ -215,9 +224,11 @@ def load_resumable(conversation_id: str) -> Optional[RunSnapshot]:
                 active_tool_names=list(row[7] or []),
                 plan=row[8] or None,
                 messages=list(row[9] or []),
-                last_tool=row[10] or None,
-                error=row[11] or "",
-                updated_at=row[12].isoformat() if row[12] else "",
+                tasks=list(row[10] or []),
+                stream_state=row[11] or {},
+                last_tool=row[12] or None,
+                error=row[13] or "",
+                updated_at=row[14].isoformat() if row[14] else "",
             )
         except Exception:
             return None

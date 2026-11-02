@@ -1891,3 +1891,27 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `resume_chat` 快照恢复 smoke：`session_started → thinking → content → done`；
 - 普通聊天快照落库：`agent_run.status=completed`；
 - `memory_context` 不再直接调用 `agent_db` 的摘要/历史/长期记忆方法。
+
+---
+
+## 五十七、阶段 68（2026-11-02）：断点恢复四项收尾
+
+- **停止/断开区分**：
+  - `ws_manager.cancel_task` 增加 `reason`；
+  - 用户 `stop_chat` → `stopped`；
+  - WebSocket 断开 → `paused`，保留 `agent_run` 快照供恢复；
+- **前端自动恢复**：
+  - 新增 `GET /api/v1/conversations/{id}/resume`；
+  - `useWebSocket.tryResume()` 在连接建立 / 切换会话后检查并发送 `resume_chat`；
+- **任务账本嵌入快照**：
+  - `agent_run.tasks JSONB` 保存最近 10 条 `ai_task`；
+  - 与 `plan` / `messages` 一起恢复；
+- **流式 token 快照**：
+  - `agent_run.stream_state JSONB` 保存累计 content、chunk 列表、tool_call_chunks；
+  - 每 8 个 chunk 更新一次；
+  - 恢复时先向前端回放 partial content，再重新生成当前轮（不伪装成 provider 级 token 续传）。
+- 验证：
+  - `tests/run_state_test.py` 覆盖 tasks/stream_state；
+  - 断开 smoke：`agent_run.status=paused`；
+  - 主动停止 smoke：`stopped`；
+  - 前端 `vite build` 通过。

@@ -36,6 +36,8 @@ class WebSocketManager:
         self.frontend_results: Dict[str, Dict[str, Any]] = {}
         # ★ session_id → {conversation_id → asyncio.Task} (多对话并行)
         self.active_tasks: Dict[str, Dict[str, asyncio.Task]] = {}
+        # ★ (session, conversation) → 取消原因: user / disconnect
+        self.cancel_reasons: Dict[str, Dict[str, str]] = {}
 
     def register_task(self, session_id: str, conversation_id: str, task: asyncio.Task):
         """
@@ -47,11 +49,12 @@ class WebSocketManager:
         self.active_tasks[session_id][conversation_id] = task
         logger.info(f"Task registered: session={session_id}, conv={conversation_id}")
 
-    def cancel_task(self, session_id: str, conversation_id: str = None) -> int:
+    def cancel_task(self, session_id: str, conversation_id: str = None, reason: str = "user") -> int:
         """
         取消指定 session 的活跃任务。
         - conversation_id 为 None: 取消该 session 下所有活跃任务
         - conversation_id 指定: 只取消该对话的任务
+        - reason: user(主动停止) / disconnect(连接断开)
         返回实际取消的任务数。
         """
         if session_id not in self.active_tasks:
@@ -59,14 +62,16 @@ class WebSocketManager:
             return 0
 
         cancelled_count = 0
+        reasons = self.cancel_reasons.setdefault(session_id, {})
 
         if conversation_id:
             # 取消指定对话
             task = self.active_tasks[session_id].pop(conversation_id, None)
             if task and not task.done():
+                reasons[conversation_id] = reason
                 task.cancel()
                 cancelled_count = 1
-                logger.info(f"Task cancelled: session={session_id}, conv={conversation_id}")
+                logger.info(f"Task cancelled: session={session_id}, conv={conversation_id}, reason={reason}")
             else:
                 logger.info(f"No active task to cancel: session={session_id}, conv={conversation_id}")
             # 清理空 session 条目
@@ -76,12 +81,25 @@ class WebSocketManager:
             # 取消全部
             for conv_id, task in list(self.active_tasks[session_id].items()):
                 if not task.done():
+                    reasons[conv_id] = reason
                     task.cancel()
                     cancelled_count += 1
-                    logger.info(f"Task cancelled: session={session_id}, conv={conv_id}")
+                    logger.info(f"Task cancelled: session={session_id}, conv={conv_id}, reason={reason}")
             del self.active_tasks[session_id]
 
         return cancelled_count
+
+    def get_cancel_reason(self, session_id: str, conversation_id: str) -> str:
+        """读取并清除取消原因；没有记录时默认 user。"""
+        reasons = self.cancel_reasons.get(session_id, {})
+        return reasons.pop(conversation_id, "user")
+
+    def clear_cancel_reason(self, session_id: str, conversation_id: str) -> None:
+        """清理取消原因。"""
+        reasons = self.cancel_reasons.get(session_id, {})
+        reasons.pop(conversation_id, None)
+        if not reasons:
+            self.cancel_reasons.pop(session_id, None)
 
     def get_active_conversations(self, session_id: str) -> List[str]:
         """
@@ -133,8 +151,10 @@ class WebSocketManager:
         self.connections.pop(session_id, None)
         # 清理该 session 的所有活跃任务
         if session_id in self.active_tasks:
+            reasons = self.cancel_reasons.setdefault(session_id, {})
             for conv_id, task in list(self.active_tasks[session_id].items()):
                 if not task.done():
+                    reasons[conv_id] = "disconnect"
                     task.cancel()
                     logger.info(f"Task cancelled on disconnect: session={session_id}, conv={conv_id}")
             del self.active_tasks[session_id]
