@@ -24,24 +24,24 @@ _TOOL_CATEGORY_LABELS = {
     "memory": ("记忆管理", "查看/清空长期记忆与会话摘要 (AI 自身的记忆系统)"),
     "agent_team": ("专业 Worker 调度", "派发 verification_agent 做客观验收; report_agent 由系统在分割完成后自动派发, 主控用 query_agent_task 查阅报告产物; 查询或取消 worker 任务"),
     "external": ("外部工具箱", "复用 E:\\1代码\\系统\\Tools 的栅格元信息、光谱指数、掩膜矢量化与空间分析能力"),
+    "discovery": ("工具发现", "按需检索并加载工具完整 schema"),
     "demo": ("演示工具", "本地测试工具 (时间/数学/UI面板等, 不依赖外部服务)"),
 }
 
 
-def build_tools_catalog() -> str:
+def build_tools_catalog(names=None) -> str:
     """
     入参:
-      - 无显式入参, 从全局工具注册表读取当前已暴露给 LLM 的工具。
+        - names: 可选工具名集合；为空时输出完整 LLM 白名单。
     方法:
-      - 按工具 category 分组。
-      - 每个工具只输出名称和 docstring 首行。
-      - 参数 schema 由 llm.bind_tools() 注入, 此处不重复展开。
+        - 按工具 category 分组。
+        - 每个工具只输出名称和 docstring 首行；完整 schema 由按需加载提供。
     出参:
-      - str, 可直接拼入 system prompt 的工具能力目录。
+        - str, 可直接拼入 system prompt 的工具能力目录。
     """
     from backend.agent.tools.registry import get_tools_catalog_for_llm, get_tool_category_map
 
-    all_tools = get_tools_catalog_for_llm()
+    all_tools = get_tools_catalog_for_llm(names)
     cat_map = get_tool_category_map()
 
     grouped: dict = {}

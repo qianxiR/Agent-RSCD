@@ -218,6 +218,17 @@ class Settings:
         default_factory=lambda: _env("AGENT_PLAN_FIRST", "false").lower() == "true"
     )
 
+    # ==================== 动态工具注入 ====================
+    # true: 首轮按用户目标检索并只绑定少量工具 + search_tools/load_tool；
+    #       模型需要其他工具时先 search_tools，再 load_tool 加载完整 schema。
+    # false: 保持旧行为，绑定全部 LLM 白名单工具。
+    agent_dynamic_tools_enabled: bool = field(
+        default_factory=lambda: _env("AGENT_DYNAMIC_TOOLS", "true").lower() == "true"
+    )
+    agent_dynamic_tools_limit: int = field(
+        default_factory=lambda: int(_env("AGENT_DYNAMIC_TOOLS_LIMIT", "12"))
+    )
+
     # ==================== WebSocket ====================
     ws_heartbeat_interval: int = 30
     ws_frontend_result_timeout: int = 120

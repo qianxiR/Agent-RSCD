@@ -81,6 +81,9 @@ _LLM_EXPOSED_TOOL_NAMES = {
     "external_raster_to_vector",
     "external_spatial_operation",
     "external_knowledge_query",
+    # 按需工具发现
+    "search_tools",
+    "load_tool",
 }
 
 _AGENT_ROLE_EXPOSED_TOOL_NAMES = {
@@ -121,28 +124,44 @@ def get_tool_category_map() -> Dict[str, str]:
     return dict(_tool_category_map)
 
 
-def get_tools_for_llm() -> list:
+def get_tools_for_llm(names=None, compact: bool = False) -> list:
     """
     获取供 LLM bind_tools 使用的工具列表 (LangChain @tool 对象)。
-    入参: 无。
-    方法: 从完整注册表中按 _LLM_EXPOSED_TOOL_NAMES 白名单筛选, 保留注册顺序, 隐藏非核心/高噪声工具。
-    出参: 已收窄的 StructuredTool 列表; 未注册的白名单项会被自然跳过, 支持可选依赖降级。
+    入参:
+        - names: 可选工具名集合；为空时返回完整白名单。
+        - compact: True 时缩短 description，仅用于绑定，执行仍取完整工具。
+    方法: 从完整注册表中按白名单筛选；可选按 names 过滤并压缩 description。
+    出参: StructuredTool 列表。
     """
     all_tools = get_all_tools()
     exposed = _LLM_EXPOSED_TOOL_NAMES | _DYNAMIC_EXPOSED_TOOL_NAMES
-    return [tool for name, tool in all_tools.items() if name in exposed]
+    selected = set(names) if names is not None else None
+    result = [
+        tool for name, tool in all_tools.items()
+        if name in exposed and (selected is None or name in selected)
+    ]
+    if compact:
+        from backend.agent.tools.schema import compact_tool
+
+        result = [compact_tool(tool) for tool in result]
+    return result
 
 
-def get_tools_catalog_for_llm() -> Dict[str, Callable]:
+def get_tools_catalog_for_llm(names=None) -> Dict[str, Callable]:
     """
     获取用于 system prompt 工具目录的白名单工具 dict。
-    入参: 无。
-    方法: 与 get_tools_for_llm 使用同一白名单, 确保 prompt 目录和 bind_tools 真实能力一致。
-    出参: {tool_name: StructuredTool} 映射, 仅包含当前允许 LLM 主动选择的工具。
+    入参:
+        - names: 可选工具名集合；为空时返回完整白名单。
+    方法: 与 get_tools_for_llm 使用同一白名单，可按 names 过滤。
+    出参: {tool_name: StructuredTool} 映射。
     """
     all_tools = get_all_tools()
     exposed = _LLM_EXPOSED_TOOL_NAMES | _DYNAMIC_EXPOSED_TOOL_NAMES
-    return {name: tool for name, tool in all_tools.items() if name in exposed}
+    selected = set(names) if names is not None else None
+    return {
+        name: tool for name, tool in all_tools.items()
+        if name in exposed and (selected is None or name in selected)
+    }
 
 
 def get_llm_exposed_tool_names() -> set:

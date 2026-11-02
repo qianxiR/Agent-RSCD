@@ -235,6 +235,7 @@ def build_context_messages(
     llm,
     user_id: str = "study_user",
     images: Optional[List[Dict[str, Any]]] = None,
+    tool_names=None,
 ) -> Tuple[List[BaseMessage], int]:
     """
     构建发送给 LLM 的完整消息列表, 并返回本轮新增起点 index。
@@ -280,11 +281,13 @@ def build_context_messages(
         user_profile=user_profile_text,
         task_state=task_state_text,
         plan_state=plan_state_text,
+        tool_names=tool_names,
     ) if not settings.enable_context_cache else build_system_prompt_blocks(
         conversation_summary=summary_text,
         user_profile=user_profile_text,
         task_state=task_state_text,
         plan_state=plan_state_text,
+        tool_names=tool_names,
     )
 
     # 拼装: [System] + history + [Human]

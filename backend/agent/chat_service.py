@@ -1029,10 +1029,23 @@ class AgentChatService:
         try:
             # 获取工具并绑定 LLM（MCP 工具按 TTL 懒加载，失败不阻断聊天）
             from backend.agent.mcp.registry import ensure_mcp_tools_loaded
+            from backend.agent.tools.discovery import select_initial_tool_names
+
             await ensure_mcp_tools_loaded()
-            tools = get_tools_for_llm()
+            selected_tool_names = select_initial_tool_names(req.prompt, req.images)
+            active_tool_names = set(selected_tool_names)
+            tools = get_tools_for_llm(
+                selected_tool_names,
+                compact=settings.agent_dynamic_tools_enabled,
+            )
+            logger.info(
+                "[Tools] dynamic=%s selected=%s",
+                settings.agent_dynamic_tools_enabled,
+                selected_tool_names,
+            )
             llm = create_responses_llm_with_tools(tools, req.model, req.temperature)
             llm_without_tools = create_responses_llm(req.model, req.temperature)
+            tools_dirty = False
             disable_tools_next_turn = False
             pending_repair_audit = None
             pending_repair_attempt = None
@@ -1081,6 +1094,7 @@ class AgentChatService:
                 llm,
                 user_id=req.user_id,
                 images=input_images,
+                tool_names=selected_tool_names,
             )
 
             # ★ v2.3: 立即持久化用户消息, 防止停止时丢失上下文
@@ -1409,6 +1423,13 @@ class AgentChatService:
                                 "tool": tool_name,
                             }
 
+                    # ★ 按需工具：load_tool 成功后把目标工具加入下一轮绑定集合
+                    if tool_name == "load_tool" and isinstance(tool_result, dict) and tool_result.get("type") != "error":
+                        loaded_tool = ((tool_result.get("data") or {}).get("tool") or {}).get("name")
+                        if loaded_tool and loaded_tool not in active_tool_names:
+                            active_tool_names.add(loaded_tool)
+                            tools_dirty = True
+
                     # ★ P3: 重工具收尾 — 按成败更新任务状态 + 记录耗时
                     if _task_id is not None:
                         import time as _time
@@ -1565,6 +1586,19 @@ class AgentChatService:
                             "source_tool": tool_name,
                             "repair_plan": validation.get("repair_plan") or {},
                         }
+
+                # ★ 按需工具：本轮 load_tool 新增了工具，下一轮重新绑定完整 schema
+                if tools_dirty:
+                    logger.info("[Tools] load_tool 扩展绑定: %s", sorted(active_tool_names))
+                    llm = create_responses_llm_with_tools(
+                        get_tools_for_llm(
+                            active_tool_names,
+                            compact=settings.agent_dynamic_tools_enabled,
+                        ),
+                        req.model,
+                        req.temperature,
+                    )
+                    tools_dirty = False
 
         except asyncio.CancelledError:
             # ★ v2.1: 被用户停止 → 回滚到 checkpoint, 不向上传播 (避免影响同 session 其他对话)

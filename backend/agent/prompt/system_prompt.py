@@ -26,6 +26,7 @@ def build_system_prompt(
     user_profile: str = None,
     task_state: str = None,
     plan_state: str = None,
+    tool_names=None,
 ) -> str:
     """
     入参:
@@ -40,7 +41,7 @@ def build_system_prompt(
       - str, 完整 system prompt 字符串。
     """
     return _static_template_text().format(
-        tools_catalog=build_tools_catalog(),
+        tools_catalog=build_tools_catalog(tool_names),
         decision_table=build_decision_table(),
         dynamic_section=build_dynamic_section(conversation_summary, user_profile, task_state, plan_state),
     )
@@ -51,6 +52,7 @@ def build_system_prompt_blocks(
     user_profile: str = None,
     task_state: str = None,
     plan_state: str = None,
+    tool_names=None,
 ) -> list:
     """
     入参:
@@ -65,7 +67,7 @@ def build_system_prompt_blocks(
       - list[dict], OpenAI content-blocks 格式的 system prompt 内容。
     """
     static_text = _static_template_text().format(
-        tools_catalog=build_tools_catalog(),
+        tools_catalog=build_tools_catalog(tool_names),
         decision_table=build_decision_table(),
         dynamic_section="",
     )

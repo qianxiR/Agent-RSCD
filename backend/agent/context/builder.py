@@ -22,10 +22,11 @@ class ContextBuilder:
         llm: Any,
         user_id: str = "",
         images: Optional[List[Dict[str, Any]]] = None,
+        tool_names=None,
     ) -> Tuple[List[Any], int]:
         """构建 [System]+history+Human 消息列表，返回 (messages, 本轮起点)。"""
         return memory_context.build_context_messages(
-            conversation_id, prompt, llm, user_id=user_id, images=images
+            conversation_id, prompt, llm, user_id=user_id, images=images, tool_names=tool_names
         )
 
     def persist_turn(self, conversation_id: str, messages: List[Any], start_idx: int) -> None:

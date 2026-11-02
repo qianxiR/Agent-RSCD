@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 from backend.agent.tools.registry import register_tool
 from backend.agent.tools._paths import (
     session_subpath, session_subdirs, short_conv, rand_suffix,
@@ -290,8 +291,46 @@ def _build_base_layer_params(image_path: str, cls_tag: str) -> dict:
         return {}
 
 
+class SegmentImageArgs(BaseModel):
+    """segment_image 的参数契约。"""
+
+    image_path: str = Field(
+        ...,
+        description="本地影像路径；支持绝对路径或 agent-files/ 相对路径",
+    )
+    classes: str = Field(
+        "",
+        description="英文类别 + 英文同义词；分号分类别，逗号分同义词；留空使用默认类别",
+    )
+    referring_expression: str = Field(
+        "",
+        description="可选，指代式分割表达；classes 为空时使用",
+    )
+
+
+class DetectChangeArgs(BaseModel):
+    """detect_change 的参数契约。"""
+
+    t1_path: str = Field(..., description="T1 时相影像的本地路径")
+    t2_path: str = Field(..., description="T2 时相影像的本地路径")
+    classes: str = Field(
+        "",
+        description="英文类别 + 英文同义词；分号分类别，逗号分同义词；留空使用默认类别",
+    )
+
+
+class UnderstandImageArgs(BaseModel):
+    """understand_image 的参数契约。"""
+
+    image_path: str = Field(..., description="本地影像路径")
+    question: str = Field(
+        "请描述这张影像中的地物内容和空间分布特征。",
+        description="希望模型回答的影像理解问题",
+    )
+
+
 @register_tool("samseg")
-@tool
+@tool(args_schema=SegmentImageArgs)
 def segment_image(
     image_path: str,
     classes: str = "",
@@ -517,7 +556,7 @@ def segment_image(
 
 
 @register_tool("samseg")
-@tool
+@tool(args_schema=DetectChangeArgs)
 def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, Any]:
     """
     对两张不同时期的图片 (双时相) 做变化检测, 找出哪些区域发生了地物变化, 在前端展示变化图。
@@ -871,7 +910,7 @@ def _image_to_data_uri(image_path: str) -> Optional[str]:
 
 
 @register_tool("vlm")
-@tool
+@tool(args_schema=UnderstandImageArgs)
 def understand_image(image_path: str, question: str = "请描述这张影像中的地物内容和空间分布特征。") -> Dict[str, Any]:
     """
     对一张遥感影像进行视觉理解与解译分析: 真正"看图"回答用户关于影像内容的问题。

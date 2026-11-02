@@ -1833,3 +1833,25 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - 工具参数、具体路径、前端实现细节改为引用工具契约与 `path_map`，减少静态耦合；
 - 动态上下文结构、顺序、来源不变；
 - 验证：`build_system_prompt()` / `build_system_prompt_blocks()` 正常，关键区块齐全。
+
+---
+
+## 五十五、阶段 66（2026-11-02）：工具 schema 与按需注入
+
+- 注册工具 **57 个**，LLM 暴露 **43 个**；
+- 新增 `agent/tools/schema.py`：
+  - 绑定时只使用短 description；
+  - `load_tool` 返回完整 description + parameters schema；
+- `segment_image` / `detect_change` / `understand_image` 增加显式 `args_schema`；
+- `search_tools` / `load_tool` 增加显式参数 Field 描述；
+- 新增 `agent/tools/discovery.py` + `discovery_tools.py`：
+  - 首轮按用户目标关键词选择少量工具；
+  - 默认保留核心解译工具和 `search_tools` / `load_tool`；
+  - `AGENT_DYNAMIC_TOOLS=true` 默认开启，`AGENT_DYNAMIC_TOOLS_LIMIT=12`；
+- ChatService 在 `load_tool` 后把目标工具加入绑定集合，下一轮重新 `bind_tools`；
+- Prompt 工具目录只拼接当前工具名 + 短描述，不重复参数 schema；
+- 效果（“提取建筑”示例）：
+  - 绑定工具从 43 个降到 6 个；
+  - tool schema 约 28,594 → **2,239 tokens**；
+  - 完整 system prompt 约 **2,932 tokens**；
+- 验证：`tests/tool_discovery_test.py` 通过；`build_system_prompt(tool_names=...)` 正常。

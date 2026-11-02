@@ -23,7 +23,7 @@
 Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主线，通过数据层、模型层、智能体层、服务平台四大板块的分层解耦与协同联动，形成从底层数据资源组织、核心智能能力构建到上层自然语言交互的完整闭环。
 
 - **数据层**是基础资源层，为系统提供高质量的空间与业务语料：通过 GeoServer 统一发布 WMS/WFS/WCS 栅格与矢量图层服务，PostgreSQL 业务库以「表名作参数」的通用 CRUD 承载业务数据，并预留知识库骨架（pgvector/向量服务可选），为上层的认知与推理提供可检索、可操作的数据底座。
-- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面以 `model/base.py` + `model/registry.py` 统一解译模型协议，把 **ProC-SAM3 分割/变化检测**（代码已 vendored，权重外置）、影像理解、后续检测/分类模型做成可插拔适配器。GeoServer 操作、数据库 CRUD、图层控制、沙盒、预处理、报表等能力则作为 **55 个注册工具（14 类）** 放在 `agent/tools/`，由 `@register_tool` 统一调度；Markdown 技能方案承载长任务编排。
+- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面以 `model/base.py` + `model/registry.py` 统一解译模型协议，把 **ProC-SAM3 分割/变化检测**（代码已 vendored，权重外置）、影像理解、后续检测/分类模型做成可插拔适配器。GeoServer 操作、数据库 CRUD、图层控制、沙盒、预处理、报表等能力则作为 **57 个注册工具（14 类）** 放在 `agent/tools/`，由 `@register_tool` 统一调度；Markdown 技能方案承载长任务编排。
 - **智能体层**作为应用承载，采用 **ReAct 推理 + 工具编排 + 可选 Plan-first**机制：流式输出思维链、无硬性工具轮次上限（用户停止兜底）、按 `conversation_id` 精确停止与消息回滚；执行前可由 PlanGraph 生成 DAG（变化检测已灰度），执行中由确定性 verification/repair/completion gate 约束。配合**三层记忆系统**（工作记忆、短期摘要、长期经验/教训）与显式上下文缓存，将大模型的「单次问答」升级为「持续推理、自主决策、长程协作」的智能体行为。
 - **服务平台**面向终端用户，通过 **WebSocket 全双工通道**实现前后端协同：以 `request_id` 配对完成「智能体发指令→前端执行渲染→回传结果」的闭环，支持同一连接多对话并行；前端集成聊天交互、**OpenLayers 地图容器**（影像/掩膜/矢量图层叠加 + WMS 图层 + GetFeatureInfo 属性弹窗 + 颜色图注）、数据表格面板，以及任务日志监控。
 
@@ -278,5 +278,7 @@ graph LR
 | 标准业务技能 | `backend/agent/skills/catalog.py` | 地物提取/变化检测/发布/空间分析/栅格 QA 的结构化 SkillSpec |
 | 标准 Harness | `backend/agent/harness/` | `HarnessContext` / `HarnessEvent` / `AgentHarness`，ChatHarness 适配现有 ChatService |
 | Prompt 独立存储 | `backend/agent/prompt_store/` | 唯一静态模板 `static_template2.md`；缺失直接报错，无代码兜底 |
+| 按需工具注入 | `backend/agent/tools/discovery.py` + `discovery_tools.py` | `AGENT_DYNAMIC_TOOLS=true` 时首轮只绑定少量工具；`search_tools` 检索、`load_tool` 加载完整 schema 后重绑 |
+| 工具 schema 压缩 | `backend/agent/tools/schema.py` | 绑定时使用短 description；`load_tool` 返回完整参数 schema |
 | Context 独立构建 | `backend/agent/context/builder.py` | 调用方只依赖 ContextBuilder，不直接依赖 memory_context |
 | Memory 独立存储 | `backend/agent/memory/stores.py` | Working/Summary/LongTerm 三层 store，memory_context 只做编排 |

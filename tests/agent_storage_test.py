@@ -28,7 +28,7 @@ def test_context_builder_delegates() -> None:
     original = memory_context.build_context_messages
     captured = {}
 
-    def fake(conversation_id, prompt, llm, user_id="", images=None):
+    def fake(conversation_id, prompt, llm, user_id="", images=None, tool_names=None):
         captured.update({"conversation_id": conversation_id, "prompt": prompt, "images": images})
         return ["msg"], 0
 

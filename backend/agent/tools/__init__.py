@@ -43,5 +43,8 @@ except ImportError as _e:
 from backend.agent.tools.memory_tools import *
 from backend.agent.tools.team_tools import *
 
+# 按需工具发现（search_tools / load_tool）
+from backend.agent.tools.discovery_tools import *  # noqa: F401,F403
+
 # 外部工具箱适配（E:\1代码\系统\Tools）
 from backend.integrations import external_tools  # noqa: F401,E402
