@@ -234,6 +234,68 @@ def apply_step_observation(
     return step
 
 
+def apply_node_outcome(
+    plan: Dict[str, Any],
+    step_id: str,
+    *,
+    status: str,
+    outputs: Optional[Dict[str, Any]] = None,
+    evidence: Optional[Dict[str, Any]] = None,
+    repair_plan: Optional[Dict[str, Any]] = None,
+    error: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    入参:
+      - plan/step_id: 当前计划与步骤 ID。
+      - status: passed / failed。
+      - outputs: 步骤产物（供下游占位符引用）。
+      - evidence: 验证证据。
+      - repair_plan: 修复计划（失败时）。
+      - error: 失败原因。
+    方法:
+      - Plan-and-Execute 专用的步骤回填：一次写入状态、产物、证据；
+      - passed → completed；failed 且带 repair_plan → blocked，否则 failed。
+    出参:
+      - 更新后的步骤；不存在返回 None。
+    """
+    step = next((item for item in plan.get("steps", []) if item.get("step_id") == step_id), None)
+    if step is None:
+        return None
+    step["outputs"] = outputs if isinstance(outputs, dict) else {}
+    if isinstance(evidence, dict) and evidence:
+        step.setdefault("evidence", []).append(dict(evidence))
+    if status == "passed":
+        step["status"] = "completed"
+        step["repair_plan"] = {}
+        step["next_action"] = "进入下一必需步骤或完成门检查"
+        step["error"] = ""
+    else:
+        repair = repair_plan if isinstance(repair_plan, dict) else {}
+        step["repair_plan"] = repair
+        step["status"] = "blocked" if repair else "failed"
+        step["error"] = (error or "")[:500]
+        step["next_action"] = repair.get("next_action") or "重规划剩余步骤"
+    step["updated_at"] = _now_iso()
+    plan["updated_at"] = step["updated_at"]
+    _refresh_completion_gate(plan)
+    return step
+
+
+def collect_completed_outputs(plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    入参: plan — 当前计划。
+    方法: 汇总所有 completed 步骤的 outputs，按 step_id 建索引。
+    出参: {step_id: outputs}；无计划返回空 dict。
+    """
+    if not isinstance(plan, dict):
+        return {}
+    return {
+        step.get("step_id"): step.get("outputs") or {}
+        for step in plan.get("steps") or []
+        if step.get("status") == "completed"
+    }
+
+
 def _refresh_completion_gate(plan: Dict[str, Any]) -> Dict[str, Any]:
     """
     入参:

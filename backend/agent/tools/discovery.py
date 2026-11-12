@@ -105,6 +105,11 @@ def get_tool_card(name: str) -> Optional[ToolCard]:
     return None
 
 
+def all_tool_cards() -> List[Dict[str, str]]:
+    """返回全部工具卡片（规划器使用，不含参数 schema）。"""
+    return [card.to_dict() for card in _all_cards()]
+
+
 def select_initial_tool_names(
     prompt: str,
     images: Optional[List[Dict[str, Any]]] = None,

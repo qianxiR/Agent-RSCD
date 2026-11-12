@@ -175,6 +175,127 @@ def maybe_build_plan_first_state(
         return None
 
 
+def _collect_context_inputs(prompt: str, images: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    入参: prompt / images。
+    方法: 抽取规划所需输入（发布文件、双时相、单图、类别）。
+    出参: context_inputs dict；没有任何影像或文件输入时返回 None。
+    """
+    publish_file = extract_publish_file(prompt)
+    if publish_file:
+        return {"file_path": publish_file, "classes": infer_classes_from_prompt(prompt)}
+
+    change_inputs = extract_change_inputs(images)
+    if change_inputs:
+        return {
+            **change_inputs,
+            "classes": infer_classes_from_prompt(prompt),
+        }
+    single_image = extract_single_image(images)
+    if single_image:
+        return {
+            "image_path": single_image,
+            "classes": infer_classes_from_prompt(prompt),
+        }
+    return None
+
+
+async def maybe_build_plan_state(
+    prompt: str,
+    images: List[Dict[str, Any]],
+    conversation_id: str,
+    user_id: str = "",
+    llm=None,
+    existing_plan: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    入参:
+      - prompt/images/conversation_id/user_id: 本轮请求上下文。
+      - llm: 未绑定工具的 LLM 实例，用于 LLM 规划。
+      - existing_plan: 已有计划；存在时不重建。
+    方法:
+      - 规划优先级：技能契约 > 确定性模板 > LLM 规划器；
+      - 每一步产物都过 validate_plan_graph，失败则继续下一种方式；
+      - 全部失败返回 None，由调用方回退自由 ReAct。
+    出参:
+      - 可持久化的 plan state；未构建成功返回 None。
+    """
+    if existing_plan:
+        return None
+
+    context_inputs = _collect_context_inputs(prompt, images) or {"classes": infer_classes_from_prompt(prompt)}
+    context_text = json.dumps(context_inputs, ensure_ascii=False)
+
+    from backend.agent.tools.registry import (  # 延迟导入，避免启动期重依赖
+        get_all_tools,
+        get_llm_exposed_tool_names,
+    )
+
+    available = set(get_all_tools().keys())
+    whitelist = get_llm_exposed_tool_names()
+
+    graph = None
+
+    # 1) 技能契约
+    try:
+        from backend.agent.skills.selector import select_skill
+        from backend.agent.planner.plan_adapter import skill_contract_to_graph
+
+        selection = select_skill(prompt, context_inputs=context_inputs)
+        if selection.get("selected_skill"):
+            graph = skill_contract_to_graph(selection, prompt, context_inputs, conversation_id)
+            if graph is not None:
+                validate_plan_graph(graph, available_tools=available, tool_whitelist=whitelist)
+    except (PlanValidationError, ValueError, OSError) as exc:
+        logger.info(f"[Planner] 技能计划不可用，继续下一种方式: {exc}")
+        graph = None
+
+    # 2) 确定性模板
+    if graph is None:
+        try:
+            from backend.agent.runtime.task_spec import build_task_spec
+
+            task_spec = build_task_spec(prompt, context_inputs, conversation_id=conversation_id)
+            graph = build_graph_for_task(task_spec.get("task_type") or "", prompt, context_inputs)
+            if graph is not None:
+                validate_plan_graph(graph, available_tools=available, tool_whitelist=whitelist)
+        except (PlanValidationError, ValueError, OSError) as exc:
+            logger.info(f"[Planner] 模板计划不可用，继续 LLM 规划: {exc}")
+            graph = None
+
+    # 3) LLM 规划器
+    if graph is None and llm is not None and getattr(settings, "agent_planner_llm_enabled", False):
+        try:
+            from backend.agent.planner.llm_planner import build_plan
+            from backend.agent.runtime.task_spec import build_task_spec
+            from backend.agent.tools.discovery import all_tool_cards
+
+            task_spec = build_task_spec(prompt, context_inputs, conversation_id=conversation_id)
+            graph = await build_plan(
+                prompt,
+                all_tool_cards(),
+                llm=llm,
+                task_spec=task_spec,
+                context_text=context_text,
+                available_tools=available,
+                tool_whitelist=whitelist,
+            )
+        except Exception as exc:  # 规划失败不得影响主链路
+            logger.warning(f"[Planner] LLM 规划失败，回退 ReAct: {exc}")
+            graph = None
+
+    if graph is None:
+        return None
+
+    try:
+        from backend.agent.planner.plan_adapter import graph_to_plan_state
+
+        return graph_to_plan_state(graph, conversation_id, context_inputs=context_inputs)
+    except (PlanValidationError, ValueError, OSError) as exc:
+        logger.warning(f"[Planner] 计划转换失败，回退 ReAct: {exc}")
+        return None
+
+
 def maybe_log_shadow_plan(
     prompt: str,
     images: List[Dict[str, Any]],

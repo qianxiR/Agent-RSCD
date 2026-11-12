@@ -1915,3 +1915,42 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
   - 断开 smoke：`agent_run.status=paused`；
   - 主动停止 smoke：`stopped`；
   - 前端 `vite build` 通过。
+
+---
+
+## 六十、阶段 71（2026-11-11）：Plan-and-Execute 执行模式
+
+### 60.1 结构
+
+- 新增 `Loop{Plan, ReAct}`：外层 `executor/plan_executor.py` 按 DAG 依赖调度步骤，内层 `executor/step_executor.py` 每步执行一次受限 ReAct；
+- 计划来源优先级：技能契约（`plan_adapter.skill_contract_to_graph`）> 确定性模板（`planner/templates.py`）> LLM 规划器（`planner/llm_planner.py`）；
+- 规划器：一次规划调用 + 一次校验修复；两次失败返回 `None`，回退自由 ReAct；
+- 单步执行：工具绑定收窄到本步 `tool`（无声明时按步骤目标检索），默认 6 轮上限，`agent_validation.status=passed` 即停；
+- 重规划：必需步骤失败时调用 `create_plan_revision` + `revise_plan`，保留 completed 步骤，`plan_version+1`、`parent_plan_id` 指向旧版；
+- 收尾：完成门放行后一次无工具 LLM 调用生成最终回复；预算/重规划上限触发时返回 `budget_exceeded` / `blocked`。
+
+### 60.2 基础设施抽取
+
+- `runtime/llm_stream.py`：`stream_llm()`，ChatService 流式方法改为委托；
+- `runtime/tool_call_runner.py`：`ToolCallRunner`，承载工具查找、async/sync 分派、异常规范化、重工具 `ai_task`、frontend_action 推送与等待、成功回调。
+
+### 60.3 配置
+
+- `AGENT_PLAN_EXECUTE`（默认 false）：新模式总开关；
+- `AGENT_PLANNER_LLM`（默认 true）、`AGENT_PLANNER_MODEL`（默认空，沿用主模型）；
+- `AGENT_PLAN_MAX_VERSIONS=2`、`AGENT_PLAN_MAX_TOOL_CALLS=20`、`AGENT_STEP_MAX_TURNS=6`。
+
+### 60.4 验证
+
+- `python tests/llm_planner_test.py`：合法计划、一次修复、放弃、重规划；
+- `python tests/step_executor_test.py`：单步通过、轮次耗尽、无 tool_calls 判失败；
+- `python tests/plan_execute_test.py`：成功路径、重规划保留 completed 步骤、重规划上限、工具预算；
+- `python tests/planner_test.py`、`python tests/plan_state_test.py`、`python tests/tool_discovery_test.py`、`python tests/harness_test.py` 通过；
+- `python -m compileall -q backend` 通过。
+
+### 60.5 边界
+
+- 开关关闭时主链路行为不变；
+- 步骤按依赖串行调度，未启用 `dag_executor` 并行批次；
+- 断点恢复仍走自由 ReAct 快照路径，计划步骤不保证工具幂等；
+- 计划路径暂未接入 `retry_guard` 的同签名拦截。

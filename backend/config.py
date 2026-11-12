@@ -217,6 +217,31 @@ class Settings:
     agent_plan_first_enabled: bool = field(
         default_factory=lambda: _env("AGENT_PLAN_FIRST", "false").lower() == "true"
     )
+    # Plan-and-Execute 执行模式: 外层规划器 + 逐步受限 ReAct + 失败重规划。
+    # 默认关闭；关闭时完全沿用自由 ReAct 主循环。
+    agent_plan_execute_enabled: bool = field(
+        default_factory=lambda: _env("AGENT_PLAN_EXECUTE", "false").lower() == "true"
+    )
+    # 技能/模板未命中时是否允许 LLM 规划器生成计划。
+    agent_planner_llm_enabled: bool = field(
+        default_factory=lambda: _env("AGENT_PLANNER_LLM", "true").lower() == "true"
+    )
+    # 规划器模型；为空时沿用主聊天模型。
+    agent_planner_model: str = field(
+        default_factory=lambda: _env("AGENT_PLANNER_MODEL", "")
+    )
+    # 单次任务最大重规划次数（含首次计划）。
+    agent_plan_max_versions: int = field(
+        default_factory=lambda: int(_env("AGENT_PLAN_MAX_VERSIONS", "2"))
+    )
+    # 单次任务工具调用预算。
+    agent_plan_max_tool_calls: int = field(
+        default_factory=lambda: int(_env("AGENT_PLAN_MAX_TOOL_CALLS", "20"))
+    )
+    # 单个计划步骤的 ReAct 轮次上限。
+    agent_step_max_turns: int = field(
+        default_factory=lambda: int(_env("AGENT_STEP_MAX_TURNS", "6"))
+    )
 
     # ==================== 动态工具注入 ====================
     # true: 首轮按用户目标检索并只绑定少量工具 + search_tools/load_tool；

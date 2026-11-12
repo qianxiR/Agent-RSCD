@@ -74,6 +74,9 @@ from backend.agent.runtime.observation_builder import (
     build_repair_followup_system_message,
     should_disable_tools_for_next_repair_turn,
 )
+from backend.agent.runtime.llm_stream import stream_llm
+from backend.agent.runtime.tool_call_runner import ToolCallRunner
+from backend.agent.executor.plan_executor import run_plan_and_execute
 from backend.agent.runtime.skill_execution import apply_skill_selection_to_plan
 from backend.agent.observability.decision_audit import (
     append_jsonl,
@@ -885,62 +888,15 @@ class AgentChatService:
         - 方法: astream 逐 chunk 推送 thinking 事件
         - 出参: 累积完成的 AIMessage (含 content + tool_calls)
         """
-        collected_chunks: List[AIMessageChunk] = []
-        partial_content = ""
-        partial_chunks: List[str] = []
-        partial_tool_calls: List[Any] = []
+        async def emit(payload: dict) -> None:
+            await ws_manager.send_to_session(session_id, payload)
 
-        async for chunk in llm.astream(all_messages):
-            collected_chunks.append(chunk)
-
-            if chunk.content:
-                partial_content += chunk.content
-                partial_chunks.append(chunk.content)
-                await ws_manager.send_to_session(session_id, {
-                    "type": "thinking",
-                    "content": chunk.content,
-                    "conversation_id": conversation_id,
-                })
-
-            tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
-            if tool_chunks:
-                partial_tool_calls.extend(_json_safe_tool_chunks(tool_chunks))
-
-            # 每 8 个 chunk 持久化一次原始流式 token，供断点恢复/排查
-            if on_partial is not None and len(collected_chunks) % 8 == 0:
-                on_partial(partial_content, partial_tool_calls, partial_chunks)
-
-            # ★ 每个 chunk 之间显式检查是否被取消 (httpx 底层可能不检测)
-            await asyncio.sleep(0)
-
-        # 将所有 chunk 合并为一条完整的 AIMessage
-        if not collected_chunks:
-            return AIMessage(content="")
-
-        full_message = collected_chunks[0]
-        for chunk in collected_chunks[1:]:
-            full_message = full_message + chunk
-
-        # ★ 显式缓存命中率日志 (stream_usage 开启时, 最后一个 chunk 携带 usage_metadata)
-        if settings.enable_context_cache and settings.log_cache_hit_rate:
-            um = getattr(full_message, "usage_metadata", None)
-            if um:
-                cached = (um.get("input_token_details") or {}).get("cache_read", 0)
-                total_in = um.get("input_tokens", 0)
-                rate = cached / total_in * 100 if total_in else 0
-                logger.info(
-                    f"[Cache] conv={conversation_id} hit={cached}/{total_in} ({rate:.0f}%) "
-                    f"output={um.get('output_tokens', 0)}"
-                )
-
-        return AIMessage(
-            content=full_message.content,
-            tool_calls=full_message.tool_calls,
-            id=full_message.id,
-            additional_kwargs={
-                **(getattr(full_message, "additional_kwargs", {}) or {}),
-                "thinking_content": full_message.content or "",
-            },
+        return await stream_llm(
+            llm,
+            all_messages,
+            emit=emit,
+            on_partial=on_partial,
+            conversation_id=conversation_id,
         )
 
     # ==================== WebSocket 模式 ====================
@@ -1127,6 +1083,21 @@ class AgentChatService:
                     plan_task_id = persist_plan_state(
                         conversation_id, req.user_id, current_plan, plan_task_id
                     )
+            # ★ Plan-and-Execute: 开关开启且没有既有计划时, 按技能 > 模板 > LLM 规划器构建计划。
+            #   规划失败返回 None, 后续仍走自由 ReAct。
+            if settings.agent_plan_execute_enabled and not current_plan and resume_state is None:
+                from backend.agent.planner.runtime import maybe_build_plan_state
+
+                planner_llm = create_responses_llm(
+                    settings.agent_planner_model or req.model, 0.0
+                )
+                current_plan = await maybe_build_plan_state(
+                    req.prompt, input_images, conversation_id, req.user_id, planner_llm
+                )
+                if current_plan:
+                    plan_task_id = persist_plan_state(
+                        conversation_id, req.user_id, current_plan, plan_task_id
+                    )
             # Shadow 计划只用于对比；已进入 Plan-first 时不重复构建。
             if not plan_first_state and resume_state is None:
                 from backend.agent.planner.runtime import maybe_log_shadow_plan
@@ -1256,6 +1227,146 @@ class AgentChatService:
                 stream_buffer = {"content": "", "chunks": [], "tool_calls": []}
 
             _save_run_state()
+
+            # ★ Plan-and-Execute: 显式计划存在时, 走外层 Loop{Plan, ReAct}。
+            if (
+                settings.agent_plan_execute_enabled
+                and resume_state is None
+                and current_plan
+                and current_plan.get("steps")
+            ):
+                from backend.agent.tools.discovery import all_tool_cards
+                from backend.agent.tools.registry import get_llm_exposed_tool_names
+
+                async def _emit_plan_event(payload: dict) -> None:
+                    await ws_manager.send_to_session(session_id, payload)
+
+                async def _on_plan_tool_success(tool_name, tool_args, tool_result, task_id):
+                    if not isinstance(tool_result, dict) or tool_result.get("type") == "error":
+                        return
+                    if task_id is not None:
+                        _register_tool_artifacts(tool_name, tool_result, task_id, conversation_id)
+                    try:
+                        pref = pattern_tracker.record(req.user_id, tool_name, tool_args)
+                        if pref:
+                            get_memory_stores().long_term.save(
+                                req.user_id,
+                                pref["key"],
+                                pref["value"],
+                                pref["category"],
+                                scope="user",
+                                kind=pref.get("kind"),
+                                confidence=pref.get("confidence", 0.7),
+                                source=pref.get("source", "pattern"),
+                                evidence={
+                                    "conversation_id": conversation_id,
+                                    "tool": tool_name,
+                                },
+                            )
+                            asyncio.create_task(_emit_memory_updated(
+                                session_id, conversation_id, ws_manager, [pref], "pattern"
+                            ))
+                    except Exception as pt_err:
+                        logger.warning(f"[PatternTracker] record 失败: {pt_err}")
+                    if tool_name == "segment_image" and tool_result.get("type") == "frontend_action":
+                        asyncio.create_task(_dispatch_segment_report_worker(
+                            tool_result=tool_result,
+                            parent_task_id=task_id,
+                            conversation_id=conversation_id,
+                            user_id=req.user_id,
+                            session_id=session_id,
+                            ws_manager=ws_manager,
+                        ))
+
+                plan_tool_runner = ToolCallRunner(
+                    conversation_id=conversation_id,
+                    user_id=req.user_id,
+                    session_id=session_id,
+                    send=_emit_plan_event,
+                    turn_images=_turn_images,
+                    on_success=_on_plan_tool_success,
+                )
+
+                def _save_plan(updated_plan: dict) -> None:
+                    nonlocal plan_task_id, current_plan
+                    current_plan = updated_plan
+                    plan_task_id = persist_plan_state(
+                        conversation_id, req.user_id, updated_plan, plan_task_id
+                    )
+
+                def _on_plan_step_done(updated_plan: dict) -> None:
+                    nonlocal current_plan
+                    current_plan = updated_plan
+                    _save_run_state()
+
+                plan_result = await run_plan_and_execute(
+                    conversation_id=conversation_id,
+                    user_id=req.user_id,
+                    goal=req.prompt,
+                    plan=current_plan,
+                    llm_factory=lambda tool_list: create_responses_llm_with_tools(
+                        tool_list, req.model, req.temperature
+                    ),
+                    llm_without_tools=llm_without_tools,
+                    stream_llm=lambda target_llm, msgs, conversation_id="": (
+                        self._stream_llm_thinking_ws(
+                            target_llm, msgs, session_id, conversation_id, ws_manager
+                        )
+                    ),
+                    tool_runner=plan_tool_runner,
+                    emit=_emit_plan_event,
+                    save_plan=_save_plan,
+                    on_step_done=_on_plan_step_done,
+                    tool_cards=all_tool_cards(),
+                    available_tools=set(get_tool_category_map().keys()),
+                    tool_whitelist=get_llm_exposed_tool_names(),
+                    context_inputs={},
+                    all_messages=all_messages,
+                    max_versions=settings.agent_plan_max_versions,
+                    max_tool_calls=settings.agent_plan_max_tool_calls,
+                    max_step_turns=settings.agent_step_max_turns,
+                )
+
+                content = plan_result.final_content or ""
+                if plan_result.status != "completed" and not content:
+                    content = f"任务未完成：{plan_result.reason or plan_result.status}"
+                if content:
+                    for i in range(0, len(content), 5):
+                        await ws_manager.send_to_session(session_id, {
+                            "type": "content",
+                            "content": content[i:i + 5],
+                            "conversation_id": conversation_id,
+                        })
+                        await asyncio.sleep(0.02)
+                all_messages.append(AIMessage(
+                    content=content,
+                    additional_kwargs={"thinking_content": content},
+                ))
+                get_context_builder().persist_turn(conversation_id, all_messages, new_start_idx + 1)
+                _save_run_state(
+                    status="completed" if plan_result.status == "completed" else "failed",
+                    error=plan_result.reason,
+                )
+                if _turn_images:
+                    agent_db.set_last_assistant_images(conversation_id, _turn_images)
+                agent_db.update_conversation_status(
+                    conversation_id,
+                    "completed" if plan_result.status == "completed" else "stopped",
+                )
+                await ws_manager.send_to_session(session_id, {
+                    "type": "done",
+                    "conversation_id": conversation_id,
+                })
+                asyncio.create_task(_async_memory_finale(
+                    conversation_id, req.user_id, list(all_messages), new_start_idx,
+                    session_id, ws_manager,
+                ))
+                asyncio.create_task(_async_self_correction_scan(
+                    conversation_id, req.user_id, list(all_messages),
+                    session_id, ws_manager,
+                ))
+                return
+
             while True:
                 iteration += 1
                 logger.info(f"[WS] Iteration {iteration}, conv={conversation_id}")
