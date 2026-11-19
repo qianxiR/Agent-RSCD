@@ -92,22 +92,13 @@ const {
   phaseDialogOpen: samplePhaseOpen,
   mode: sampleMode,
   dirty: sampleDirty,
-  instances: sampleInstances,
   beginSession,
   resetSession,
-  beginRange,
-  setWorkFrame,
-  clearInstances,
 } = useSampleStudio()
 const {
   capturing: sampleCapturing,
   progress: sampleProgress,
-  rangeError: sampleRangeError,
   prepareScene,
-  startRange: startSampleRange,
-  clearRange: clearSampleRange,
-  confirmRange: confirmSampleRangeRaw,
-  resetRange: resetSampleRange,
   exitScene,
 } = useSampleScene()
 const sampleEditor = useSampleEditor()
@@ -354,47 +345,14 @@ async function onSampleConfirm(payload) {
     sampleEditor.enter(map)
     setFeatureInfoEnabled(false)
     if (popupRef.value) popupRef.value.innerHTML = ''
-    startSampleRange({ onConfirm: confirmSampleRange })
-    ElMessage.success('影像已载入，请在影像上拖动框选工作范围')
+    sampleEditor.setMode('draw')
+    ElMessage.success('影像已载入，可直接标注')
   } catch (e) {
     ElMessage.error(e.message || '影像抓取失败')
     samplePhaseOpen.value = true
   } finally {
     sampleEntering.value = false
   }
-}
-
-// 入参: 无 | 方法: Enter/双击确认红框，切到框内视图并开始标注 | 出参: 无
-function confirmSampleRange() {
-  const workFrame = confirmSampleRangeRaw()
-  if (!workFrame) {
-    ElMessage.warning(sampleRangeError.value || '请先框选工作范围')
-    return
-  }
-  setWorkFrame(workFrame)
-  sampleEditor.setMode('draw')
-  ElMessage.success('工作范围已确定，可开始标注')
-}
-
-// 入参: 无 | 方法: 重选工作范围；已有标注时二次确认并清空 | 出参: 无
-async function reselectSampleRange() {
-  if (!sampleActive.value) return
-  if (sampleInstances.value.length) {
-    try {
-      await ElMessageBox.confirm(
-        '重选工作范围会清空已有标注，是否继续？',
-        '重选工作范围',
-        { confirmButtonText: '重选', cancelButtonText: '取消', type: 'warning' },
-      )
-    } catch (e) {
-      return
-    }
-  }
-  clearInstances()
-  beginRange()
-  resetSampleRange()
-  sampleEditor.setMode('range')
-  startSampleRange({ onConfirm: confirmSampleRange })
 }
 
 // 入参: 模式 draw | edit | select | 方法: 切换标注模式，再次点击回到浏览 | 出参: 无
@@ -624,19 +582,6 @@ function isTypingTarget(target) {
 
 // 入参: event 键盘事件 | 方法: Enter 确认待选区；Esc 取消待选区或退出框选模式 | 出参: 无
 function onKeydown(event) {
-  if (sampleActive.value && sampleMode.value === 'range') {
-    if (isTypingTarget(event.target)) return
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      confirmSampleRange()
-      return
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      clearSampleRange()
-      return
-    }
-  }
   if (sampleActive.value && sampleEditor.onKeydown(event)) return
   if (event.key === 'Enter' && pendingBBox.value) {
     if (isTypingTarget(event.target)) return
@@ -820,7 +765,7 @@ onBeforeUnmount(() => {
           <Icon name="audit" :size="14" />
           <span>样本制作</span>
         </button>
-        <template v-if="sampleActive && sampleMode !== 'range'">
+        <template v-if="sampleActive">
           <button
             type="button"
             class="sample-tool"
@@ -966,7 +911,6 @@ onBeforeUnmount(() => {
       <SamplePanel
         v-if="sampleActive"
         @exit="requestExitSample"
-        @reselect-range="reselectSampleRange"
       />
 
       <!-- 样本影像抓取进度 -->
@@ -991,12 +935,6 @@ onBeforeUnmount(() => {
       <!-- 底图署名（Esri 时显示，满足署名要求） -->
       <div v-if="currentBasemap === 'esri'" class="basemap-attribution">
         Esri, Maxar, Earthstar Geographics
-      </div>
-
-      <!-- 样本制作：工作范围红框提示 -->
-      <div v-if="sampleActive && sampleMode === 'range'" class="sample-range-hint">
-        <Icon name="map" :size="13" />
-        <span>{{ sampleRangeError || '在影像上拖动框选工作范围 · Enter/双击确认 · Esc 清除' }}</span>
       </div>
 
       <!-- 框选提示（仅框选模式显示） -->

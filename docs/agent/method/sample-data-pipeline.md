@@ -70,11 +70,10 @@
 
 1. **时相**：任务名、项目、样本区域（点「在地图上框选」回地图拖框，松开后带新范围重开弹窗）、时相 A（必选）、时相 B（可选）。范围过大时抓图会拒绝，需先放大地图。
 2. **影像**：单期抓一张 Esri Wayback GeoTIFF 直接铺图；双期以同一 bbox、同一缩放抓两张，进入卷帘，B 按分隔线右侧裁剪。
-3. **工作范围**：影像载入后在影像上拖动红色矩形，`Enter` 或双击确认，`Esc` 清除。确认后只显示框内影像，标注坐标以红框左上角为原点。
-4. **标注**：地图左侧 `SamplePanel.vue` 提供绘制 / 顶点 / 框选、实例列表、类别自由输入与颜色选择、删除、重选范围、保存、COCO/SHP/数据集下载；导出时弹出系统保存对话框选择保存位置。
-5. **操作**：左键落点，F2/Enter 闭合，Backspace 撤销，Esc 取消；拖动顶点、点边加点、Shift 点顶点或 F2 删点；框选后 Delete 批删；最少 3 点。
+3. **标注**：影像载入后直接在整幅影像内标注，不再二次框选工作范围。地图左侧 `SamplePanel.vue` 提供绘制 / 顶点 / 框选、实例列表、类别自由输入与颜色选择、删除、保存、COCO/SHP/数据集下载；导出时弹出系统保存对话框选择保存位置。
+4. **操作**：左键落点，F2/Enter 闭合，Backspace 撤销，Esc 取消；拖动顶点、点边加点、Shift 点顶点或 F2 删点；框选后 Delete 批删；最少 3 点。
 
-状态机：`idle → phase_selecting → capturing → range_select → editing → saved`。框选范围前不进入编辑；有未保存修改时退出二次确认。
+状态机：`idle → phase_selecting → capturing → editing → saved`。有未保存修改时退出二次确认。
 
 ## 4. 后端设计
 
@@ -115,7 +114,7 @@
 agent-files/samples/{project}/{task}/
   source_a.tif         # 时相 A 抓图副本（带 CRS，整张）
   source_b.tif         # 双期时存在
-  annotations.json     # 标注真值（红框坐标系）
+  annotations.json     # 标注真值（影像像素坐标系）
   meta.json            # 任务摘要
   dataset/image/       # 数据集导出：按 crop_px 裁剪的 phase_a/b.tif + png
   dataset/vector/      # 数据集导出：SHP/GeoJSON
@@ -135,8 +134,8 @@ agent-files/samples/{project}/{task}/
     "path": "source_a.tif", "width": 135, "height": 175,
     "bounds": [103.947, 30.756, 103.961, 30.771],
     "crs": "EPSG:4326",
-    "crop_px": [251, 116, 386, 291],
-    "source_width": 452, "source_height": 416,
+    "crop_px": [0, 0, 135, 175],
+    "source_width": 135, "source_height": 175,
     "phases": [{"date": "2026-11-18", "path": "source_a.tif"}]
   },
   "classes": [{"id": 1, "name": "building", "color": [230, 25, 75]}],
@@ -151,13 +150,13 @@ agent-files/samples/{project}/{task}/
 }
 ```
 
-约定：`coordinates` 是 EPSG:4326 事实源，`points` 是红框内像素坐标（COCO 用）；两者同时落盘。`image.width/height` 为红框尺寸，`image.bounds` 为红框经纬度范围；`image.crop_px` 为红框在整张抓图中的位置，`source_width/source_height` 为整张抓图尺寸。后端校验所有顶点落在红框内。类别默认 6 类，支持在面板内自由输入新类别并自选颜色；自定义类别写入 `classes` 与实例的 `class_name/class_id`。
+约定：`coordinates` 是 EPSG:4326 事实源，`points` 是影像像素坐标（COCO 用）；两者同时落盘。`image.width/height` 为影像尺寸，`image.bounds` 为影像经纬度范围；当前不二次框选，`image.crop_px` 固定为 `[0, 0, width, height]`，`source_width/source_height` 与影像尺寸一致，保留字段用于兼容旧任务。后端校验所有顶点落在影像内。类别默认 6 类，支持在面板内自由输入新类别并自选颜色；自定义类别写入 `classes` 与实例的 `class_name/class_id`。
 
 ## 5. 分阶段
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| 79 | 人工标注闭环：时相选择 → 抓图/卷帘 → 红框工作范围 → 绘制/顶点/框选 → `annotations.json` → COCO/SHP/数据集（裁剪影像 + 标注 + 矢量） | ✅ 已实现 |
+| 79 | 人工标注闭环：时相选择 → 框选样本区域 → 抓图/卷帘 → 绘制/顶点/框选 → `annotations.json` → COCO/SHP/数据集（影像 + 标注 + 矢量） | ✅ 已实现 |
 | 80 | AI 候选（接地头 `run_classes`）+ 交互头点/框精修 + 掩码 GeoTIFF | 待排期 |
 
 数据集生产（证据 / CLIP / caption / VQA）不排期，等标注链路稳定后另写设计。

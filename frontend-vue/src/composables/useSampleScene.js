@@ -2,33 +2,19 @@
 // 单期：一张 ImageStatic 直接铺图；双期：两张同范围同缩放的 ImageStatic，B 按分隔线右侧裁剪。
 import { ref } from 'vue'
 import ImageLayer from 'ol/layer/Image'
-import VectorLayer from 'ol/layer/Vector'
 import ImageStatic from 'ol/source/ImageStatic'
-import VectorSource from 'ol/source/Vector'
-import Feature from 'ol/Feature'
-import Polygon from 'ol/geom/Polygon'
-import Style from 'ol/style/Style'
-import Stroke from 'ol/style/Stroke'
-import Fill from 'ol/style/Fill'
-import DragBox from 'ol/interaction/DragBox'
-import { always } from 'ol/events/condition'
 import { getRenderPixel } from 'ol/render'
 import { transformExtent } from 'ol/proj'
 import { captureWaybackImage } from '@/composables/useWaybackCapture'
 import { georeferenceImagery } from '@/services/imagery'
 import { getMap } from '@/composables/useMap'
 
-const RANGE_COLOR = '#b54a4a'
-const MIN_RANGE_PX = 32
 
 const capturing = ref(false)
 const progress = ref('')
 const error = ref('')
 const swipeActive = ref(false)
 const ratio = ref(0.5)
-const rangeMode = ref(false)
-const rangeError = ref('')
-const rangeRect = ref(null)
 
 let layerA = null
 let layerB = null
@@ -36,12 +22,6 @@ let divider = null
 let clipped = false
 let dragging = false
 let previousView = null
-let scene = null
-let rangeBox = null
-let rangeLayer = null
-let rangeSource = null
-let rangeOnConfirm = null
-let pendingRange = null
 const cleanups = []
 
 function clearLayers() {
@@ -50,12 +30,9 @@ function clearLayers() {
   if (map) {
     if (layerA) map.removeLayer(layerA)
     if (layerB) map.removeLayer(layerB)
-    if (rangeLayer) map.removeLayer(rangeLayer)
   }
   layerA = null
   layerB = null
-  rangeLayer = null
-  rangeSource = null
 }
 
 function removeDivider() {
@@ -210,175 +187,6 @@ function clipLayerB() {
   })
 }
 
-// ==================== 工作范围红框 ====================
-
-function sceneCoordToPixel(coordinate) {
-  const [minx, miny, maxx, maxy] = scene.extent
-  return [
-    ((coordinate[0] - minx) / (maxx - minx)) * scene.width,
-    ((maxy - coordinate[1]) / (maxy - miny)) * scene.height,
-  ]
-}
-
-function scenePixelToCoord(x, y) {
-  const [minx, miny, maxx, maxy] = scene.extent
-  return [
-    minx + (x / scene.width) * (maxx - minx),
-    maxy - (y / scene.height) * (maxy - miny),
-  ]
-}
-
-function ensureRangeLayer(map) {
-  if (rangeLayer) return
-  rangeSource = new VectorSource()
-  rangeLayer = new VectorLayer({
-    source: rangeSource,
-    zIndex: 55,
-    style: new Style({
-      stroke: new Stroke({ color: RANGE_COLOR, width: 2 }),
-    }),
-  })
-  map.addLayer(rangeLayer)
-}
-
-function drawRangeRect(rect) {
-  if (!rangeSource) return
-  rangeSource.clear()
-  if (!rect) return
-  const [x0, y0, x1, y1] = rect
-  const ring = [
-    scenePixelToCoord(x0, y0),
-    scenePixelToCoord(x1, y0),
-    scenePixelToCoord(x1, y1),
-    scenePixelToCoord(x0, y1),
-    scenePixelToCoord(x0, y0),
-  ]
-  rangeSource.addFeature(new Feature({ geometry: new Polygon([ring]) }))
-}
-
-function onRangeBoxEnd() {
-  if (!scene || !rangeBox) return
-  const extent = rangeBox.getGeometry().getExtent()
-  const minx = Math.max(extent[0], scene.extent[0])
-  const miny = Math.max(extent[1], scene.extent[1])
-  const maxx = Math.min(extent[2], scene.extent[2])
-  const maxy = Math.min(extent[3], scene.extent[3])
-  if (minx >= maxx || miny >= maxy) {
-    rangeError.value = '框选范围不在影像内'
-    pendingRange = null
-    drawRangeRect(null)
-    return
-  }
-  const [x0, y0] = sceneCoordToPixel([minx, maxy])
-  const [x1, y1] = sceneCoordToPixel([maxx, miny])
-  const rect = [
-    Math.round(Math.max(0, Math.min(x0, x1))),
-    Math.round(Math.max(0, Math.min(y0, y1))),
-    Math.round(Math.min(scene.width, Math.max(x0, x1))),
-    Math.round(Math.min(scene.height, Math.max(y0, y1))),
-  ]
-  if (rect[2] - rect[0] < MIN_RANGE_PX || rect[3] - rect[1] < MIN_RANGE_PX) {
-    rangeError.value = `工作范围至少 ${MIN_RANGE_PX}×${MIN_RANGE_PX} 像素`
-    pendingRange = null
-    drawRangeRect(null)
-    return
-  }
-  pendingRange = rect
-  rangeRect.value = rect
-  rangeError.value = ''
-  drawRangeRect(rect)
-}
-
-function onRangeDblClick() {
-  if (!rangeMode.value) return
-  rangeOnConfirm?.()
-}
-
-function stopRangeInteraction() {
-  const map = getMap()
-  if (!map) return
-  if (rangeBox) map.removeInteraction(rangeBox)
-  map.un('dblclick', onRangeDblClick)
-  rangeBox = null
-  const target = map.getTargetElement()
-  if (target) target.style.cursor = ''
-}
-
-// 入参: { onConfirm } | 方法: 进入红框模式，等待拖框 | 出参: 是否启动成功
-export function startRange({ onConfirm } = {}) {
-  const map = getMap()
-  if (!map || !scene) return false
-  rangeOnConfirm = onConfirm || null
-  clearRange()
-  ensureRangeLayer(map)
-  stopRangeInteraction()
-  rangeBox = new DragBox({
-    condition: always,
-    style: new Style({
-      stroke: new Stroke({ color: RANGE_COLOR, width: 1.5, lineDash: [6, 4] }),
-      fill: new Fill({ color: 'rgba(181,74,74,0.08)' }),
-    }),
-  })
-  rangeBox.on('boxend', onRangeBoxEnd)
-  map.addInteraction(rangeBox)
-  map.on('dblclick', onRangeDblClick)
-  rangeMode.value = true
-  rangeError.value = ''
-  const target = map.getTargetElement()
-  if (target) target.style.cursor = 'crosshair'
-  return true
-}
-
-// 入参: 无 | 方法: 清除当前红框，留在红框模式 | 出参: 无
-export function clearRange() {
-  pendingRange = null
-  rangeRect.value = null
-  rangeError.value = ''
-  drawRangeRect(null)
-}
-
-// 入参: 无 | 方法: Enter/双击确认红框，切到框内视图并返回工作帧 | 出参: workFrame | null
-export function confirmRange() {
-  if (!scene) return null
-  if (!pendingRange) {
-    rangeError.value = '请先框选工作范围'
-    return null
-  }
-  const [x0, y0, x1, y1] = pendingRange
-  const [minx, maxy] = scenePixelToCoord(x0, y0)
-  const [maxx, miny] = scenePixelToCoord(x1, y1)
-  const workExtent = [minx, miny, maxx, maxy]
-  layerA?.setExtent(workExtent)
-  layerB?.setExtent(workExtent)
-  const map = getMap()
-  // 左侧给样本面板留出空间，避免红框工作区被面板遮住
-  map?.getView().fit(workExtent, { padding: [24, 24, 24, 340], duration: 180 })
-  stopRangeInteraction()
-  rangeMode.value = false
-  rangeRect.value = [...pendingRange]
-  return {
-    width: x1 - x0,
-    height: y1 - y0,
-    bounds: transformExtent(workExtent, 'EPSG:3857', 'EPSG:4326'),
-    extent: workExtent,
-    cropPx: [...pendingRange],
-    sourceWidth: scene.width,
-    sourceHeight: scene.height,
-  }
-}
-
-// 入参: 无 | 方法: 撤销红框，恢复整张影像视图 | 出参: 无
-export function resetRange() {
-  clearRange()
-  stopRangeInteraction()
-  rangeMode.value = false
-  layerA?.setExtent(undefined)
-  layerB?.setExtent(undefined)
-  const map = getMap()
-  if (map && scene) map.getView().fit(scene.extent, { padding: [40, 40, 40, 40], duration: 0 })
-}
-
-
 export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
   const map = getMap()
   if (!map) throw new Error('地图尚未就绪')
@@ -421,10 +229,6 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
 
     clearLayers()
     removeDivider()
-    stopRangeInteraction()
-    rangeMode.value = false
-    pendingRange = null
-    rangeRect.value = null
 
     const view = map.getView()
     previousView = { center: view.getCenter(), zoom: view.getZoom() }
@@ -437,13 +241,6 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
     }
 
     const extent = transformExtent(imageA.bbox, 'EPSG:4326', 'EPSG:3857')
-    scene = {
-      extent,
-      width: imageA.width,
-      height: imageA.height,
-      bounds: imageA.bbox,
-      path: imageA.file_path,
-    }
     view.fit(extent, { padding: [40, 40, 40, 40], duration: 0 })
 
     swipeActive.value = Boolean(imageB)
@@ -483,16 +280,10 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
 
 // 入参: 无 | 方法: 移除样本影像/卷帘并回到进入前视图 | 出参: 无
 export function exitScene({ restoreView = true } = {}) {
-  stopRangeInteraction()
   clearLayers()
   removeDivider()
   swipeActive.value = false
   ratio.value = 0.5
-  rangeMode.value = false
-  rangeError.value = ''
-  rangeRect.value = null
-  pendingRange = null
-  scene = null
   const map = getMap()
   if (restoreView && map && previousView?.center) {
     map.getView().animate({ center: previousView.center, zoom: previousView.zoom, duration: 220 })
@@ -507,14 +298,7 @@ export function useSampleScene() {
     error,
     swipeActive,
     ratio,
-    rangeMode,
-    rangeError,
-    rangeRect,
     prepareScene,
-    startRange,
-    clearRange,
-    confirmRange,
-    resetRange,
     exitScene,
   }
 }

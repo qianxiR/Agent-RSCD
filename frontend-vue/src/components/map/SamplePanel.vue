@@ -7,7 +7,7 @@ import BaseButton from '@/shared/ui/BaseButton.vue'
 import { useSampleStudio } from '@/composables/useSampleStudio'
 import { useSampleEditor } from '@/composables/useSampleEditor'
 
-defineEmits(['exit', 'reselect-range'])
+defineEmits(['exit'])
 
 const {
   taskDir,
@@ -141,10 +141,6 @@ function onDeleteSelected() {
         <span v-else-if="sourceFrame">{{ sourceFrame.width }} × {{ sourceFrame.height }} px</span>
       </div>
       <div class="sp-phase">{{ phaseText }}</div>
-      <div v-if="frame" class="sp-range">
-        <span>工作范围 {{ frame.width }} × {{ frame.height }} px</span>
-        <button type="button" @click="$emit('reselect-range')">重选范围</button>
-      </div>
     </div>
 
     <div v-if="frame" class="sp-modes">
@@ -172,9 +168,6 @@ function onDeleteSelected() {
       >
         <Icon name="trash" :size="13" />
       </button>
-    </div>
-    <div v-else class="sp-range-hint">
-      在影像上拖动框选工作范围，Enter 或双击确认。
     </div>
 
     <div v-if="frame" class="sp-count">
@@ -294,33 +287,6 @@ function onDeleteSelected() {
   color: var(--text-muted);
 }
 .sp-phase { font-size: var(--fs-sm); color: var(--text-secondary); }
-.sp-range {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-}
-.sp-range button {
-  padding: 0;
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--border-strong);
-  cursor: pointer;
-}
-.sp-range button:hover { color: var(--text-primary); }
-.sp-range-hint {
-  padding: 10px 8px;
-  border-radius: var(--r-sm);
-  background: var(--bg-inset);
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  line-height: 1.6;
-}
 
 .sp-modes { display: flex; gap: 4px; }
 .sp-modes button {

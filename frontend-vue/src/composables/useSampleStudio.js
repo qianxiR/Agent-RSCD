@@ -15,7 +15,6 @@ const project = ref('default')
 const taskDir = ref('')
 const sourceFrame = ref(null)
 const frame = ref(null)
-const rangeReady = ref(false)
 const phases = ref([])
 const classes = ref(SAMPLE_CLASSES.map((item) => ({ ...item, color: [...item.color] })))
 const instances = ref([])
@@ -87,52 +86,28 @@ function changeClassName(id, name) {
   dirty.value = true
 }
 
-// 入参: 无 | 方法: 开始新会话，记录整张抓图帧，等待红框确定工作范围 | 出参: 无
+// 入参: 无 | 方法: 开始新会话，抓图即工作范围 | 出参: 无
 function beginSession({ projectId, taskName, frameData, phaseList }) {
   project.value = projectId || 'default'
   taskDir.value = taskName
   sourceFrame.value = frameData
-  frame.value = null
-  rangeReady.value = false
+  frame.value = {
+    ...frameData,
+    cropPx: [0, 0, frameData.width, frameData.height],
+    sourceWidth: frameData.width,
+    sourceHeight: frameData.height,
+  }
   phases.value = phaseList || []
   classes.value = SAMPLE_CLASSES.map((item) => ({ ...item, color: [...item.color] }))
   instances.value = []
   selectedId.value = ''
   selectedIds.value = []
   selectedVertex.value = null
-  mode.value = 'range'
+  mode.value = 'draw'
   dirty.value = false
   savedAt.value = 0
   status.value = ''
   active.value = true
-}
-
-// 入参: 红框换算后的工作帧 | 方法: 把参考帧切到红框范围，开始标注 | 出参: 无
-function setWorkFrame(workFrame) {
-  if (!workFrame) return
-  frame.value = {
-    ...(sourceFrame.value || {}),
-    ...workFrame,
-  }
-  rangeReady.value = true
-  mode.value = 'draw'
-}
-
-// 入参: 无 | 方法: 清空工作帧，回到红框选择状态（重选范围时使用） | 出参: 无
-function beginRange() {
-  frame.value = null
-  rangeReady.value = false
-  mode.value = 'range'
-}
-
-// 入参: 无 | 方法: 清空实例（重选工作范围时使用） | 出参: 无
-function clearInstances() {
-  instances.value = []
-  selectedId.value = ''
-  selectedIds.value = []
-  selectedVertex.value = null
-  dirty.value = false
-  status.value = ''
 }
 
 // 入参: 无 | 方法: 清空会话状态（地图图层由 useSampleScene 负责移除） | 出参: 无
@@ -141,7 +116,6 @@ function resetSession() {
   phaseDialogOpen.value = false
   sourceFrame.value = null
   frame.value = null
-  rangeReady.value = false
   phases.value = []
   instances.value = []
   selectedId.value = ''
@@ -356,7 +330,6 @@ export function useSampleStudio() {
     taskDir,
     sourceFrame,
     frame,
-    rangeReady,
     phases,
     classes,
     instances,
@@ -371,9 +344,6 @@ export function useSampleStudio() {
     savedAt,
     beginSession,
     resetSession,
-    beginRange,
-    setWorkFrame,
-    clearInstances,
     addShape,
     selectShape,
     selectMany,

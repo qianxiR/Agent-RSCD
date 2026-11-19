@@ -2259,15 +2259,14 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - 双期：A/B 以同一 bbox、同一缩放抓取（`captureWaybackImage` 新增 `exactBbox` / `zoom` 参数）→ 两张同尺寸 GeoTIFF → B 按分隔线右侧裁剪。
 - 抓图复用 `/api/v1/imagery/georeference`，影像以 `ImageStatic` 铺在 3857 地图上。
 
-### 79.3 工作范围与标注
+### 79.3 标注
 
-- 抓图后进入红框模式：在影像上拖动红色矩形，`Enter` 或双击确认，`Esc` 清除。
-- 确认后只显示框内影像（ImageStatic 按工作范围裁剪并 fit），红色边框常驻。
+- 样本区域只在时相弹窗框选一次；影像载入后直接在整幅影像内标注，不再二次框选工作范围。
 - 新增 `useSampleEditor.js`：绘制、顶点编辑、框选多选，图层 zIndex 40/45/50。
 - 操作：左键落点；F2/Enter 闭合；Backspace 撤销；Esc 取消；拖动顶点；点边加点；Shift 点顶点或 F2 删点；框选后 Delete 批删；最少 3 点。
-- 几何以红框左上角为原点的影像像素存储，保存时同时写 EPSG:4326 经纬度；COCO 用像素，SHP 用经纬度。
-- 顶点拖动与落点限制在红框内；样本模式内关闭 WFS 属性查询与双击缩放，退出后恢复。
-- 新增 `SamplePanel.vue`：任务名、时相、工作范围、模式按钮、实例列表、类别自由输入与颜色选择、面积、删除、重选范围、保存、COCO/SHP/数据集下载；导出经系统保存对话框选择路径，浏览器不支持时降级为默认下载。
+- 几何以影像左上角为原点的像素存储，保存时同时写 EPSG:4326 经纬度；COCO 用像素，SHP 用经纬度。
+- 落点与顶点拖动限制在影像内；样本模式内关闭 WFS 属性查询与双击缩放，退出后恢复。
+- 新增 `SamplePanel.vue`：任务名、时相、模式按钮、实例列表、类别自由输入与颜色选择、面积、删除、保存、COCO/SHP/数据集下载；导出经系统保存对话框选择路径，浏览器不支持时降级为默认下载。
 
 ### 79.4 后端
 
@@ -2325,3 +2324,10 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - `BaseButton` quick hover、左栏搜索/图层操作 hover、影像入口 hover 改中性文字色。
 - `PromptDialog` / `LayerPanel` 的 EP 覆盖迁到 `styles/overlays.css`，组件内不再写 `!important`。
 - 新增全局技能 `frontend-design-detail` 与 `check_ui_rules.py`；工作台 `--strict` 扫描 0 违规。
+
+### 79.9 移除二次范围框选（2026-11-19）
+
+- 样本区域只在 `SamplePhaseDialog` 框选一次；抓图 bbox 即工作范围。
+- 影像载入后直接进入绘制模式，删除红框工作范围、`Enter/双击确认`、`重选范围` 与相关提示。
+- `annotations.json` 的 `crop_px` 固定为整幅影像 `[0, 0, width, height]`；数据集导出仍按该字段裁剪，兼容旧任务。
+- 页面实测：框选区域 → 进入标注 → 直接绘制、保存；无二次框选、无 range 提示。
