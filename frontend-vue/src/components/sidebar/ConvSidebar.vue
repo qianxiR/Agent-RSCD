@@ -11,6 +11,7 @@ import { useConversationStore } from '@/stores/conversation'
 import { useChat } from '@/composables/useChat'
 import { deleteConversation, patchConversation, createProject, patchProject, deleteProject, getGeoServerServices, getLayerBbox } from '@/services/api'
 import { useMap } from '@/composables/useMap'
+import PromptDialog from '@/shared/ui/PromptDialog.vue'
 
 const projectStore = useProjectStore()
 const convStore = useConversationStore()
@@ -154,17 +155,24 @@ function onNewTaskInProject(g) {
 }
 
 // 入参: g 项目对象
-// 方法: prompt 输入新名称 → PATCH 后端 → 刷新列表
-// 出参: 无; 用户取消或名称未变时直接返回
-async function onRenameProject(g) {
-  const { value } = await ElMessageBox.prompt('请输入新项目名称', '重命名项目', {
-    inputValue: g.name || '',
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
-    inputPattern: /.+/,
-    inputErrorMessage: '名称不能为空',
+// 方法: 打开输入弹窗预填当前名称 → 确认后 PATCH 后端 → 刷新列表
+// 出参: 无
+function onRenameProject(g) {
+  openPrompt({
+    mode: 'rename-project',
+    target: g,
+    title: '重命名项目',
+    label: '项目名称',
+    placeholder: '请输入新项目名称',
+    prefill: g.name || '',
+    confirmText: '保存',
   })
-  const name = value.trim()
+}
+
+// 入参: g 项目对象、name 新名称
+// 方法: PATCH 后端项目名 → 刷新列表; 名称未变时直接返回
+// 出参: Promise<void>
+async function renameProjectFlow(g, name) {
   if (!name || name === g.name) return
   try {
     const data = await patchProject(g.id, { name })
@@ -250,18 +258,66 @@ function selectFirstSearchResult() {
   if (first) selectSearchResult(first)
 }
 
-async function onNewProject() {
-  const { value } = await ElMessageBox.prompt('请输入新项目名称', '新建项目', {
-    confirmButtonText: '创建',
-    cancelButtonText: '取消',
-    inputPattern: /.+/,
-    inputErrorMessage: '名称不能为空',
+// ==================== 文本输入弹窗（新建项目 / 重命名项目 / 重命名对话） ====================
+// 统一走 PromptDialog：单行输入、Enter 提交、非空校验
+const promptOpen = ref(false)
+const promptConfig = ref({
+  mode: '',
+  target: null,
+  title: '',
+  label: '',
+  placeholder: '',
+  prefill: '',
+  confirmText: '',
+})
+
+// 入参: cfg 弹窗配置（mode/target/title/label/placeholder/prefill/confirmText）
+// 方法: 合并配置并打开弹窗；未传 prefill 时清空上次预填
+// 出参: 无
+function openPrompt(cfg) {
+  promptConfig.value = { prefill: '', target: null, ...cfg }
+  promptOpen.value = true
+}
+
+// 入参: name 弹窗确认的名称
+// 方法: 按当前 mode 分派到对应流程
+// 出参: Promise<void>
+async function onPromptConfirm(name) {
+  const { mode, target } = promptConfig.value
+  if (mode === 'create-project') await createProjectFlow(name)
+  else if (mode === 'rename-project') await renameProjectFlow(target, name)
+  else if (mode === 'rename-conv') await renameConvFlow(target, name)
+}
+
+// 入参: 无
+// 方法: 打开新建项目输入弹窗
+// 出参: 无
+function onNewProject() {
+  openPrompt({
+    mode: 'create-project',
+    title: '新建项目',
+    label: '项目名称',
+    placeholder: '请输入新项目名称',
+    confirmText: '创建',
   })
-  const data = await createProject({ name: value.trim() })
-  if (data.status === 'success') {
-    await projectStore.loadAll()
-    ElMessage.success('项目已创建')
+}
+
+// 入参: name 新项目名称
+// 方法: POST 创建 → 刷新列表 → 选中并展开新项目 → 滚动到可见位置
+// 出参: Promise<void>
+async function createProjectFlow(name) {
+  const data = await createProject({ name })
+  if (data.status !== 'success') return
+  await projectStore.loadAll()
+  const pid = data.project_id
+  if (pid) {
+    projectStore.setActiveProject(pid)
+    projectStore.expandGroup(pid)
+    nextTick(() => {
+      document.querySelector(`.project-row[data-project-id="${pid}"]`)?.scrollIntoView({ block: 'nearest' })
+    })
   }
+  ElMessage.success('项目已创建')
 }
 
 function onOpen(conv) {
@@ -289,13 +345,25 @@ async function onDelete(conv) {
   }
 }
 
-async function onRename(conv) {
-  const { value } = await ElMessageBox.prompt('请输入新名称', '重命名', {
-    inputValue: conv.title || '',
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
+// 入参: conv 待重命名的会话摘要
+// 方法: 打开输入弹窗预填当前标题
+// 出参: 无
+function onRename(conv) {
+  openPrompt({
+    mode: 'rename-conv',
+    target: conv,
+    title: '重命名对话',
+    label: '对话名称',
+    placeholder: '请输入新名称',
+    prefill: conv.title || '',
+    confirmText: '保存',
   })
-  const name = value.trim()
+}
+
+// 入参: conv 会话摘要、name 新标题
+// 方法: PATCH 后端标题 → 同步本地摘要; 标题未变时直接返回
+// 出参: Promise<void>
+async function renameConvFlow(conv, name) {
   if (!name || name === conv.title) return
   try {
     await patchConversation(conv.id, { title: name })
@@ -358,6 +426,7 @@ function fmtTime(t) {
         <div
           class="project-row"
           :class="{ collapsed: projectStore.isGroupCollapsed(g.id), active: activeProjectId === g.id }"
+          :data-project-id="g.id"
           @click="projectStore.toggleGroup(g.id)"
         >
           <el-icon class="project-row-icon"><Folder /></el-icon>
@@ -418,6 +487,18 @@ function fmtTime(t) {
         <span>新建项目</span>
       </button>
     </div>
+
+    <!-- 输入弹窗：新建项目 / 重命名项目 / 重命名对话 -->
+    <PromptDialog
+      v-model="promptOpen"
+      :title="promptConfig.title"
+      :label="promptConfig.label"
+      :placeholder="promptConfig.placeholder"
+      :prefill="promptConfig.prefill"
+      :confirm-text="promptConfig.confirmText"
+      empty-hint="名称不能为空"
+      @confirm="onPromptConfirm"
+    />
 
     <Teleport to="body">
       <div v-if="searchOpen" class="search-overlay" @click.self="closeSearch" @keydown.esc="closeSearch">

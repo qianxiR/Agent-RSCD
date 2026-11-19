@@ -70,6 +70,12 @@ export const useProjectStore = defineStore('project', {
       else this.collapsedGroups.push(gid)
     },
 
+    // 展开指定分组（新建项目后定位用；已展开时不变）
+    expandGroup(gid) {
+      const idx = this.collapsedGroups.indexOf(gid)
+      if (idx >= 0) this.collapsedGroups.splice(idx, 1)
+    },
+
     // 从摘要列表移除（删除对话后调用）
     removeConv(id) {
       const idx = this.convList.findIndex((c) => c.id === id)

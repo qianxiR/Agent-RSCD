@@ -4,7 +4,7 @@
 //   样式一比一对齐原生 .ai-chat / .welcome-area / .ai-input-area
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useConversationStore } from '@/stores/conversation'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useChat } from '@/composables/useChat'
@@ -15,6 +15,34 @@ import MessageBubble from './MessageBubble.vue'
 import TaskProgressBar from './TaskProgressBar.vue'
 import TaskMonitorDialog from './TaskMonitorDialog.vue'
 import ProjectSelector from './ProjectSelector.vue'
+import PromptDialog from '@/shared/ui/PromptDialog.vue'
+
+// ==================== 输入弹窗（编辑消息 / 重新生成） ====================
+// 统一走 PromptDialog：多行输入、预填当前内容、确认后回到原分支流程
+const promptOpen = ref(false)
+const promptMode = ref('')
+const promptTarget = ref(null)
+const promptConfig = ref({ title: '', label: '', placeholder: '', prefill: '', confirmText: '' })
+
+// 入参: mode 流程标识、target 关联消息、cfg 弹窗文案
+// 方法: 记录流程上下文并打开弹窗
+// 出参: 无
+function openPrompt(mode, target, cfg) {
+  promptMode.value = mode
+  promptTarget.value = target
+  promptConfig.value = { prefill: '', ...cfg }
+  promptOpen.value = true
+}
+
+// 入参: text 弹窗确认的文本
+// 方法: 按当前 mode 分派到重新生成或编辑消息流程
+// 出参: Promise<void>
+async function onPromptConfirm(text) {
+  const msg = promptTarget.value
+  if (!msg) return
+  if (promptMode.value === 'regenerate') await regenerateFlow(msg, text)
+  else if (promptMode.value === 'edit') await editFlow(msg, text)
+}
 
 // 任务日志监控弹窗显隐（纯只读查看器，对齐原生 task-monitor.js）
 const taskDialogVisible = ref(false)
@@ -173,24 +201,29 @@ function removePendingLayer(index) {
 }
 
 // 入参: msg(MessageBubble 派发的 AI 消息对象，含 nodeId)
-// 方法: 弹编辑框预填该 AI 上一条 human 的 content → 用户编辑 → regenerate(fork + 重发)
+// 方法: 打开编辑弹窗预填该 AI 上一条 human 的 content → 用户编辑 → regenerate(fork + 重发)
 //   预填值：从 active.messages 找 msg 前最近 human 的 content；无则留空
 // 出参: 无
-async function onRegenerate(msg) {
+function onRegenerate(msg) {
   const msgs = active.value?.messages || []
   const idx = msgs.findIndex((m) => m.id === msg.id)
   let prefill = ''
   for (let i = idx - 1; i >= 0; i--) {
     if (msgs[i].role === 'human') { prefill = msgs[i].content; break }
   }
-  const { value } = await ElMessageBox.prompt('编辑后重新生成（将分叉当前分支）', '重新生成', {
-    inputValue: prefill,
-    confirmButtonText: '重新生成',
-    cancelButtonText: '取消',
-    inputType: 'textarea',
+  openPrompt('regenerate', msg, {
+    title: '重新生成',
+    label: '编辑后重新生成（将分叉当前分支）',
+    placeholder: '请输入消息内容',
+    prefill,
+    confirmText: '重新生成',
   })
-  const prompt = (value || '').trim()
-  if (!prompt) return
+}
+
+// 入参: msg 关联的 AI 消息、prompt 用户确认后的文本
+// 方法: 从该节点分叉并重发
+// 出参: Promise<void>
+async function regenerateFlow(msg, prompt) {
   try {
     await regenerate({ nodeId: msg.nodeId, prompt })
   } catch (e) {
@@ -262,28 +295,26 @@ function onInput(e) {
 }
 
 // 入参: msg 用户消息对象，包含 content、nodeId 及附件上下文。
-// 方法: 校验任务状态，弹出预填编辑框；确认后从该用户节点之前分叉并重新发送。
+// 方法: 校验任务状态，打开编辑弹窗预填当前内容；确认后从该用户节点之前分叉并重新发送。
 // 出参: Promise<void>；取消编辑或输入为空时不修改对话。
-async function onEdit(msg) {
+function onEdit(msg) {
   if (active.value?.isSending) {
     ElMessage.warning('当前任务正在执行，请先停止后再编辑')
     return
   }
-  let value
-  try {
-    const result = await ElMessageBox.prompt('修改消息后，将重新生成此处之后的对话', '编辑消息', {
-      inputValue: msg.content || '',
-      confirmButtonText: '重新发送',
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-    })
-    value = result.value
-  } catch (action) {
-    if (action === 'cancel' || action === 'close') return
-    throw action
-  }
-  const prompt = (value || '').trim()
-  if (!prompt) return
+  openPrompt('edit', msg, {
+    title: '编辑消息',
+    label: '修改消息后，将重新生成此处之后的对话',
+    placeholder: '请输入消息内容',
+    prefill: msg.content || '',
+    confirmText: '重新发送',
+  })
+}
+
+// 入参: msg 待替换的用户消息、prompt 用户确认后的文本
+// 方法: 带上原消息附件与图层，从该节点分叉并重新发送
+// 出参: Promise<void>
+async function editFlow(msg, prompt) {
   try {
     const sent = await regenerate({
       nodeId: msg.nodeId,
@@ -518,6 +549,19 @@ onBeforeUnmount(() => {
     </div>
     <!-- 任务日志监控弹窗（纯只读，Teleport 到 body） -->
     <TaskMonitorDialog v-model:visible="taskDialogVisible" :conversation-id="activeConvId" />
+
+    <!-- 输入弹窗：编辑消息 / 重新生成 -->
+    <PromptDialog
+      v-model="promptOpen"
+      :title="promptConfig.title"
+      :label="promptConfig.label"
+      :placeholder="promptConfig.placeholder"
+      :prefill="promptConfig.prefill"
+      :confirm-text="promptConfig.confirmText"
+      multiline
+      width="480px"
+      @confirm="onPromptConfirm"
+    />
   </div>
 </template>
 

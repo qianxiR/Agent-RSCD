@@ -2,7 +2,7 @@
 // ==================== 三栏主布局 + 拖拽分隔 ====================
 // ★ 对应原生 index.html 的 .header + .main 三栏结构
 //   header：logo + 系统标题 + WS 状态点（与原生前端一比一）
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useConversationStore } from '@/stores/conversation'
 import { useResize } from '@/composables/useResize'
@@ -23,22 +23,6 @@ const WS_LABELS = {
   error: '链路异常',
 }
 const wsLabel = computed(() => WS_LABELS[wsStatus.value] || '链路状态未知')
-
-// 顶栏时间：30s 刷新一次，避免秒级重渲染
-const clock = ref('')
-let clockTimer = null
-function tickClock() {
-  const d = new Date()
-  const p = (n) => String(n).padStart(2, '0')
-  clock.value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-onMounted(() => {
-  tickClock()
-  clockTimer = setInterval(tickClock, 30000)
-})
-onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
 
 // 左右栏宽度（px），中间栏 flex:1
 const leftWidth = ref(210)
@@ -103,7 +87,6 @@ function startResize(which, ev) {
           </button>
         </div>
         <span v-if="sessionId" class="status-item mono">会话 {{ sessionId.slice(0, 8) }}</span>
-        <span class="status-item mono clock">{{ clock }}</span>
         <RouterLink class="admin-entry" to="/admin" title="进入管理控制台（需要管理员 MFA）">
           <Icon name="shield" :size="13" />
           <span>管理控制台</span>
@@ -226,7 +209,6 @@ function startResize(which, ev) {
 }
 .header-status :deep(*),
 .header-status .mono,
-.header-status .clock,
 .header-status .admin-entry {
   font-family: inherit;
 }
@@ -235,10 +217,6 @@ function startResize(which, ev) {
   align-items: center;
   gap: 5px;
   white-space: nowrap;
-}
-.status-item.clock {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
 }
 .status-text {
   font-size: var(--fs-sm);
