@@ -267,3 +267,8 @@
 .prompt-dialog .pd-input .el-textarea__inner::placeholder {
   color: var(--text-muted);
 }
+
+/* 全局消息提示：高于搜索/任务等自绘浮层（3000） */
+.el-message {
+  z-index: 4000 !important;
+}
