@@ -698,14 +698,6 @@ onMounted(() => {
           </el-select>
         </div>
 
-        <div class="im-field im-download-hint" :class="{ warn: areaTooLarge }">
-          <Icon name="alert" :size="12" />
-          <span>
-            下载上限 {{ maxArea }}°²，当前范围 {{ areaDeg2.toFixed(2) }}°²
-            <template v-if="areaTooLarge">，请框选更小范围</template>
-          </span>
-        </div>
-
         <div class="im-side-actions">
           <BaseButton class="im-grow" variant="primary" size="lg" bold :disabled="loading" @click="runSearch()">
             {{ loading ? '检索中…' : '检索' }}
@@ -1048,20 +1040,6 @@ onMounted(() => {
   font-style: normal;
   font-size: var(--fs-xs);
   opacity: 0.7;
-}
-.im-download-hint {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 7px 9px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  background: var(--bg-inset);
-  border-radius: var(--r-sm);
-}
-.im-download-hint.warn {
-  color: var(--accent-amber);
-  background: #fdf6e7;
 }
 .im-side-actions {
   position: sticky;
