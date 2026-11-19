@@ -1,7 +1,7 @@
 # 前端组件库清单
 
 > 扫描日期：2026-11-19。范围：`frontend-vue/src`，共 48 个 `.vue` 文件。
-> 设计约束见 [docs/rules/ui-style.md](../rules/ui-style.md)；令牌来源 `frontend-vue/src/styles/theme.css`。
+> 工作台左→右的结构与配色链路见 [workbench-ui-map.md](workbench-ui-map.md)；设计约束见 [docs/rules/ui-style.md](../rules/ui-style.md)；令牌来源 `frontend-vue/src/styles/theme.css`。
 
 ## 一、分层
 
