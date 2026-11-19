@@ -5,6 +5,7 @@
 > 不在范围：管理端 `/admin/**`（其实现与设计不纳入本文结论）、旧版原生前端 `frontend/`、后端接口。
 > 方法：静态扫描 `frontend-vue/src` 的 Vue 单文件组件、全局样式、composables/stores/services；统计值为扫描结果，非估计。
 > 增量（2026-11-19）：样本制作新增 `SamplePanel.vue`、`SamplePhaseDialog.vue`，用户端 Vue 文件 21 个；其余统计未重扫。
+> 当前组件库现状以 [frontend-component-library.md](frontend-component-library.md) 为准；本文保留原始盘点与组件库规划。
 
 ---
 

@@ -142,6 +142,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 | [ui-design-spec.md](platform/ui-design-spec.md) | **用户端 UI 设计（V1）**：信息架构、页面、组件、Copilot 形态；原型见 `core-ui-mockup.html` | 新增 |
 | [two-portal-ui-design.md](platform/two-portal-ui-design.md) | **双门户 UI 设计**：用户端 vs 管理端、管理端信息架构与权限化交互；原型见 `admin-ui-mockup.html` | 新增 |
 | [ui-component-inventory.md](platform/ui-component-inventory.md) | **用户端 UI 资产盘点**：组件/控件清单、样式层重复与覆盖、P0–P2 组件库规划、落地顺序与验收 | 新增 |
+| [frontend-component-library.md](platform/frontend-component-library.md) | **前端组件库清单**：48 个 Vue 文件、基础组件 API、业务组件、composables/services/stores、缺口与分层建议 | 新增 |
 | [rules/ui-style.md](rules/ui-style.md) | **用户端 UI 规则**：设计令牌、字体、层级、状态、按钮、地图工具条、十条规则与禁止项 | 新增 |
 | [open-imagery-sources.md](platform/open-imagery-sources.md) | **开源影像检索**：PC/ES/CDSE/GEE 数据源、REST 契约、AOI 裁剪下载、限制与许可 | 5.5 |
 | [upgrade/README.md](upgrade/README.md) | **改造升级文档集**：记忆、多 Agent、提示词、上下文、Skills、MCP、Harness、工作流、Loop | 9 篇 |
