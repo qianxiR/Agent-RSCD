@@ -64,6 +64,9 @@ frontend-vue/dist/
 # 参考资料 (非本项目源码)
 GeoCD-Agent/
 
+# 大体积本地测试数据（不入库）
+dataes/CD/
+
 # ChangeQwen ONNX 运行时权重（体积大，不入库）
 backend/model/change_detection/change_qwen_runtime/weights/*.onnx
 backend/model/change_detection/change_qwen_runtime/weights/*.npz
