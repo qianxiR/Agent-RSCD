@@ -69,7 +69,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 - 工具：50 个注册工具（14 类），`@register_tool` 注册表统一调度；技能库（Markdown）+ MCP 服务器管理。
 - 记忆：工作记忆（完整工具链）/ 短期会话摘要 / 长期记忆（preference 行为偏好 + profile 稳定画像 + 仅 verification=passed 的 lesson）。
 - LLM：GLM-5.3-Flash（DashScope `qwen3.7-plus` 兜底），System Prompt 显式缓存。
-- 遥感：地物提取走 **SamSeg 本体**（SegEarth-OV3 官方口径：单图/512 滑窗 + 双头融合 + `prob_thd`，英文类别 + 英文同义词，唯一口径无开关）；样本制作当前走 **人工标注**（`backend/model/sample/` 契约/存储/导出），候选阶段将复用 **原生 SAM3**（`backend/model/sam3native/` 文本接地 + 交互头）；变化检测 = **change_qwen 专用 ONNX**（`change_detection/change_qwen_runtime/`，九寨沟滑坡 / 成都建筑两类二值变化权重，336 分块 + 概率 GeoTIFF）；结果矢量化写 `vector_layer`。
+- 遥感：地物提取走 **SamSeg 本体**（SegEarth-OV3 官方口径：单图/512 滑窗 + 双头融合 + `prob_thd`，英文类别 + 英文同义词，唯一口径无开关）；样本制作当前走 **人工标注**（`backend/model/sample/` 契约/存储/导出），候选阶段将复用 **原生 SAM3**（`backend/model/sam3native/` 文本接地 + 交互头）；变化检测 = **change_qwen 专用 ONNX**（`change_detection/change_qwen_runtime/`，九寨沟滑坡 / 成都建筑两类二值变化权重，336 分块 + 概率 GeoTIFF）；结果矢量化写 `vector_layer`。三类入口与模型绑定详见 [architecture-inference-entries.md](model/architecture-inference-entries.md)。
 
 ### 5.4 数据、图层与产物
 
@@ -135,6 +135,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 | [architecture-agent.md](agent/core/architecture-agent.md) | Agent 内核：会话管理 / ReAct 推理 / 三层记忆 / System Prompt / WebSocket | §1 §2 §4 §5 §6 |
 | [architecture-tools.md](model/architecture-tools.md) | 工具系统：注册机制 / 10 大分类 42 工具 / 统一 Tool Result Schema | §3 |
 | [architecture-samseg.md](model/architecture-samseg.md) | SamSeg 遥感分析：开放词汇分割（SamSeg 本体默认）/变化检测/矢量化 | §10 |
+| [architecture-inference-entries.md](model/architecture-inference-entries.md) | **三类推理入口与模型绑定**：样本标注→原生 SAM3 / 地物提取→开放词汇分割 / 变化检测→change_qwen ONNX；边界与待接入项 | 5.3 |
 | [architecture-platform.md](platform/architecture-platform.md) | 平台层：前端指令执行(OpenLayers 地图容器) / GeoServer 数据集成 / 技能编排 / 视觉设计 | §7 §8 §9 §11 附 |
 | [core-architecture-design.md](platform/core-architecture-design.md) | **非 Agent 核心架构（V1）**：项目/数据目录/图层/任务/产物五域，Java BFF + Python Core，Agent 接缝 | 新增 |
 | [production-architecture.md](platform/production-architecture.md) | **生产级双门户架构**：多租户/RBAC/双入口/队列/对象存储/审计/部署 | 新增 |

@@ -22,6 +22,8 @@
 - 样本制作只出"实例级标注"，不再产出业务用分类成果图；
 - 原生 SAM3 不再参与地物提取（`SAMSEG_INFERENCE_MODE` 已废弃），变化检测也不借它兜底。
 
+三类入口的当前状态、模型绑定与待接入接口见 [architecture-inference-entries.md](../../model/architecture-inference-entries.md)。
+
 ## 1. 主流程（唯一一条）
 
 ```
