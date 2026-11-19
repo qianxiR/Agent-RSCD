@@ -4,7 +4,6 @@ import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import Icon from '@/shared/ui/Icon.vue'
 import BaseButton from '@/shared/ui/BaseButton.vue'
-import { SAMPLE_CLASSES } from '@/services/samples'
 import { useSampleStudio } from '@/composables/useSampleStudio'
 import { useSampleEditor } from '@/composables/useSampleEditor'
 
@@ -16,6 +15,7 @@ const {
   sourceFrame,
   frame,
   phases,
+  classes,
   instances,
   selectedId,
   selectedIds,
@@ -24,12 +24,14 @@ const {
   saving,
   status,
   savedAt,
-  classOf,
   polygonArea,
   selectShape,
   removeShape,
   removeSelected,
-  changeClass,
+  changeClassName,
+  classNameOf,
+  classColorHex,
+  setClassColor,
   save,
   exportUrl,
 } = useSampleStudio()
@@ -44,6 +46,17 @@ const canExport = computed(() => Boolean(savedAt.value) && !dirty.value)
 
 function isSelected(id) {
   return id === selectedId.value || selectedIds.value.includes(id)
+}
+
+// 入参: shape, 输入事件 | 方法: 自由输入类别名，空值回退 | 出参: 无
+function onClassNameChange(shape, event) {
+  const text = String(event.target.value || '').trim()
+  if (!text) {
+    event.target.value = classNameOf(shape)
+    return
+  }
+  changeClassName(shape.id, text)
+  event.target.value = classNameOf(shape)
 }
 
 // 入参: 模式 | 方法: 再次点击当前模式时回到浏览 | 出参: 无
@@ -179,20 +192,22 @@ function onDeleteSelected() {
         @click="selectShape(shape.id)"
       >
         <div class="sp-item-top">
-          <span
-            class="sp-swatch"
-            :style="{ background: `rgb(${classOf(shape.classId).color.join(',')})` }"
-          />
-          <select
-            class="sp-select"
-            :value="String(shape.classId)"
+          <input
+            type="color"
+            class="sp-color"
+            :value="classColorHex(shape.classId)"
+            title="选择类别颜色"
             @click.stop
-            @change="changeClass(shape.id, $event.target.value)"
-          >
-            <option v-for="item in SAMPLE_CLASSES" :key="item.id" :value="String(item.id)">
-              {{ item.name }}
-            </option>
-          </select>
+            @input="setClassColor(shape.classId, $event.target.value)"
+          />
+          <input
+            class="sp-class"
+            :value="classNameOf(shape)"
+            list="sp-class-options"
+            placeholder="输入类别"
+            @click.stop
+            @change="onClassNameChange(shape, $event)"
+          />
           <span class="sp-area">{{ Math.round(polygonArea(shape.points)) }} px</span>
           <BaseButton
             variant="icon"
@@ -205,6 +220,9 @@ function onDeleteSelected() {
         </div>
         <div class="sp-item-sub">{{ shape.points.length }} 个顶点</div>
       </div>
+      <datalist id="sp-class-options">
+        <option v-for="item in classes" :key="item.id" :value="item.name" />
+      </datalist>
     </div>
 
     <div v-if="frame" class="sp-status">{{ status || '左键绘制；F2/Enter 闭合；Shift 点顶点删除；框选后 Delete 批删' }}</div>
@@ -357,11 +375,23 @@ function onDeleteSelected() {
 }
 .sp-item.sel { background: #ececec; border-color: var(--border-strong); }
 .sp-item-top { display: flex; align-items: center; gap: 6px; }
-.sp-swatch { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
-.sp-select {
+.sp-color {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+.sp-color::-webkit-color-swatch-wrapper { padding: 1px; }
+.sp-color::-webkit-color-swatch { border: 0; border-radius: 2px; }
+.sp-class {
   min-width: 0;
+  flex: 1;
   height: 24px;
-  padding: 0 4px;
+  padding: 0 5px;
   font-family: inherit;
   font-size: var(--fs-sm);
   color: var(--text-primary);
@@ -369,6 +399,10 @@ function onDeleteSelected() {
   border: 1px solid var(--border);
   border-radius: var(--r-xs);
   outline: none;
+}
+.sp-class:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px var(--bg-inset);
 }
 .sp-area { margin-left: auto; font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sp-item-sub { margin-top: 3px; font-size: var(--fs-sm); color: var(--text-muted); }

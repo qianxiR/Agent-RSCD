@@ -184,6 +184,27 @@ def test_export_dataset_with_crop() -> None:
         assert src.crs is not None
 
 
+def test_custom_class_and_color() -> None:
+    payload = _payload()
+    payload["classes"] = [
+        {"id": 7, "name": "greenhouse", "color": [12, 34, 56]},
+    ]
+    payload["instances"][0]["class_name"] = "greenhouse"
+    result = normalize_annotations(payload)
+    custom = next(item for item in result["classes"] if item["name"] == "greenhouse")
+    assert custom["id"] == 7
+    assert custom["color"] == [12, 34, 56]
+    assert result["instances"][0]["class_name"] == "greenhouse"
+    assert result["instances"][0]["class_id"] == 7
+
+    payload2 = _payload()
+    payload2["instances"][0]["class_name"] = "solar_panel"
+    result2 = normalize_annotations(payload2)
+    names = [item["name"] for item in result2["classes"]]
+    assert "solar_panel" in names
+    assert result2["instances"][0]["class_name"] == "solar_panel"
+
+
 def main() -> None:
     test_normalize_annotations()
     test_pixel_lonlat_roundtrip()
@@ -191,6 +212,7 @@ def main() -> None:
     test_store_save_load_and_copy()
     test_export_coco_and_shp()
     test_export_dataset_with_crop()
+    test_custom_class_and_color()
     print("samples_test: PASS")
 
 

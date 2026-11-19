@@ -25,6 +25,7 @@ const {
   active,
   frame,
   instances,
+  classes,
   selectedId,
   selectedIds,
   selectedVertex,
@@ -533,7 +534,7 @@ function exit() {
 
 // 实例 / 选中 / 模式变化时重绘
 watch(
-  [instances, selectedId, selectedIds, selectedVertex, mode],
+  [instances, classes, selectedId, selectedIds, selectedVertex, mode],
   () => {
     if (!active.value) return
     rebuildShapes()

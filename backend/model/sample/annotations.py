@@ -18,6 +18,12 @@ DEFAULT_CLASSES: List[Dict[str, Any]] = [
     {"id": 6, "name": "farmland", "color": [0, 128, 0]},
 ]
 
+# 自定义类别按顺序取色，保证新增类别有稳定的可视颜色
+CUSTOM_CLASS_COLORS: List[List[int]] = [
+    [148, 103, 189], [227, 119, 194], [188, 189, 34],
+    [23, 190, 207], [174, 199, 232], [255, 187, 120],
+]
+
 
 def polygon_area(points: Sequence[Sequence[float]]) -> float:
     """鞋带公式，返回像素面积。"""
@@ -141,6 +147,18 @@ def normalize_annotations(payload: Dict[str, Any]) -> Dict[str, Any]:
     class_by_name = {item["name"]: item for item in classes}
     class_by_id = {item["id"]: item for item in classes}
 
+    def ensure_class(name: str) -> Dict[str, Any]:
+        item = class_by_name.get(name)
+        if item is not None:
+            return item
+        next_id = max(class_by_id) + 1 if class_by_id else 1
+        color = CUSTOM_CLASS_COLORS[len(classes) % len(CUSTOM_CLASS_COLORS)]
+        item = {"id": next_id, "name": name, "color": list(color)}
+        classes.append(item)
+        class_by_name[name] = item
+        class_by_id[next_id] = item
+        return item
+
     raw_instances = payload.get("instances") or []
     if not isinstance(raw_instances, (list, tuple)):
         raise ValueError("instances 必须是数组")
@@ -150,9 +168,12 @@ def normalize_annotations(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(raw, dict):
             continue
         class_name = str(raw.get("class_name") or raw.get("label") or "").strip()
-        class_item = class_by_name.get(class_name) or class_by_id.get(int(raw.get("class_id") or 0))
+        if class_name:
+            class_item = ensure_class(class_name)
+        else:
+            class_item = class_by_id.get(int(raw.get("class_id") or 0))
         if class_item is None:
-            raise ValueError(f"第 {index + 1} 个实例的类别不在类别表中: {class_name!r}")
+            raise ValueError(f"第 {index + 1} 个实例缺少有效类别")
         class_name = class_item["name"]
 
         if raw.get("points") and raw.get("coordinates"):

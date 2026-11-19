@@ -10,6 +10,12 @@ export const SAMPLE_CLASSES = [
   { id: 6, name: 'farmland', color: [0, 128, 0] },
 ]
 
+// 自定义类别按顺序取色，与后端 CUSTOM_CLASS_COLORS 保持一致
+export const CUSTOM_CLASS_COLORS = [
+  [148, 103, 189], [227, 119, 194], [188, 189, 34],
+  [23, 190, 207], [174, 199, 232], [255, 187, 120],
+]
+
 async function request(url, options = {}) {
   const response = await fetch(url, options)
   const data = await response.json().catch(() => ({}))

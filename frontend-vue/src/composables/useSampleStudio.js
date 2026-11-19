@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue'
 import { toLonLat } from 'ol/proj'
 import {
+  CUSTOM_CLASS_COLORS,
   SAMPLE_CLASSES,
   sampleExportUrl,
   saveSampleAnnotations,
@@ -16,6 +17,7 @@ const sourceFrame = ref(null)
 const frame = ref(null)
 const rangeReady = ref(false)
 const phases = ref([])
+const classes = ref(SAMPLE_CLASSES.map((item) => ({ ...item, color: [...item.color] })))
 const instances = ref([])
 const selectedId = ref('')
 const selectedIds = ref([])
@@ -35,7 +37,54 @@ function newId() {
 }
 
 function classOf(classId) {
-  return SAMPLE_CLASSES.find((item) => item.id === Number(classId)) || SAMPLE_CLASSES[0]
+  return classes.value.find((item) => item.id === Number(classId))
+    || classes.value[0]
+    || SAMPLE_CLASSES[0]
+}
+
+// 入参: 类别名 | 方法: 不存在时按调色板新建类别 | 出参: 类别对象
+function ensureClass(name) {
+  const text = String(name || '').trim()
+  if (!text) return classes.value[0] || SAMPLE_CLASSES[0]
+  const found = classes.value.find((item) => item.name === text)
+  if (found) return found
+  const nextId = classes.value.reduce((max, item) => Math.max(max, item.id), 0) + 1
+  const color = CUSTOM_CLASS_COLORS[classes.value.length % CUSTOM_CLASS_COLORS.length]
+  const item = { id: nextId, name: text, color: [...color] }
+  classes.value.push(item)
+  return item
+}
+
+function classNameOf(shape) {
+  return classOf(shape?.classId).name
+}
+
+function classColorHex(classId) {
+  const [r, g, b] = classOf(classId).color || [0, 0, 0]
+  return `#${[r, g, b].map((v) => Number(v).toString(16).padStart(2, '0')).join('')}`
+}
+
+function setClassColor(classId, hex) {
+  const item = classes.value.find((entry) => entry.id === Number(classId))
+  if (!item) return
+  const text = String(hex || '').replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(text)) return
+  item.color = [
+    parseInt(text.slice(0, 2), 16),
+    parseInt(text.slice(2, 4), 16),
+    parseInt(text.slice(4, 6), 16),
+  ]
+  dirty.value = true
+}
+
+function changeClassName(id, name) {
+  const shape = instances.value.find((item) => item.id === id)
+  const text = String(name || '').trim()
+  if (!shape || !text) return
+  const item = ensureClass(text)
+  shape.classId = item.id
+  shape.edited = true
+  dirty.value = true
 }
 
 // 入参: 无 | 方法: 开始新会话，记录整张抓图帧，等待红框确定工作范围 | 出参: 无
@@ -46,6 +95,7 @@ function beginSession({ projectId, taskName, frameData, phaseList }) {
   frame.value = null
   rangeReady.value = false
   phases.value = phaseList || []
+  classes.value = SAMPLE_CLASSES.map((item) => ({ ...item, color: [...item.color] }))
   instances.value = []
   selectedId.value = ''
   selectedIds.value = []
@@ -156,7 +206,7 @@ function polygonBBox(points) {
 function addShape(points) {
   const shape = {
     id: newId(),
-    classId: SAMPLE_CLASSES[0].id,
+    classId: (classes.value[0] || SAMPLE_CLASSES[0]).id,
     points: points.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]),
     score: null,
     source: 'manual',
@@ -237,7 +287,7 @@ function buildAnnotations() {
       source_height: current.sourceHeight || current.height,
       phases: phases.value.map((item) => ({ date: item.date, path: item.path })),
     },
-    classes: SAMPLE_CLASSES.map((item) => ({ ...item })),
+    classes: classes.value.map((item) => ({ ...item, color: [...item.color] })),
     instances: instances.value.map((shape) => {
       const cls = classOf(shape.classId)
       return {
@@ -308,6 +358,7 @@ export function useSampleStudio() {
     frame,
     rangeReady,
     phases,
+    classes,
     instances,
     selectedId,
     selectedIds,
@@ -329,6 +380,11 @@ export function useSampleStudio() {
     removeShape,
     removeSelected,
     changeClass,
+    changeClassName,
+    ensureClass,
+    classNameOf,
+    classColorHex,
+    setClassColor,
     markDirty,
     buildAnnotations,
     save,
