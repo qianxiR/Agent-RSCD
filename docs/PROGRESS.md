@@ -2253,7 +2253,8 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ### 79.2 入口与时相
 
-- 新增 `SamplePhaseDialog.vue`：任务名、项目、当前视图 bbox、时相 A（必选）、时相 B（可选）。
+- 新增 `SamplePhaseDialog.vue`：任务名、项目、样本区域、时相 A（必选）、时相 B（可选）。
+- 样本区域：点「在地图上框选」关闭弹窗，地图 DragBox 拖框，松开后带新 bbox 重开弹窗；默认取当前视图。
 - 单期：抓取该期 Esri Wayback 影像直接铺图。
 - 双期：A/B 以同一 bbox、同一缩放抓取（`captureWaybackImage` 新增 `exactBbox` / `zoom` 参数）→ 两张同尺寸 GeoTIFF → B 按分隔线右侧裁剪。
 - 抓图复用 `/api/v1/imagery/georeference`，影像以 `ImageStatic` 铺在 3857 地图上。

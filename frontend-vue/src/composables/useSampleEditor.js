@@ -464,11 +464,20 @@ function enter(nextMap) {
   draftLayer = new VectorLayer({
     source: draftSource,
     zIndex: 50,
-    style: new Style({
-      fill: new Fill({ color: 'rgba(75,95,214,0.10)' }),
-      stroke: new Stroke({ color: '#4b5fd6', width: 1.5, lineDash: [5, 4] }),
-      image: new CircleStyle({ radius: 4, fill: new Fill({ color: '#4b5fd6' }) }),
-    }),
+    style: [
+      new Style({
+        stroke: new Stroke({ color: 'rgba(255,255,255,0.95)', width: 4, lineDash: [5, 4] }),
+      }),
+      new Style({
+        fill: new Fill({ color: 'rgba(26,26,24,0.10)' }),
+        stroke: new Stroke({ color: '#1a1a18', width: 1.5, lineDash: [5, 4] }),
+        image: new CircleStyle({
+          radius: 4,
+          fill: new Fill({ color: '#1a1a18' }),
+          stroke: new Stroke({ color: '#ffffff', width: 1.5 }),
+        }),
+      }),
+    ],
   })
 
   map.addLayer(shapeLayer)

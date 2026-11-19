@@ -14,7 +14,7 @@ const props = defineProps({
   bbox: { type: Array, default: null },
 })
 
-const emit = defineEmits(['confirm'])
+const emit = defineEmits(['confirm', 'request-region'])
 const open = defineModel({ type: Boolean, default: false })
 
 const projectStore = useProjectStore()
@@ -125,6 +125,10 @@ function submit() {
         <span>项目：{{ projectLabel }}</span>
         <span>范围约 {{ areaKm2 < 0.01 ? areaKm2.toFixed(4) : areaKm2.toFixed(2) }} km²</span>
       </div>
+      <div class="sp-region">
+        <span>样本区域</span>
+        <button type="button" @click="$emit('request-region')">在地图上框选</button>
+      </div>
       <div class="sp-bbox">{{ bboxText }}</div>
 
       <div class="sp-grid">
@@ -154,8 +158,9 @@ function submit() {
       </div>
 
       <div class="sp-hint">
-        只选时相 A：抓取该期影像直接标注。<br />
-        同时选 B：两期影像按同一范围抓取并进入卷帘，分隔线两侧都可绘制。
+        先在地图上框选样本区域；范围过大时抓图会失败，建议放大地图后框选。<br />
+        只选时相 A：抓取该期影像直接标注；同时选 B：两期影像按同一范围抓取并进入卷帘。<br />
+        进入标注后，还可在影像上框选更小的红框工作范围。
       </div>
 
       <div v-if="error" class="sp-error">{{ error }}</div>
@@ -213,7 +218,7 @@ function submit() {
 }
 .sp-input:focus {
   border-color: var(--border-strong);
-  box-shadow: 0 0 0 2px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--bg-inset);
 }
 .sp-meta {
   display: flex;
@@ -222,6 +227,25 @@ function submit() {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
+.sp-region {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.sp-region button {
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border-strong);
+  cursor: pointer;
+}
+.sp-region button:hover { color: var(--text-primary); }
 .sp-bbox {
   margin-bottom: 12px;
   padding: 7px 9px;

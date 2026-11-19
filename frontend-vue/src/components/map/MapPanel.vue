@@ -119,6 +119,7 @@ const drawHint = computed(() => {
   if (changeDialogLoading.value) return '正在获取两期影像…'
   if (pendingBBox.value) return '已选择区域 · Enter 确定 · Esc 取消'
   if (drawMode.value === 'change') return '拖动选择变化检测范围 · Esc 取消'
+  if (drawMode.value === 'sample') return '拖动选择样本区域 · Esc 取消'
   return drawMode.value === 'capture'
     ? '拖动选择地物提取范围 · Esc 取消'
     : '拖动鼠标框选检索范围 · Esc 取消'
@@ -316,6 +317,18 @@ function onSampleClick() {
   if (!waybackReleases.value.length) loadWaybackReleases()
   sampleBBox.value = getViewBbox()
   samplePhaseOpen.value = true
+}
+
+// 入参: 无 | 方法: 关闭时相弹窗，回到地图框选样本区域；松开后带新范围重开弹窗 | 出参: 无
+function startSampleRegionDraw() {
+  if (!map) return
+  samplePhaseOpen.value = false
+  layerPanelOpen.value = false
+  comparePanelOpen.value = false
+  changeDialogOpen.value = false
+  if (compareActive.value) stopCompareSwipe()
+  if (dragBox) stopDraw()
+  startDraw('sample')
 }
 
 // 入参: { taskName, releaseA, releaseB, bbox, projectId }
@@ -536,7 +549,7 @@ async function captureDirect(bbox) {
   }
 }
 
-// 入参: mode 'imagery'|'capture' | 方法: 进入拖拽框选，结束后按模式回传 bbox | 出参: 无
+// 入参: mode 'imagery'|'capture'|'change'|'sample' | 方法: 进入拖拽框选，结束后按模式回传 bbox | 出参: 无
 function startDraw(mode) {
   if (!map || dragBox) return
   // 重新发起地物提取时，丢弃上一次待确认的框
@@ -564,6 +577,9 @@ function startDraw(mode) {
       capture.cancelDraw()
       pendingBBox.value = bbox
       showCaptureBBox(bbox)
+    } else if (mode === 'sample') {
+      sampleBBox.value = bbox
+      samplePhaseOpen.value = true
     } else {
       imagery.finishDraw(bbox)
     }
@@ -633,6 +649,12 @@ function onKeydown(event) {
   if (pendingBBox.value) {
     event.preventDefault()
     cancelPendingBBox()
+    return
+  }
+  if (drawMode.value === 'sample') {
+    event.preventDefault()
+    stopDraw()
+    samplePhaseOpen.value = true
     return
   }
   if (changeDrawRequested.value) {
@@ -979,7 +1001,7 @@ onBeforeUnmount(() => {
 
       <!-- 框选提示（仅框选模式显示） -->
       <div
-        v-if="pendingBBox || changeDrawRequested || changeDialogLoading || imagery.drawRequested.value || capture.drawRequested.value"
+        v-if="pendingBBox || drawMode === 'sample' || changeDrawRequested || changeDialogLoading || imagery.drawRequested.value || capture.drawRequested.value"
         class="draw-hint"
       >
         <Icon name="map" :size="13" />
@@ -1003,6 +1025,7 @@ onBeforeUnmount(() => {
       :loading="waybackLoading"
       :bbox="sampleBBox"
       @confirm="onSampleConfirm"
+      @request-region="startSampleRegionDraw"
     />
   </div>
 </template>
