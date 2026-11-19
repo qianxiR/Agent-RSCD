@@ -2316,3 +2316,12 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - 任务列表接口已提供，面板尚未做历史任务加载入口。
 - 类别默认 6 类，支持自由输入新类别并自选颜色；后端按名称自动建类。
 - 大范围视域会被抓图上限拒绝，需先放大地图。
+
+### 79.8 UI 规范收口（2026-11-19）
+
+- 清理工作台浅蓝：`MessageBubble` 头像/用户气泡/轨迹卡/工具卡，`AssistantSteps` 轨迹卡/工具结果，`AuthPage` 登录页渐变与网格。
+- 选中态改中性：`LayerPanel` 底图单选、`TaskMonitorDialog` 任务行；`LayerPanel` 蓝色主按钮改黑色。
+- 清理纯黑阴影：卷帘分隔线、图例、各弹窗、侧栏展开按钮、`panel-dialog`、Markdown 浮层。
+- `BaseButton` quick hover、左栏搜索/图层操作 hover、影像入口 hover 改中性文字色。
+- `PromptDialog` / `LayerPanel` 的 EP 覆盖迁到 `styles/overlays.css`，组件内不再写 `!important`。
+- 新增全局技能 `frontend-design-detail` 与 `check_ui_rules.py`；工作台 `--strict` 扫描 0 违规。

@@ -145,46 +145,6 @@ function onEnter(e) {
   padding: 0 16px 16px;
 }
 
-/* 输入框对齐会话输入区：底色 + 发丝级内环，聚焦与基态一致 */
-.pd-input :deep(.el-input__wrapper) {
-  min-height: 44px;
-  padding: 0 12px;
-  border: 0 !important;
-  border-radius: var(--r-shell) !important;
-  background: var(--bg-base) !important;
-  box-shadow: inset 0 0 0 var(--hairline) var(--border-faint) !important;
-}
-.pd-input :deep(.el-input__wrapper.is-focus) {
-  background: var(--bg-base) !important;
-  box-shadow: inset 0 0 0 var(--hairline) var(--border-faint) !important;
-}
-.pd-input :deep(.el-input__inner) {
-  background: transparent !important;
-  box-shadow: none !important;
-  border-radius: 0;
-  font-size: var(--fs-lg);
-  color: var(--text-primary);
-}
-.pd-input :deep(.el-textarea__inner) {
-  padding: 10px 12px 8px;
-  border: 0 !important;
-  border-radius: var(--r-shell) !important;
-  background: var(--bg-base) !important;
-  box-shadow: inset 0 0 0 var(--hairline) var(--border-faint) !important;
-  font-family: var(--sans);
-  font-size: var(--fs-lg);
-  line-height: 1.5;
-  color: var(--text-primary);
-  resize: none;
-}
-.pd-input :deep(.el-textarea__inner:focus) {
-  background: var(--bg-base) !important;
-  box-shadow: inset 0 0 0 var(--hairline) var(--border-faint) !important;
-}
-.pd-input :deep(.el-input__inner::placeholder),
-.pd-input :deep(.el-textarea__inner::placeholder) {
-  color: var(--text-muted);
-}
 .prompt-dialog :deep(.el-dialog__header) {
   padding: 0;
   margin: 0;

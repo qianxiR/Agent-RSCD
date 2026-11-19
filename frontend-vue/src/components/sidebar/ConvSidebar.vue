@@ -742,7 +742,7 @@ function fmtTime(t) {
 }
 
 .search-clear-btn:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
   border-color: var(--glass-accent-border);
 }
@@ -868,7 +868,7 @@ function fmtTime(t) {
   cursor: pointer;
 }
 .project-row-add:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
 }
 .project-row-add.danger:hover {
@@ -1064,9 +1064,9 @@ function fmtTime(t) {
 }
 
 .layer-search-clear-btn:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
-  border-color: var(--glass-accent-border);
+  border-color: var(--border-strong);
 }
 
 .layer-search-results {

@@ -82,7 +82,7 @@ async function onChange(pid) {
   gap: 8px;
   padding: 8px 14px;
   background: var(--bg-panel);
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: var(--hairline) solid var(--border);
 }
 .ctx-actions {
   margin-left: auto;

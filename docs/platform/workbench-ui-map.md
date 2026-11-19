@@ -141,16 +141,21 @@
 - 拖拽分隔线：跟手，无回弹。
 - 弹窗/浮层：`--shadow-float`，不使用纯黑阴影。
 
-## 四、当前不一致
+## 四、当前状态
+
+- 工作台 UI 规则扫描 `--strict`：0 违规。
+- 已清理：`MessageBubble` / `AssistantSteps` 浅蓝底与浅蓝边框；`AuthPage` 浅蓝渐变与网格；`LayerPanel` 底图单选蓝色描边、蓝色主按钮；`TaskMonitorDialog` 选中行蓝色左边条；`BaseButton` quick hover 蓝色；`MainLayout` / `ProjectSelector` 硬编码底边；各弹窗纯黑阴影。
+- 输入框统一 `--bg-inset` + 0.5px 内描边，聚焦不加外发光。
+- 选中态：左栏项目/会话、任务行、样本实例统一 `#ececec`；地图要素选中用加粗描边 + 白色外圈。
+
+仍待处理的非颜色项：
 
 | 位置 | 问题 |
 |---|---|
-| `MessageBubble.vue` | 组件内仍保留 `#eef1ff`、`rgba(241,247,252,.72)`、`rgba(233,242,249,.68)`、`rgba(157,188,213,.45)` 等浅蓝；工作台主要消息/轨迹已被 `design-v2.css` 覆盖，但未覆盖的分支仍会出现浅蓝。 |
-| `MainLayout.vue` | 顶栏底边硬编码 `#f0f0f0`；收起侧栏按钮阴影 `rgba(0,0,0,.06)` 使用纯黑。 |
-| `ConvSidebar.vue` | `#ececec`、`#8d97a5`、`#d03050`、`#f59e0b` 硬编码；与令牌值重复但未走变量。 |
-| `MapPanel.vue` | 样本工具条按钮 `.sample-tool` 未纳入 `design-v2.css` 的地图按钮选择器清单；默认/激活态由通用 `.map-tools-bar button` 与组件 scoped 样式叠加。 |
-| 输入框 | 统一为 `--bg-inset` + 0.5px 内描边；聚焦不加外发光，符合规则。 |
-| 选中态 | 左栏项目/会话与样本实例均为 `#ececec`，无浅蓝；地图要素选中用加粗描边 + 白色外圈。 |
+| `MapPanel.vue` | `.sample-tool` 未列入 `design-v2.css` 的地图按钮选择器清单，默认/激活态由通用 `.map-tools-bar button` 与 scoped 样式叠加。 |
+| `ConvSidebar.vue` | `#ececec`、`#8d97a5` 等仍有硬编码，值与令牌一致但未走变量。 |
+| 地图框选 | `DragBox` 仍用强调色虚线；属于交互提示，不是选中态。 |
+| 管理端 | `/admin/**` 沿用独立壳层 `shell.css`，不纳入工作台规范。 |
 
 ## 五、组件使用总表
 

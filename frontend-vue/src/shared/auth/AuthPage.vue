@@ -422,9 +422,9 @@ function switchAccount() {
   padding: 34px 42px;
   overflow: hidden;
   background:
-    radial-gradient(760px 420px at 8% 0%, rgba(77, 107, 254, 0.14), transparent 62%),
-    radial-gradient(560px 380px at 92% 100%, rgba(106, 134, 255, 0.16), transparent 60%),
-    linear-gradient(160deg, #fafbff 0%, #f2f4ff 52%, #eef1ff 100%);
+    radial-gradient(760px 420px at 8% 0%, rgba(24, 24, 20, 0.05), transparent 62%),
+    radial-gradient(560px 380px at 92% 100%, rgba(24, 24, 20, 0.04), transparent 60%),
+    linear-gradient(160deg, var(--bg-panel) 0%, var(--bg-base) 52%, var(--bg-inset) 100%);
   border-right: 1px solid var(--border);
 }
 .auth-brand::after {
@@ -433,10 +433,10 @@ function switchAccount() {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(77, 107, 254, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(77, 107, 254, 0.05) 1px, transparent 1px);
+    linear-gradient(rgba(24, 24, 20, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 24, 20, 0.04) 1px, transparent 1px);
   background-size: 44px 44px;
-  mask-image: radial-gradient(120% 90% at 30% 20%, #000 30%, transparent 78%);
+  mask-image: radial-gradient(120% 90% at 30% 20%, #fff 30%, transparent 78%);
   pointer-events: none;
 }
 .auth-brand > * {
@@ -554,7 +554,7 @@ function switchAccount() {
   margin-bottom: 14px;
   border-radius: var(--r-md);
   background: var(--bg-inset);
-  color: var(--accent-hover);
+  color: var(--text-secondary);
   font-size: var(--fs-sm);
   line-height: 1.55;
 }

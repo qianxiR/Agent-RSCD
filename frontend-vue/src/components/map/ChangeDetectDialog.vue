@@ -275,7 +275,7 @@ function confirm() {
   border-radius: 14px;
   overflow: hidden;
   background: var(--bg-panel);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-float);
 }
 .change-dialog .el-dialog__header {
   padding: 0;

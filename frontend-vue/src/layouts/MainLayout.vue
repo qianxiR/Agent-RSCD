@@ -163,7 +163,7 @@ function startResize(which, ev) {
   gap: 16px;
   padding: 0 18px;
   background: var(--bg-panel);
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: var(--hairline) solid var(--border);
   color: var(--text-primary);
   z-index: 10;
 }
@@ -205,7 +205,7 @@ function startResize(which, ev) {
   flex-shrink: 0;
   font-size: var(--fs-md);
   color: var(--text-muted);
-  font-family: 'Times New Roman', SimSun, serif;
+  font-family: var(--sans);
 }
 .header-status :deep(*),
 .header-status .mono,
@@ -357,13 +357,13 @@ function startResize(which, ev) {
   left: 0;
   border-left: none;
   border-radius: 0 8px 8px 0;
-  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.06);
+  box-shadow: 2px 0 6px rgba(24, 24, 20, 0.06);
 }
 .pane-expand.right {
   right: 0;
   border-right: none;
   border-radius: 8px 0 0 8px;
-  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.06);
+  box-shadow: -2px 0 6px rgba(24, 24, 20, 0.06);
 }
 .pane {
   min-width: 0;

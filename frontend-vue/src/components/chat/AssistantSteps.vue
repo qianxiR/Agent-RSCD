@@ -358,15 +358,15 @@ function formatToolArgs(args) {
   width: 100%;
   box-sizing: border-box;
   background: var(--bg-panel);
-  border: 1px solid rgba(157, 188, 213, 0.78);
-  border-left: 1px solid rgba(157, 188, 213, 0.78);
+  border: var(--hairline) solid var(--border);
+  border-left: var(--hairline) solid var(--border);
   border-radius: var(--r-shell);
   padding: 7px 9px;
   box-shadow: none;
 }
 
 .trace-card.tool-call-group {
-  border-left-color: rgba(157, 188, 213, 0.78);
+  border-left-color: var(--border);
   background: var(--bg-panel);
 }
 
@@ -512,7 +512,7 @@ function formatToolArgs(args) {
   padding: 7px 9px;
   border-radius: var(--r-sm);
   background: var(--bg-panel);
-  border: 1px solid rgba(157, 188, 213, 0.45);
+  border: var(--hairline) solid var(--border);
   color: var(--text-secondary);
   font-family: var(--mono);
   font-size: 12px;
@@ -525,8 +525,8 @@ function formatToolArgs(args) {
   margin-top: 8px;
   padding: 8px 10px;
   border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: rgba(233, 242, 249, 0.68);
+  border: var(--hairline) solid var(--border);
+  background: var(--bg-inset);
 }
 
 .tool-inline-result-head {

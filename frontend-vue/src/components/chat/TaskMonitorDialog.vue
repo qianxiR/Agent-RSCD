@@ -214,8 +214,8 @@ watch(() => props.visible, (v) => {
   color: var(--text-secondary);
 }
 .task-monitor-modal :deep(.el-button:hover) {
-  border-color: var(--glass-accent-border);
-  color: var(--accent);
+  border-color: var(--glass-border-strong);
+  color: var(--text-primary);
 
 }
 .task-monitor-modal :deep(.el-button--danger.is-plain) {
@@ -233,7 +233,7 @@ watch(() => props.visible, (v) => {
 /* 任务卡片 */
 .task-row { padding: 10px 14px; border-bottom: 1px solid var(--glass-border-soft); cursor: pointer; }
 .task-row:hover { background: var(--bg-hover); }
-.task-row.active { background: color-mix(in srgb, var(--bg-hover) 72%, transparent); border-left: 3px solid var(--accent); }
+.task-row.active { background: #ececec; border-left: 3px solid var(--border-strong); }
 .task-row-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .task-row-type { font-family: var(--mono); font-size: var(--fs-sm); }
 .task-row-meta { font-size: var(--fs-xs); color: var(--text-muted); }

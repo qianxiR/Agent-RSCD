@@ -90,7 +90,7 @@ defineProps({
 }
 
 .ui-btn--quick:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 /* ---------- 尺寸 ---------- */

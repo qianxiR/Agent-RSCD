@@ -706,8 +706,8 @@ function onBasemapDropdown(open) {
   border: 1.5px solid var(--border-strong);
 }
 .basemap-radio.checked {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 3px var(--accent);
+  border-color: var(--text-primary);
+  box-shadow: inset 0 0 0 3px var(--text-primary);
 }
 .basemap-name {
   flex: none;
@@ -730,10 +730,6 @@ function onBasemapDropdown(open) {
 }
 .basemap-date-select {
   width: 100%;
-}
-.basemap-date-select :deep(.el-select__wrapper),
-.basemap-date-select :deep(.el-select__wrapper.is-focused) {
-  background: transparent !important;
 }
 .basemap-note {
   font-size: 12px;
@@ -882,7 +878,7 @@ function onBasemapDropdown(open) {
   font-size: 13px;
 }
 .layer-name:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
   text-decoration: none;
 }
@@ -998,9 +994,9 @@ function onBasemapDropdown(open) {
 }
 
 .layer-search-clear-btn:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
-  border-color: var(--glass-accent-border);
+  border-color: var(--border-strong);
 }
 
 .layer-search-results {
@@ -1112,8 +1108,12 @@ function onBasemapDropdown(open) {
 }
 
 .ws-pick-btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: #1a1a1a;
+  border-color: #1a1a1a;
+  color: #fcfcfb;
+}
+.ws-pick-btn.primary:hover:not(:disabled) {
+  background: #111110;
+  border-color: #111110;
 }
 </style>

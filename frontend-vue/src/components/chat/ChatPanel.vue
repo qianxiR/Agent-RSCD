@@ -656,8 +656,8 @@ onBeforeUnmount(() => {
 
 /* Ensure internal focusable elements do not show global focus shadow */
 .input-wrapper :focus-visible {
-  box-shadow: none !important;
-  outline: none !important;
+  box-shadow: none;
+  outline: none;
 }
 .ai-textarea {
   flex: 1;

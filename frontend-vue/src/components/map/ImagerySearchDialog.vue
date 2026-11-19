@@ -861,7 +861,7 @@ onMounted(() => {
   padding: 0;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-float);
 }
 .imagery-dialog .el-dialog__header {
   padding: 0;

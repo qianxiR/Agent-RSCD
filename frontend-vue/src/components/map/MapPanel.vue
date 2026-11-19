@@ -1308,7 +1308,7 @@ onBeforeUnmount(() => {
   width: 2px;
   margin-left: -1px;
   background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px rgba(24, 24, 20, 0.35);
   z-index: 18;
   cursor: ew-resize;
   touch-action: none;
@@ -1491,10 +1491,10 @@ onBeforeUnmount(() => {
 }
 .imagery-entry:hover,
 .imagery-entry.capture-entry:hover {
-  color: var(--accent);
+  color: var(--text-primary);
 
-  border-color: var(--accent);
-  background: #fff;
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
 }
 .imagery-clear {
   color: var(--accent-red);

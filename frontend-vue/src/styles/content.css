@@ -179,7 +179,7 @@
   max-width: min(320px, calc(100vw - 24px));
   box-sizing: border-box;
   font-size: var(--fs-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px rgba(24, 24, 20, 0.15);
   /* 卫星景号等超长无空格字符串必须可断行，否则会撑破弹窗 */
   overflow-wrap: anywhere;
 }

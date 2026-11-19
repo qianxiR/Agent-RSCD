@@ -51,6 +51,6 @@ defineProps({
   width: 10px;
   height: 10px;
   border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  border: var(--hairline) solid rgba(24, 24, 20, 0.15);
 }
 </style>

@@ -209,7 +209,7 @@ async function submit() {
   padding: 0;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-float);
 }
 .capture-dialog .el-dialog__header { padding: 0; margin: 0; }
 .capture-dialog .el-dialog__body { padding: 0; }
@@ -269,7 +269,7 @@ async function submit() {
   bottom: 6px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(24, 24, 20, 0.55);
   color: #fff;
   font-size: 12px;
 }

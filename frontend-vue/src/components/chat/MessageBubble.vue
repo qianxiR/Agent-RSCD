@@ -315,8 +315,8 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: #eef1ff;
-  color: var(--accent);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
 
   display: flex;
   align-items: center;
@@ -387,10 +387,10 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   overflow-wrap: break-word;
 }
 .message.user .message-bubble {
-  background: #f2f3f5;
+  background: var(--bg-inset);
   color: var(--text-primary);
   border: none;
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 .message.ai .message-bubble {
   background: transparent;
@@ -412,7 +412,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   gap: 6px;
   font-size: var(--fs-md);
   font-weight: var(--fw-strong);
-  color: var(--accent);
+  color: var(--text-primary);
 
   margin-bottom: 6px;
 }
@@ -431,16 +431,16 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 .trace-card {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(241, 247, 252, 0.72);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--accent);
+  background: var(--bg-base);
+  border: var(--hairline) solid var(--border);
+  border-left: var(--hairline) solid var(--border);
   border-radius: var(--r-shell);
   padding: 7px 9px;
   box-shadow: none;
 }
 .trace-card.tool-call-group {
-  border-left-color: var(--accent);
-  background: rgba(241, 247, 252, 0.72);
+  border-left-color: var(--border);
+  background: var(--bg-base);
 }
 .trace-head {
   width: 100%;
@@ -592,8 +592,8 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   overflow: auto;
   padding: 7px 9px;
   border-radius: var(--r-sm);
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid rgba(157, 188, 213, 0.45);
+  background: var(--bg-panel);
+  border: var(--hairline) solid var(--border);
   color: var(--text-secondary);
   font-family: var(--mono);
   font-size: var(--fs-sm);
@@ -605,8 +605,8 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   margin-top: 8px;
   padding: 8px 10px;
   border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: rgba(233, 242, 249, 0.68);
+  border: var(--hairline) solid var(--border);
+  background: var(--bg-inset);
 }
 .tool-inline-result-head {
   display: flex;
