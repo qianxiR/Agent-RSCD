@@ -225,7 +225,7 @@ def _build_polygon_layer_params(result: dict, cls_tag: str) -> dict:
                         bbox = bb
                 except Exception:
                     pass
-                # 为面图层设置蓝色样式 (#2C6FBD = GeoAI Copilot 标题色, 填充+描边)
+                # 为面图层设置红色样式 (#FF0000 半透明填充+描边, 分割掩码/边界统一红色)
                 style_name = gs._ensure_samseg_polygon_style()
                 if style_name:
                     gs._set_layer_default_style(workspace, layer_name, style_name)
@@ -313,9 +313,17 @@ class DetectChangeArgs(BaseModel):
 
     t1_path: str = Field(..., description="T1 时相影像的本地路径")
     t2_path: str = Field(..., description="T2 时相影像的本地路径")
+    model: str = Field(
+        "jiuzhaigou_landslide",
+        description=(
+            "专用变化检测权重：jiuzhaigou_landslide=九寨沟滑坡（地震后滑坡/松散堆积体）；"
+            "chengdu_building=成都市 2016–2023 年建筑变化（2016 / 2023 两期影像）。"
+            "仅这两个权重可用。"
+        ),
+    )
     classes: str = Field(
         "",
-        description="英文类别 + 英文同义词；分号分类别，逗号分同义词；留空使用默认类别",
+        description="兼容参数；专用权重使用固定文本提示，留空即可",
     )
 
 
@@ -343,7 +351,7 @@ def segment_image(
     ★ 不触发场景: 用户只是问"图里有什么/描述一下/这是什么地物"等**理解类**问题 ——
       那是影像理解需求, 本工具只会按类别画掩膜, 无法回答"有什么", 不要调用。
     ★ 耗时: 推理通常 5~30 秒 (取决于图片大小和类别数), 首次调用需加载模型 (约几十秒)。
-    ★ 依赖: 需 torch + ProC-SAM3 权重就绪, 否则返回不可用错误。
+    ★ 依赖: 需 torch + SamSeg 权重 (backend/model/SamSeg) 就绪, 否则返回不可用错误。
     ★ 图片来源: 前端上传后返回的绝对路径 (如 .../agent-files/send/{conv_id}/xxx.png)。
 
     入参:
@@ -356,8 +364,8 @@ def segment_image(
             "找出温室大棚" → "greenhouse, plastic roof, glasshouse"
           常用类别: building / road / water / vegetation / farmland / bareland。
           留空则用默认 6 类（含同义词）。
-        - referring_expression (str): 当前 ProC-SAM3 引擎暂不支持指代单实例；
-          传入会返回明确错误。
+        - referring_expression (str): 可选指代式表达，如 "the largest building at
+          the top left"；提供后按大小/方位/参照关系只输出单个实例。
     出参: frontend_action 指令, 前端右侧面板展示彩色分割结果
 
     示例:
@@ -489,7 +497,7 @@ def segment_image(
         )
 
         # ★ 工作区布局: 原图层 (底图) + 变化面 (GeoServer WMS, 仅此一个矢量结果)
-        #   面 SHP 统一为 #2C6FBD (GeoAI Copilot 标题色), 描边由面图层样式完成。
+        #   面 SHP 统一为 #FF0000 (填充分割掩码 + 描边界), 与前端 WFS 红色样式一致。
         polygon_layer = _build_polygon_layer_params(result, cls_tag)
         # ★ 原图底图层: 同步上传到 GeoServer → 前端从 WMS 加载 (支持属性查询 GetFeatureInfo)
         #   框选解译的输入来自底图截图, 地图上已有同源高分底图;
@@ -555,36 +563,47 @@ def segment_image(
         return {"type": "error", "msg": f"分割执行失败: {e}"}
 
 
+def _resolve_change_model(model: str, classes: str) -> tuple[str, str, str]:
+    """把工具入参归一化为 ONNX 权重键、中文场景名、GeoServe 图层标签。"""
+    text = f"{model or ''} {classes or ''}".lower()
+    if any(key in text for key in ("chengdu", "cdcd", "building", "建筑", "成都")):
+        return "cdcd", "成都市 2016–2023 年建筑变化", "building"
+    return "jzg", "九寨沟滑坡变化", "landslide"
+
+
 @register_tool("samseg")
 @tool(args_schema=DetectChangeArgs)
-def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, Any]:
+def detect_change(t1_path: str, t2_path: str, classes: str = "",
+                  model: str = "jiuzhaigou_landslide") -> Dict[str, Any]:
     """
-    对两张不同时期的图片 (双时相) 做变化检测, 找出哪些区域发生了地物变化, 在前端展示变化图。
+    对两张不同时期的图片 (双时相) 做变化检测, 找出变化区域, 在前端展示变化图。
 
-    ★ 触发场景: 用户**明确要求做变化检测/对比变化** (如"对比这两张图的变化""检测这两期影像的变化""哪里发生了改变")。
-    ★ 不触发场景: 用户只是想"了解/描述"某张图 —— 那是影像理解需求, 不要用本工具。
-    ★ 耗时: 两张图各自分割 + 变化对比, 通常 10~60 秒, 首次调用需加载模型。
-    ★ 依赖: 需 torch + ProC-SAM3 权重就绪, 否则返回不可用错误。
-    ★ 图片来源: 前端「变化检测」区域选择 + 时相选择自动生成的两期 Sentinel-2 GeoTIFF，
-      也可由用户直接上传两张图片；两张按顺序作为 T1、T2。
+    ★ 仅支持两个专用权重 (二值变化):
+      - jiuzhaigou_landslide: 九寨沟滑坡变化 (地震后滑坡、松散堆积体)。
+      - chengdu_building: 成都市 2016–2023 年建筑变化 (城市扩张/新增建筑;
+        2016 / 2023 两期影像)。
+
+    ★ 触发场景: 用户**明确要求做变化检测/对比变化**, 且区域属于上述两类场景。
+    ★ 不触发场景: 用户只是想"了解/描述"某张图, 或区域不属于上述两类场景。
+    ★ 耗时: 整景分块推理, 单块 336×336; GPU 下约 0.5 秒/块, 首次加载约 20 秒。
+    ★ 依赖: ONNX Runtime + 两个 ONNX 权重; 不再使用 SAM3 分割对比。
+    ★ 图片来源: 前端「变化检测」区域选择 + 时相选择生成的两期 GeoTIFF。
 
     入参:
-        - t1_path (str): 前一时相 (T1) 图片绝对路径
-        - t2_path (str): 后一时相 (T2) 图片绝对路径
-        - classes (str): 英文类别 + 英文同义词；分号分隔类别、逗号分隔同义词。
-          例: "building, house, roof; vegetation, tree, grass"。留空用默认 6 类。
-    出参: frontend_action 指令, 前端右侧面板展示变化检测结果
-           (变化区域按变化后的地物类别上色, 未变化区域为白色背景)
+        - t1_path (str): 前一时相 (T1) 影像绝对路径。
+        - t2_path (str): 后一时相 (T2) 影像绝对路径。
+        - model (str): 权重选择。
+            jiuzhaigou_landslide = 九寨沟滑坡；
+            chengdu_building     = 成都市 2016–2023 年建筑变化。
+        - classes (str): 兼容参数；专用权重使用固定文本提示，留空即可。
+
+    出参: frontend_action 指令, 前端展示变化图斑、统计与矢量结果。
 
     示例:
-        detect_change("E:/.../t1_2020.png", "E:/.../t2_2024.png",
-                      "building, house, roof; vegetation, tree, grass")
+        detect_change("E:/.../t1.tif", "E:/.../t2.tif",
+                      model="jiuzhaigou_landslide")
     """
-    from backend.model.SamSeg import runner
     from backend.model.SamSeg.geoio import assert_image_has_crs
-
-    if not runner.samseg_available():
-        return {"type": "error", "msg": "SamSeg 不可用: 未安装 torch 或模型权重缺失"}
 
     if not Path(t1_path).is_file():
         return {"type": "error", "msg": f"T1 图片不存在: {t1_path}"}
@@ -612,58 +631,71 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
     spatial_warnings = spatial_check.get("warnings") or [] if spatial_check.get("deep_checked") else []
 
     try:
+        model_key, model_label, cls_tag = _resolve_change_model(model, classes)
         out_dir = _ensure_output_dir()
-        cls_tag = _classes_tag(classes)
-        # ★ v2.4 命名精简: 文件名 = {conv短}_{类别}_change_{随机4}.png (去 t1_t2 拼接和时间戳)
-        #   stem 只用于 caption 展示 "T1_T2" 原图名, 不进文件名
         stem = f"{Path(t1_path).stem}_{Path(t2_path).stem}"
         conv = short_conv() or "anon"
         suffix = rand_suffix(4)
-        out_file = f"{conv}_{cls_tag}_change_{suffix}.png"
-        out_path = str(out_dir / out_file)
+        run_dir = out_dir / f"{conv}_{cls_tag}_change_{suffix}"
+        run_dir.mkdir(parents=True, exist_ok=True)
 
-        # ★ P1 矢量化: 准备变化图斑 GeoJSON 输出路径
-        vec_dir = _ensure_vector_dir()
-        # 与分割流程保持同一产物契约：ASCII GeoJSON + 同源 Shapefile。
-        from backend.model.SamSeg.geoio import ascii_stem
-        vec_stem = ascii_stem(Path(out_file).stem, fallback=f"{conv}_change_{suffix}")
-        vec_file = f"{vec_stem}.geojson"
-        vec_path = str(vec_dir / vec_file)
+        from backend.model.change_detection.change_qwen_runtime import predict_change
+        import os as _os
 
         t0 = time.time()
-        result = runner.run_change_detection(
-            t1_path=t1_path,
-            t2_path=t2_path,
-            output_path=out_path,
-            classes=classes or None,
-            vector_output_path=vec_path,
-            save_mask=False,
-        )
+        try:
+            result = predict_change(
+                t1_path,
+                t2_path,
+                model=model_key,
+                output_dir=str(run_dir),
+                threshold=float(_os.getenv("CHANGE_QWEN_THRESHOLD", "0.5")),
+                device=_os.getenv("CHANGE_QWEN_DEVICE", "auto"),
+                min_area_px=int(_os.getenv("CHANGE_QWEN_MIN_AREA_PX", "0")),
+                min_area_m2=float(_os.getenv("CHANGE_QWEN_MIN_AREA_M2", "50")),
+                save_prob=True,
+            )
+        except Exception as exc:
+            return {"type": "error", "msg": f"变化检测失败: {exc}"}
         elapsed = time.time() - t0
 
-        if not result:
-            return {"type": "error", "msg": f"变化检测失败: {t1_path} vs {t2_path}"}
+        stats = {
+            "total_regions": int(result["stats"]["regions"]),
+            "changed_pixels": int(result["stats"]["changed_pixels"]),
+            "changed_percent": float(result["stats"]["changed_percent"]),
+            "per_class": [{
+                "name": "变化",
+                "regions": int(result["stats"]["regions"]),
+                "area_px": int(result["stats"]["changed_pixels"]),
+                "area_percent": float(result["stats"]["changed_percent"]),
+            }],
+        }
+        vector_stats = {
+            "total_features": int(result["stats"]["regions"]),
+            "total_area_m2": float(result["stats"]["total_area_m2"]),
+            "per_class": [{
+                "name": "变化",
+                "count": int(result["stats"]["regions"]),
+                "area_m2": float(result["stats"]["total_area_m2"]),
+            }],
+        }
+        legend = [{"name": "变化", "hex": "#ff0000"}]
+        transition = None
 
-        # ★ 双时相输入影像 URL: 让前端能从服务器读取 T1/T2 原图, 与结果对比展示
         input_image_url = _build_input_image_url(t1_path)
         input_image_url_t2 = _build_input_image_url(t2_path)
-        cls_desc = classes if classes else "7类"
-        stats = result.get("stats", {})
-        legend = result.get("legend", [])  # ★ 颜色→类别图注 (与 PNG 颜色严格一致)
-        # ★ P1: 矢量变化图斑统计 (面积/图斑数, 供摘要)
-        vector_stats = result.get("vector_stats")
+        cls_desc = model_label
         vector_path = result.get("vector_path")
         vector_url = _build_vector_url(vector_path)
         _register_vector_metadata(vector_path, "change", t1_path)
+        result["shp_zip_path"] = result.get("shp_dir_path")
 
-        # 业务类型判读必须在本地确定性完成，避免外部 VLM 网络请求阻塞检测任务终态。
-        present_classes = [item.get("name", "") for item in stats.get("per_class", [])]
-        # ★ S7: 把类别转移矩阵传入规则判读, 让业务事件带 from→to 面积支撑
-        transition = result.get("transition")
-        change_type_info = runner.classify_change_type_by_rule(
-            present_classes, stats, transition=transition
-        )
-        change_type_info["source"] = "rule"
+        change_type_info = {
+            "change_type": "滑坡变化" if model_key == "jzg" else "建筑变化",
+            "confidence": 1.0,
+            "reason": f"使用专用权重 {model_label}",
+            "source": "model",
+        }
 
         # ★ 构建详细摘要供 LLM 综合描述
         per_class_lines = []
@@ -696,7 +728,7 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             conf = change_type_info.get("confidence", 0)
             reason = change_type_info.get("reason", "")
             src = change_type_info.get("source", "rule")
-            src_label = "VLM判读" if src == "vlm" else "规则推断"
+            src_label = "专用权重" if src == "model" else ("VLM判读" if src == "vlm" else "规则推断")
             change_type_summary = (
                 f"\n业务变化类型 ({src_label}): {ct} (置信度 {conf})\n"
                 f"  判读依据: {reason}\n"
@@ -741,7 +773,7 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
             )
 
         # ★ 工作区布局: T1 原图层 (底图) + 变化面 (GeoServer WMS, 仅此一个矢量结果)
-        #   变化面 SHP 统一为 #2C6FBD (GeoAI Copilot 标题色), 描边由面图层样式完成。
+        #   变化面 SHP 统一为 #FF0000 (填充变化掩码 + 描边界), 与前端 WFS 红色样式一致。
         polygon_layer = _build_polygon_layer_params(result, cls_tag)
         # ★ 原图底图层 (T1): 同步上传到 GeoServer → 前端从 WMS 加载 (支持属性查询 GetFeatureInfo)
         base_layer = _build_base_layer_params(t1_path, cls_tag)
@@ -787,6 +819,8 @@ def detect_change(t1_path: str, t2_path: str, classes: str = "") -> Dict[str, An
                 "t1_path": t1_path,
                 "t2_path": t2_path,
                 "classes": cls_desc,
+                "model": model_key,
+                "model_label": model_label,
                 "elapsed": round(elapsed, 1),
                 "stats": stats,
                 "transition": transition,

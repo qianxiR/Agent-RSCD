@@ -23,7 +23,7 @@
 Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主线，通过数据层、模型层、智能体层、服务平台四大板块的分层解耦与协同联动，形成从底层数据资源组织、核心智能能力构建到上层自然语言交互的完整闭环。
 
 - **数据层**是基础资源层，为系统提供高质量的空间与业务语料：通过 GeoServer 统一发布 WMS/WFS/WCS 栅格与矢量图层服务，PostgreSQL 业务库以「表名作参数」的通用 CRUD 承载业务数据，并预留知识库骨架（pgvector/向量服务可选），为上层的认知与推理提供可检索、可操作的数据底座。
-- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面以 `model/base.py` + `model/registry.py` 统一解译模型协议，把 **ProC-SAM3 分割/变化检测**（代码已 vendored，权重外置）、影像理解、后续检测/分类模型做成可插拔适配器。GeoServer 操作、数据库 CRUD、图层控制、沙盒、预处理、报表等能力则作为 **56 个注册工具（14 类）** 放在 `agent/tools/`，由 `@register_tool` 统一调度；Markdown 技能方案承载长任务编排。
+- **模型层**作为智能中枢，实现了「通用地学大模型 + 专业技能模型」的融合：一方面通过 **GLM-5.3-Flash（智谱 OpenAI 兼容接口，DashScope `qwen3.7-plus` 兜底）** 提供统一的认知、推理与生成能力；另一方面以 `model/base.py` + `model/registry.py` 统一解译模型协议，把 **地物提取（SamSeg 本体）/ 变化检测（change_qwen 专用 ONNX）/ 样本制作（原生 SAM3）**、影像理解、后续检测/分类模型做成可插拔适配器。GeoServer 操作、数据库 CRUD、图层控制、沙盒、预处理、报表等能力则作为 **56 个注册工具（14 类）** 放在 `agent/tools/`，由 `@register_tool` 统一调度；Markdown 技能方案承载长任务编排。
 - **智能体层**作为应用承载，采用 **ReAct 推理 + 工具编排 + 可选 Plan-first / Plan-and-Execute** 机制：流式输出思维链、无硬性工具轮次上限（用户停止兜底）、按 `conversation_id` 精确停止与消息回滚；执行前可由 PlanGraph 生成 DAG，开启 `AGENT_PLAN_EXECUTE` 后外层规划器按步骤调度、内层受限 ReAct 逐步执行、必需步骤失败触发重规划，执行中由确定性 verification/repair/completion gate 约束。配合**三层记忆系统**（工作记忆、短期摘要、长期经验/教训）与显式上下文缓存，将大模型的「单次问答」升级为「持续推理、自主决策、长程协作」的智能体行为。
 - **服务平台**面向终端用户，通过 **WebSocket 全双工通道**实现前后端协同：以 `request_id` 配对完成「智能体发指令→前端执行渲染→回传结果」的闭环，支持同一连接多对话并行；前端集成聊天交互、**OpenLayers 地图容器**（影像/掩膜/矢量图层叠加 + WMS 图层 + GetFeatureInfo 属性弹窗 + 颜色图注）、数据表格面板，以及任务日志监控。
 
@@ -32,13 +32,13 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 | 板块 | 对应代码 | 关键组件 | 体现的「转型」 |
 |------|---------|---------|---------------|
 | 数据层 | `backend/data/` | AssetRef/catalog、GeoServer、业务库、五类数据域 | 数据资源组织 |
-| 模型层 | `backend/model/` | LLM 客户端、解译模型协议/registry、ProC-SAM3 适配器 | 认知/推理/生成 + 专业技能融合 |
+| 模型层 | `backend/model/` | LLM 客户端、解译模型协议/registry、SamSeg 本体 / 原生 SAM3 / change_qwen 适配器 | 认知/推理/生成 + 专业技能融合 |
 | 智能体层 | `backend/agent/` | ReAct/PlanGraph/DAG、工具注册表、三层记忆、System Prompt、WS 任务管理 | 规则驱动 → 认知/决策驱动 |
 | 服务平台 | `frontend-vue/` | 工作台（聊天 + OpenLayers 地图 + 图层）+ 管理控制台（`/admin` 路由）；WS 多对话路由 | 上层应用服务闭环 + 治理闭环 |
 
 ---
 
-## 当前核心功能快照（2026-10，阶段 36）
+## 当前核心功能快照（2026-11，阶段 76）
 
 > 反映当前代码的真实实现；未完成项在文末「边界与待办」列出。
 
@@ -67,9 +67,9 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 
 - ReAct 推理 + 工具编排，最多 15 轮；流式思维链；`request_id` 前后端闭环；按 `conversation_id` 停止/回滚。
 - 工具：50 个注册工具（14 类），`@register_tool` 注册表统一调度；技能库（Markdown）+ MCP 服务器管理。
-- 记忆：工作记忆（完整工具链）/ 短期会话摘要 / 长期经验（仅 verification=passed 的 lesson）；偏好/事实提取默认关闭。
+- 记忆：工作记忆（完整工具链）/ 短期会话摘要 / 长期记忆（preference 行为偏好 + profile 稳定画像 + 仅 verification=passed 的 lesson）。
 - LLM：GLM-5.3-Flash（DashScope `qwen3.7-plus` 兜底），System Prompt 显式缓存。
-- 遥感：**ProC-SAM3**（Prompt-Calibrated SAM3，开放词汇；英文类别 + 英文同义词；默认 504 交互快，`PROC_SAM3_RESOLUTION=1008` 精度优先）；变化检测 = 两期 ProC 掩膜实例对比；结果矢量化写 `vector_layer`。旧 SegEarth-OV3 保留 `SAMSEG_ENGINE=legacy` 回退。
+- 遥感：地物提取走 **SamSeg 本体**（SegEarth-OV3 官方口径：单图/512 滑窗 + 双头融合 + `prob_thd`，英文类别 + 英文同义词，唯一口径无开关）；样本制作当前走 **人工标注**（`backend/model/sample/` 契约/存储/导出），候选阶段将复用 **原生 SAM3**（`backend/model/sam3native/` 文本接地 + 交互头）；变化检测 = **change_qwen 专用 ONNX**（`change_detection/change_qwen_runtime/`，九寨沟滑坡 / 成都建筑两类二值变化权重，336 分块 + 概率 GeoTIFF）；结果矢量化写 `vector_layer`。
 
 ### 5.4 数据、图层与产物
 
@@ -85,12 +85,13 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 - 四个源：`pc`（检索 + 瓦片 + AOI 裁剪）、`es`（检索 + 快视图）、`cdse`（检索 + 快视图，整景去浏览器）、`gee`（兜底，需服务账号 + 科学上网，默认未配置）；
 - 路由：`/api/v1/imagery/{providers,search,thumbnail,download,georeference}`（`change-captures` 为 legacy Sentinel-2 路径，当前 UI 不使用）；
 - 框选取图：`POST /api/v1/imagery/capture`（Esri export / 天地图瓦片拼接 → 带 CRS GeoTIFF，落 `imagery/captures/`）；前端 `CaptureInterpretDialog.vue` + 地图左上角「地物提取」入口；Esri 失败自动回退天地图；
-- 前端：`ImagerySearchDialog.vue`（左侧筛选 + 右侧结果网格）+ 左栏「影像」入口 + DragBox 框选；左上角工具条依次为 `图层 → 卷帘 → 地物提取 → 变化检测`，点击预览影像弹出景号/日期/云量/数据源；
+- 前端：`ImagerySearchDialog.vue`（左侧筛选 + 右侧结果网格）+ 左栏「影像检索」入口 + DragBox 框选；左上角工具条依次为 `图层 → 卷帘 → 样本制作 → 地物提取 → 变化检测`，点击预览影像弹出景号/日期/云量/数据源；
 - 图层面板两级：第一级 `底图`（Esri 最新影像 / 天地图影像 / 天地图矢量 / 天地图地形 / 无底图，Esri 下可再选 Wayback 年度时相作历史底图），第二级 `工作空间`（GeoServer 图层树）；底图选择由 `composables/useBasemap.js` 持久化到 localStorage，地图挂载时恢复；默认仍是 Esri 最新影像，不再在挂载时静默替换成 Wayback（历史影像不可达会让整张底图空白）；
 - 底图渲染性能：地图视图统一为 `EPSG:3857`（与 Esri/Wayback/天地图瓦片同投影，消除逐瓦片重投影），WMS 按 `SRS=EPSG:3857` 请求；瓦片源 `transition: 0` + `cacheSize: 1024` + `useInterimTilesOnError`；`public/basemap-cache-sw.js` 用 Cache Storage 持久缓存 Esri/Wayback 瓦片（2500 张、30 天、LRU），图层面板可查看/清理；经纬度展示与业务 bbox 在边界处统一转 `EPSG:4326`；
 - 卷帘对比：地图左上角工具条「卷帘」（「图层」右侧）→ 选择 Esri Wayback 两个年度版本 → 左右两张 3857 XYZ 按 canvas 裁剪，拖动分隔线对比；清单或瓦片直连浏览器，清单不可达时用内置年度快照；日期为 Wayback 发布版本日期，不是单景成像日期；
-- 变化检测取图：地图左上角「变化检测」→ DragBox 选范围 → 弹窗选 T1/T2 **Esri Wayback 版本**（与卷帘共用清单）→ 浏览器直接拉取 Wayback 高清瓦片、按同一 AOI/像素网格拼接两张 PNG → `POST /api/v1/imagery/georeference` 写带 CRS GeoTIFF → 两期影像进入聊天附件 → Agent 调 `detect_change`（双期分割 + IoU 实例匹配 + 转移矩阵，SegEarth-OV3 同族思路；ProC-SAM3 为默认分割引擎）；
-- 地图功能入口规范：新增地图功能统一放**左上角工具条**，从左到右追加（当前 `图层` → `卷帘` → `地物提取` → `变化检测`），右上角只保留缩放；
+- 变化检测取图：地图左上角「变化检测」→ DragBox 选范围 → 弹窗选 T1/T2 **Esri Wayback 版本**（与卷帘共用清单）→ 浏览器直接拉取 Wayback 高清瓦片、按同一 AOI/像素网格拼接两张 PNG → `POST /api/v1/imagery/georeference` 写带 CRS GeoTIFF → 两期影像进入聊天附件 → Agent 调 `detect_change`（**change_qwen 专用 ONNX**：九寨沟滑坡 / 成都建筑两类权重，336×336 分块 + 概率 GeoTIFF + 变化图斑与面积统计）；
+- 样本制作：左上角工具条「样本制作」→ `SamplePhaseDialog.vue` 选任务名与时相（A 必选、B 可选）→ 浏览器抓 Esri Wayback 瓦片（单期一张；双期同 bbox、同缩放两张）→ `/api/v1/imagery/georeference` 写 GeoTIFF → `ImageStatic` 铺图/卷帘 → 影像上拖红框、Enter/双击确认工作范围 → 只显示框内影像 → `SamplePanel.vue` + `useSampleEditor.js` 绘制 / 顶点 / 框选 → `POST /api/v1/samples/annotations` 落 `agent-files/samples/{project}/{task}/` → `GET /api/v1/samples/export?format=coco|shp|dataset`；`dataset` 为裁剪 GeoTIFF/PNG + annotations.json + COCO + SHP/GeoJSON 的 zip；AI 候选与交互精修未接入；
+- 地图功能入口规范：新增地图功能统一放**左上角工具条**，从左到右追加（当前 `图层` → `卷帘` → `样本制作` → `地物提取` → `变化检测`），右上角只保留缩放；
 - 限制：单次裁剪面积默认 0.5°²、大小 300MB；框选面积 0.02°²、输出 ≤1024px；瓦片只允许数据源资产，快视图服务端缓存。
 
 ### 5.6 管理控制台（`/admin`）
@@ -133,13 +134,17 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 |--------|---------|------|
 | [architecture-agent.md](agent/core/architecture-agent.md) | Agent 内核：会话管理 / ReAct 推理 / 三层记忆 / System Prompt / WebSocket | §1 §2 §4 §5 §6 |
 | [architecture-tools.md](model/architecture-tools.md) | 工具系统：注册机制 / 10 大分类 42 工具 / 统一 Tool Result Schema | §3 |
-| [architecture-samseg.md](model/architecture-samseg.md) | SamSeg 遥感分析：ProC-SAM3 开放词汇分割/变化检测/矢量化；SegEarth legacy 回退 | §10 |
+| [architecture-samseg.md](model/architecture-samseg.md) | SamSeg 遥感分析：开放词汇分割（SamSeg 本体默认）/变化检测/矢量化 | §10 |
 | [architecture-platform.md](platform/architecture-platform.md) | 平台层：前端指令执行(OpenLayers 地图容器) / GeoServer 数据集成 / 技能编排 / 视觉设计 | §7 §8 §9 §11 附 |
 | [core-architecture-design.md](platform/core-architecture-design.md) | **非 Agent 核心架构（V1）**：项目/数据目录/图层/任务/产物五域，Java BFF + Python Core，Agent 接缝 | 新增 |
 | [production-architecture.md](platform/production-architecture.md) | **生产级双门户架构**：多租户/RBAC/双入口/队列/对象存储/审计/部署 | 新增 |
 | [ui-design-spec.md](platform/ui-design-spec.md) | **用户端 UI 设计（V1）**：信息架构、页面、组件、Copilot 形态；原型见 `core-ui-mockup.html` | 新增 |
 | [two-portal-ui-design.md](platform/two-portal-ui-design.md) | **双门户 UI 设计**：用户端 vs 管理端、管理端信息架构与权限化交互；原型见 `admin-ui-mockup.html` | 新增 |
+| [ui-component-inventory.md](platform/ui-component-inventory.md) | **用户端 UI 资产盘点**：组件/控件清单、样式层重复与覆盖、P0–P2 组件库规划、落地顺序与验收 | 新增 |
+| [rules/ui-style.md](rules/ui-style.md) | **用户端 UI 规则**：设计令牌、字体、层级、状态、按钮、地图工具条、十条规则与禁止项 | 新增 |
 | [open-imagery-sources.md](platform/open-imagery-sources.md) | **开源影像检索**：PC/ES/CDSE/GEE 数据源、REST 契约、AOI 裁剪下载、限制与许可 | 5.5 |
+| [upgrade/README.md](upgrade/README.md) | **改造升级文档集**：记忆、多 Agent、提示词、上下文、Skills、MCP、Harness、工作流、Loop | 9 篇 |
+| [upgrade/ROADMAP.md](upgrade/ROADMAP.md) | **改造计划**：9 个阶段、依赖、交付、验收 | 计划 |
 
 ---
 
@@ -149,8 +154,8 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 
 > **★ 三层重构 (2026-10, Backend V2)**：
 > - **agent 层**：Planner/Executor（ReAct + DAG）+ **全部工具实现与注册表** + 技能 loader/selector + 记忆 + Prompt + 连接/任务管理 + 上下文隔离
-> - **model 层**：解译模型统一协议/注册表（ProC-SAM3 分割/变化检测适配器）+ LLM 客户端 + 权重/推理实现
-> - **ProC-SAM3**：运行时代码在 `backend/model/ProC_SAM3/vendor/`；权重在 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（本地副本，`.gitignore` 排除，不进入 Git 历史），可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖
+> - **model 层**：解译模型统一协议/注册表（分割/变化检测适配器）+ LLM 客户端 + 权重/推理实现
+> - **SamSeg**：地物提取默认推理在 `backend/model/SamSeg/`（`official.py` 官方单图/滑窗，权重 `SamSeg/SamSeg/sam3/sam3.pt`）；**原生 SAM3** 归样本制作（`backend/model/sam3native/`，权重本地副本、`.gitignore` 排除），不参与地物提取；**变化检测** 走 `backend/model/change_detection/change_qwen_runtime/` 的专用 ONNX 权重（权重本地副本）
 > - **data 层**：AssetRef/catalog + 影像/矢量/图片/文本/other 五类域 + GeoServer/业务库连接器
 > - 依赖方向：`agent → model`、`agent → data`、`model → data`；data 不反向依赖 agent/model。
 
@@ -178,8 +183,8 @@ graph LR
             direction LR
             LLM_CLIENT["llm_client<br/>LLM 实例构造"]
             MODELREG["model/registry<br/>capability 模型注册"]
-            ADAPTERS["segmentation / change_detection<br/>ProC-SAM3 适配器"]
-            SAMSEG["ProC_SAM3 / SamSeg<br/>🛰️ 权重与推理实现"]
+            ADAPTERS["segmentation / change_detection<br/>模型适配器"]
+            SAMSEG["SamSeg / sam3native / change_qwen<br/>🛰️ 权重与推理实现"]
         end
 
         subgraph DATA["💾 数据层 (Data) — 最底层"]

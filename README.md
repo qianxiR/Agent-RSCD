@@ -14,7 +14,7 @@
 - 💾 **数据层**：GeoServer 空间服务、PostgreSQL 业务库、知识库骨架、掩膜分析子包、矢量化子包
 - 🖥️ **表现层**：聊天 UI + **OpenLayers 地图容器**（影像/掩膜/矢量图层叠加 + WMS + GetFeatureInfo 属性弹窗 + 图例浮层）+ 数据面板 + 富表格（排序/复制）
 - 🛰️ **影像检索**：按时间/区域/云量筛选开放卫星影像（Planetary Computer、Earth Search、Copernicus；GEE 兜底），地图瓦片预览 + AOI 裁剪 GeoTIFF 下载 → 加载/发布图层 → 解译
-- 🎯 **框选解译**：**默认 Esri 高分底图**拖框取图 → 带 CRS GeoTIFF → 当前会话 Agent → ProC-SAM3 矢量结果叠加；Esri 失败自动回退天地图
+- 🎯 **框选解译**：**默认 Esri 高分底图**拖框取图 → 带 CRS GeoTIFF → 当前会话 Agent → SamSeg 矢量结果叠加；Esri 失败自动回退天地图
 
 > **依赖方向**（自上而下，不反向）：agent → model → data；agent 内部自洽（memory ↔ agent_db ↔ memory_tools）。
 
@@ -37,6 +37,8 @@
 | 9 | [**技能编排（长任务）**](./docs/platform/architecture-platform.md#9-技能编排长任务) | 契约校验、确定性单技能选择、计划检查点与失败回退 | `architecture-platform.md` |
 | 10 | [**SamSeg 遥感分析**](./docs/model/architecture-samseg.md#10-samseg-遥感分析) | 分割/变化检测/矢量化（runner·geoio·visualize 三层） | `architecture-samseg.md` |
 | 11 | [**开源影像检索**](./docs/platform/open-imagery-sources.md) | 时间/区域/云量筛选 → 瓦片预览 → AOI 裁剪下载 → 图层/解译 | `open-imagery-sources.md` |
+
+> 改造升级文档：[`docs/upgrade/README.md`](./docs/upgrade/README.md)（9 篇专题 + 路线图）
 
 ### Agent 执行边界
 
@@ -70,7 +72,7 @@ Agent-RSCD/
 │   │   ├── tools/               #   工具箱、注册表与 LLM 暴露边界
 │   │   │   └── samseg_tools.py  #     segment_image / detect_change / understand_image (遥感解译工具)
 │   │   ├── skills/              #   三个 v1.0 技能、契约加载器与确定性选择器
-│   │   └── SamSeg/              #   🛰️ SamSeg 遥感推理封装 (ProC-SAM3/SAM3)
+│   │   └── SamSeg/              #   🛰️ SamSeg 遥感推理封装 (地物提取官方口径)
 │   │       ├── runner.py        #     推理层: 模型缓存 + 分割/变化检测 + 连通域统计 + 类别图注
 │   │       └── SamSeg/          #     子项目源码 (含 sam3 权重 3.3GB)
 │   └── data/                    # 💾 数据层
@@ -157,7 +159,7 @@ npm --prefix frontend-vue run dev
 | `conversation` | 会话元数据（含 project_id 外键 + status 状态机） | 会话管理 |
 | `message` | 完整消息（含 tool_calls JSONB） | **工作记忆** |
 | `conversation_summary` | 旧消息的 LLM 摘要 | **短期记忆** |
-| `user_memory` | 跨会话用户偏好、实体与 accepted lesson | **长期记忆** |
+| `user_memory` | 跨会话 preference（行为偏好）、profile（稳定画像）与 accepted lesson | **长期记忆** |
 | `ai_task` | 工具任务、worker 状态与显式 plan state 快照 | **执行状态** |
 
 ### 业务库（外部数据）
@@ -209,7 +211,7 @@ npm --prefix frontend-vue run dev
 |------|---------|------|---------|
 | **视觉理解**（影像解译） | "这张图里有什么"/"描述一下"/"分析地物" | `understand_image(image_path, question?)` | 视觉解译文本（地物类型、空间分布、形态纹理） |
 | **语义分割** | "分割这张图"/"提取建筑和道路" + 上传 1 张图 | `segment_image(image_path, classes?)` | 原图 + 彩色分割 PNG + 类别色块图注 + 连通域统计 |
-| **变化检测** | "对比这两张图的变化" + 上传 2 张图 | `detect_change(t1_path, t2_path, classes?)` | T1/T2 原图 + 变化 PNG + 图注 + 变化区域统计 |
+| **变化检测** | "对比这两张图的变化" + 上传 2 张图（九寨沟滑坡 / 成都建筑两类场景） | `detect_change(t1_path, t2_path, classes?, model?)` | T1/T2 原图 + 变化 PNG + 概率图 + 变化区域统计（change_qwen 专用 ONNX） |
 
 ### 视觉理解工具 `understand_image`（v2.2 新增）
 
@@ -218,15 +220,19 @@ npm --prefix frontend-vue run dev
 - **实现**：读图 → base64 data URI → 创建视觉 LLM（`settings.vision_model`）→ 发多模态消息 → 返回解译结论
 - 单图 ≤20MB，调用 qwen-vl 视觉模型按分辨率计费
 
-### SamSeg 分割/变化检测（ProC-SAM3 / SAM 3）
+### 解译模型：地物提取 / 变化检测 / 样本制作
+
+感知引擎三部分各司其职：
+
+- **地物提取（`segment_image`）**：SamSeg 本体（`backend/model/SamSeg/`，SegEarth-OV3 官方口径：单图/512 滑窗 + 双头融合 + `prob_thd`），英文类别 + 英文同义词，无口径开关
+- **变化检测（`detect_change`）**：change_qwen 专用 ONNX（`backend/model/change_detection/change_qwen_runtime/`），九寨沟滑坡 / 成都建筑两类二值变化权重，336 分块 + 概率 GeoTIFF
+- **样本制作（规划中）**：原生 SAM3（`backend/model/sam3native/`，文本接地逐实例 + 语义图 + 交互头点/框），权重本地副本
 
 - **默认 6 类**：building / road / water / vegetation / farmland / bareland（英文 + 英文同义词；分号分隔类别、逗号分隔同义词）
-- **引擎**：`SAMSEG_ENGINE=proc_sam3`（默认，ProC-SAM3）；`legacy` 可回退 SegEarth-OV3
-- **解析度**：`PROC_SAM3_RESOLUTION=504`（默认，交互快）/ `1008`（精度优先，较慢）
 - **优雅降级**：torch/权重缺失时 `samseg_available()` 返回 False，工具返回明确错误，不影响其他已注册工具
-- **按需加载**：模型权重（3.3GB）首次遥感请求时才加载，启动不预加载（不做遥感时零开销），加载后全局缓存复用
+- **预热加载**：SamSeg 权重（3.3GB）启动后台预热（`_warm_segmentation_engine()`），加载后全局缓存复用；原生 SAM3 改为样本制作首次调用时加载
 - **数据流**：前端点「🖼️ 上传分割」→ POST `/api/v1/samseg/upload` → 立即显示原图 → WS 发指令 → LLM 调 `segment_image` → runner 推理（首次加载模型）→ 上色存 PNG + 连通域统计 + 图注 → `frontend_action(render_image)` → 前端追加结果图 → LLM 据统计做定量描述
-- 详细实现见 [docs/PROGRESS.md](./docs/PROGRESS.md) 阶段 2-6
+- 详细实现见 [docs/PROGRESS.md](./docs/PROGRESS.md) 阶段 2-6、74-76
 
 ---
 

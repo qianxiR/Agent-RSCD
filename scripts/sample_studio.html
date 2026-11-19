@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sample Studio · 样本制作临时验证台</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1b1f26;
+    --panel-2: #222832;
+    --line: #2c333d;
+    --text: #e6e9ef;
+    --muted: #8b95a5;
+    --accent: #4d8dff;
+    --warn: #ffb020;
+    --danger: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    font: 13px/1.5 "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  header .tag {
+    font-size: 11px; color: var(--warn); border: 1px solid rgba(255,176,32,.4);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  header .spacer { flex: 1; }
+  #statusChip { font-size: 12px; color: var(--muted); }
+  #statusChip.busy { color: var(--warn); }
+  #statusChip.ok { color: #58d68d; }
+  main { flex: 1; display: flex; min-height: 0; }
+  aside {
+    width: 340px; flex: none; border-right: 1px solid var(--line);
+    background: var(--panel); display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  section { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  section h2 {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    margin: 0 0 8px; letter-spacing: .04em;
+  }
+  input, select, button, textarea { font: inherit; color: var(--text); }
+  input, select, textarea {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 7px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  button {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: #4a5666; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #1f4ea8; border-color: #2f66c8; }
+  button.primary:hover:not(:disabled) { background: #2560c4; }
+  button.ghost { background: transparent; }
+  button.danger { color: var(--danger); }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row > * { min-width: 0; }
+  .row + .row { margin-top: 6px; }
+  .grow { flex: 1; }
+  .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .class-row { display: grid; grid-template-columns: 84px 1fr 26px; gap: 6px; align-items: center; }
+  .class-row + .class-row { margin-top: 5px; }
+  .swatch {
+    width: 12px; height: 12px; border-radius: 3px; border: 1px solid #0006;
+    display: inline-block; flex: none;
+  }
+  .list { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+  .item {
+    display: grid; grid-template-columns: 14px 66px 1fr 40px 22px;
+    gap: 6px; align-items: center; padding: 4px 6px; border-bottom: 1px solid #232a33;
+    font-size: 12px; cursor: pointer;
+  }
+  .item:last-child { border-bottom: none; }
+  .item.sel { background: #1f3a68; }
+  .item .score { color: var(--muted); text-align: right; }
+  .item .del { color: var(--danger); text-align: center; }
+  .item select { padding: 2px 4px; font-size: 12px; }
+  .empty { padding: 12px; color: var(--muted); text-align: center; }
+  .stage { flex: 1; position: relative; min-width: 0; background: #0e1116; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  .toolbar {
+    position: absolute; top: 10px; left: 10px; display: flex; gap: 6px;
+    background: #1b1f26ee; border: 1px solid var(--line); border-radius: 8px;
+    padding: 4px;
+  }
+  .toolbar button.on { background: #1f4ea8; border-color: #2f66c8; }
+  .coords {
+    position: absolute; bottom: 8px; left: 10px; font-size: 11px;
+    color: var(--muted); background: #1b1f26cc; padding: 2px 8px; border-radius: 6px;
+  }
+  .logbox {
+    position: absolute; bottom: 8px; right: 10px; max-width: 46%;
+    font-size: 11px; color: var(--muted); text-align: right; white-space: pre-line;
+  }
+  .empty-stage {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #55606f; font-size: 13px; pointer-events: none; text-align: center; padding: 24px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>样本制作 · 临时验证台</h1>
+  <span class="tag">临时工具，非生产链路</span>
+  <span class="spacer"></span>
+  <span id="statusChip">未加载影像</span>
+</header>
+
+<main>
+  <aside>
+    <section>
+      <h2>1. 影像</h2>
+      <div class="row">
+        <select id="fileSelect" class="grow"></select>
+        <button id="refreshFiles" title="刷新列表">⟳</button>
+      </div>
+      <div class="row">
+        <input id="imagePath" placeholder="或直接输入影像路径（相对工作区）" />
+      </div>
+      <div class="row">
+        <button id="loadImage" class="primary grow">加载影像</button>
+      </div>
+      <div class="hint" id="imageMeta">支持 tif/tiff/png/jpg。抓图链路见地物提取的 captureImagery。</div>
+    </section>
+
+    <section>
+      <h2>2. 类别表（名称 + 提示词同义词）</h2>
+      <div id="classList"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="addClass" class="grow">+ 添加类别</button>
+        <button id="resetClasses" class="ghost">恢复默认</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. 候选实例（原生 SAM3 接地头）</h2>
+      <div class="row">
+        <label class="hint" style="flex:none">最小面积(px)</label>
+        <input id="minArea" type="number" value="64" min="0" step="16" style="width:80px" />
+        <label class="hint" style="flex:none">分辨率</label>
+        <input id="resolution" type="number" value="1008" min="256" step="112" style="width:80px" />
+      </div>
+      <div class="row">
+        <label class="hint" style="flex:none">接地阈值</label>
+        <input id="confThd" type="number" value="0.1" min="0.01" max="0.9" step="0.01" style="width:80px" />
+        <span class="hint" style="flex:1">分数 = sigmoid(logit)×presence，常用 0.05–0.15；调高更严</span>
+      </div>
+      <div class="row">
+        <button id="generate" class="primary grow" disabled>生成候选</button>
+        <button id="clearBox" class="ghost" disabled>清除框选</button>
+      </div>
+      <div class="hint" id="boxHint">在图上拖拽框选后生成；不框选则对整幅推理。</div>
+    </section>
+
+    <section>
+      <h2>4. 实例（点选可多选，Delete 删除）</h2>
+      <div class="row" style="margin-bottom:6px">
+        <span class="hint grow" id="instCount">0 个实例</span>
+        <button id="deleteSelected" class="danger ghost" disabled>删除选中</button>
+        <button id="clearAll" class="ghost" disabled>清空</button>
+      </div>
+      <div class="list" id="instList"><div class="empty">暂无实例</div></div>
+      <div class="row" style="margin-top:8px">
+        <select id="batchClass" class="grow"></select>
+        <button id="applyBatch" disabled>应用到选中</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. 保存与导出</h2>
+      <div class="row">
+        <input id="taskDir" />
+      </div>
+      <div class="row">
+        <button id="save" class="primary grow" disabled>保存标注 JSON</button>
+        <button id="exportCoco" disabled>导出 COCO</button>
+      </div>
+      <div class="hint" id="saveHint">默认落 agent-files/samples/_test/ 下的任务目录。</div>
+    </section>
+  </aside>
+
+  <div class="stage" id="stage">
+    <canvas id="canvas"></canvas>
+    <div class="toolbar">
+      <button id="modeSelect" class="on" title="点选实例（Shift 多选）">选择</button>
+      <button id="modeBox" title="拖拽框选推理范围">框选</button>
+      <button id="modeDraw" title="左键加点，双击/Enter 闭合，Esc 取消">手绘</button>
+    </div>
+    <div class="coords" id="coords">—</div>
+    <div class="logbox" id="log"></div>
+    <div class="empty-stage" id="emptyStage">先加载影像，再框选或手绘</div>
+  </div>
+</main>
+
+<script>
+const COLORS = ["#de1f07", "#0045ff", "#00ff24", "#ffffff", "#949494", "#4bb549", "#ff00ff", "#ffc800"];
+const DEFAULT_CLASSES = [
+  { name: "building",   prompts: ["building", "house", "roof"],     color: COLORS[0] },
+  { name: "road",       prompts: ["road", "highway"],               color: COLORS[1] },
+  { name: "water",      prompts: ["water", "river", "pond"],        color: COLORS[2] },
+  { name: "bareland",   prompts: ["bareland", "bare soil"],         color: COLORS[3] },
+  { name: "vegetation", prompts: ["vegetation", "tree", "grass"],   color: COLORS[4] },
+  { name: "farmland",   prompts: ["farmland", "cropland"],          color: COLORS[5] },
+];
+
+const els = {
+  fileSelect: document.getElementById("fileSelect"),
+  refreshFiles: document.getElementById("refreshFiles"),
+  imagePath: document.getElementById("imagePath"),
+  loadImage: document.getElementById("loadImage"),
+  imageMeta: document.getElementById("imageMeta"),
+  classList: document.getElementById("classList"),
+  addClass: document.getElementById("addClass"),
+  resetClasses: document.getElementById("resetClasses"),
+  minArea: document.getElementById("minArea"),
+  resolution: document.getElementById("resolution"),
+  confThd: document.getElementById("confThd"),
+  generate: document.getElementById("generate"),
+  clearBox: document.getElementById("clearBox"),
+  boxHint: document.getElementById("boxHint"),
+  instList: document.getElementById("instList"),
+  instCount: document.getElementById("instCount"),
+  deleteSelected: document.getElementById("deleteSelected"),
+  clearAll: document.getElementById("clearAll"),
+  batchClass: document.getElementById("batchClass"),
+  applyBatch: document.getElementById("applyBatch"),
+  taskDir: document.getElementById("taskDir"),
+  save: document.getElementById("save"),
+  exportCoco: document.getElementById("exportCoco"),
+  saveHint: document.getElementById("saveHint"),
+  canvas: document.getElementById("canvas"),
+  stage: document.getElementById("stage"),
+  coords: document.getElementById("coords"),
+  log: document.getElementById("log"),
+  emptyStage: document.getElementById("emptyStage"),
+  statusChip: document.getElementById("statusChip"),
+  modeSelect: document.getElementById("modeSelect"),
+  modeBox: document.getElementById("modeBox"),
+  modeDraw: document.getElementById("modeDraw"),
+};
+
+const state = {
+  classes: clone(DEFAULT_CLASSES),
+  instances: [],
+  selected: new Set(),
+  mode: "select",
+  box: null,          // {x0,y0,x1,y1} 影像像素坐标
+  dragging: false,
+  dragStart: null,
+  drawPath: [],
+  mouseImg: null,
+  image: null,        // HTMLImageElement
+  imageInfo: null,    // {path,width,height,crs,transform}
+  view: { scale: 1, ox: 0, oy: 0 },
+  busy: false,
+  nextId: 1,
+};
+
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function fmt(value, digits = 0) { return Number(value).toFixed(digits); }
+function baseName(path) { return String(path || "").split(/[\\/]/).pop(); }
+function cssColor(rgb, alpha = 0.35) {
+  const [r, g, b] = rgb;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ---------------------------------------------------------------- 状态与日志
+function setStatus(text, kind) {
+  els.statusChip.textContent = text;
+  els.statusChip.className = kind || "";
+}
+const logLines = [];
+function logLine(text) {
+  logLines.push(text);
+  while (logLines.length > 4) logLines.shift();
+  els.log.textContent = logLines.join("\n");
+}
+
+// ---------------------------------------------------------------- 类别表
+function colorOf(index) {
+  const item = state.classes[index];
+  if (!item) return [222, 31, 7];
+  const hex = String(item.color || "#de1f07").replace("#", "");
+  const value = parseInt(hex.length === 3
+    ? hex.split("").map(c => c + c).join("")
+    : hex, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function renderClasses() {
+  els.classList.innerHTML = "";
+  state.classes.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "class-row";
+    row.innerHTML = `
+      <input class="cls-name" value="${escapeAttr(item.name)}" />
+      <input class="cls-prompt" title="同义词，逗号分隔"
+             value="${escapeAttr((item.prompts || []).join(", "))}" />
+      <input type="color" class="cls-color" value="${item.color || "#de1f07"}"
+             style="padding:0;height:24px;cursor:pointer" />`;
+    row.querySelector(".cls-name").oninput = (e) => { item.name = e.target.value; renderBatchOptions(); };
+    row.querySelector(".cls-prompt").oninput = (e) => {
+      item.prompts = e.target.value.split(/[,，;；]/).map(s => s.trim()).filter(Boolean);
+    };
+    row.querySelector(".cls-color").oninput = (e) => {
+      item.color = e.target.value; renderBatchOptions(); draw();
+    };
+    els.classList.appendChild(row);
+  });
+  renderBatchOptions();
+}
+
+function renderBatchOptions() {
+  const current = els.batchClass.value;
+  els.batchClass.innerHTML = state.classes
+    .map((item, index) => `<option value="${index}">${escapeHtml(item.name)}</option>`)
+    .join("");
+  if (current !== "") els.batchClass.value = current;
+}
+
+function escapeHtml(text) {
+  return String(text == null ? "" : text).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function escapeAttr(text) { return escapeHtml(text); }
+
+// ---------------------------------------------------------------- 文件列表
+async function refreshFiles() {
+  try {
+    const resp = await fetch("/api/files");
+    const data = await resp.json();
+    els.fileSelect.innerHTML = data.files
+      .map(f => `<option value="${f.path}">${escapeHtml(baseName(f.path))} · ${f.mtime}</option>`)
+      .join("");
+    if (!data.files.length) {
+      els.fileSelect.innerHTML = `<option value="">（agent-files 下没有影像）</option>`;
+    }
+  } catch (err) {
+    logLine("文件列表加载失败：" + err.message);
+  }
+}
+
+async function loadImage() {
+  const path = (els.fileSelect.value || els.imagePath.value || "").trim();
+  if (!path) { logLine("请先选择影像"); return; }
+  els.imagePath.value = path;
+  setStatus("加载影像…", "busy");
+  const url = `/api/image?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+  const image = new Image();
+  image.onload = () => {
+    state.image = image;
+    state.instances = [];
+    state.selected.clear();
+    state.box = null;
+    state.drawPath = [];
+    state.nextId = 1;
+    els.emptyStage.style.display = "none";
+    els.imageMeta.textContent = `${baseName(path)} · ${image.width}×${image.height}`;
+    els.generate.disabled = false;
+    els.save.disabled = false;
+    fitView();
+    renderInstances();
+    draw();
+    setStatus(`已加载 ${image.width}×${image.height}`, "ok");
+    logLine("影像已加载：" + baseName(path));
+  };
+  image.onerror = () => { setStatus("影像加载失败", ""); logLine("影像加载失败：" + path); };
+  image.src = url;
+  try {
+    const resp = await fetch("/api/health");
+    const data = await resp.json();
+    if (data.state && data.state.width) {
+      state.imageInfo = { path, width: image.width, height: image.height };
+      logLine(`服务端就绪，设备 ${data.device}`);
+    }
+  } catch (err) { /* 忽略 */ }
+}
+
+// ---------------------------------------------------------------- 视图
+function fitView() {
+  const rect = els.stage.getBoundingClientRect();
+  if (!state.image) return;
+  const pad = 16;
+  const scale = Math.min((rect.width - pad * 2) / state.image.width,
+                         (rect.height - pad * 2) / state.image.height);
+  state.view.scale = Math.max(scale, 0.02);
+  state.view.ox = (rect.width - state.image.width * state.view.scale) / 2;
+  state.view.oy = (rect.height - state.image.height * state.view.scale) / 2;
+}
+
+function toCanvas(x, y) {
+  return [state.view.ox + x * state.view.scale, state.view.oy + y * state.view.scale];
+}
+function toImage(cx, cy) {
+  return [(cx - state.view.ox) / state.view.scale, (cy - state.view.oy) / state.view.scale];
+}
+
+function resizeCanvas() {
+  const rect = els.stage.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  els.canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  els.canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  els.canvas._dpr = dpr;
+  fitView();
+  draw();
+}
+window.addEventListener("resize", () => resizeCanvas());
+
+// ---------------------------------------------------------------- 绘制
+function draw() {
+  const canvas = els.canvas;
+  const ctx = canvas.getContext("2d");
+  const dpr = canvas._dpr || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+  if (!state.image) return;
+
+  const [ox, oy] = toCanvas(0, 0);
+  const w = state.image.width * state.view.scale;
+  const h = state.image.height * state.view.scale;
+  ctx.drawImage(state.image, ox, oy, w, h);
+
+  // 实例多边形
+  for (const item of state.instances) {
+    const rgb = colorOf(item.class_index);
+    const selected = state.selected.has(item.id);
+    ctx.beginPath();
+    for (const ring of item.polygons_px || []) {
+      ring.forEach(([x, y], index) => {
+        const [cx, cy] = toCanvas(x, y);
+        if (index === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      });
+      ctx.closePath();
+    }
+    ctx.fillStyle = cssColor(rgb, selected ? 0.55 : 0.3);
+    ctx.fill("evenodd");
+    ctx.lineWidth = selected ? 2 : 1;
+    ctx.strokeStyle = selected ? "#ffffff" : cssColor(rgb, 0.95);
+    ctx.setLineDash(selected ? [6, 4] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 框选
+  if (state.box) {
+    const [x0, y0] = toCanvas(state.box.x0, state.box.y0);
+    const [x1, y1] = toCanvas(state.box.x1, state.box.y1);
+    ctx.setLineDash([8, 5]);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#ffb020";
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.fillStyle = "rgba(255,176,32,0.10)";
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.setLineDash([]);
+  }
+
+  // 手绘进行中
+  if (state.drawPath.length) {
+    ctx.beginPath();
+    state.drawPath.forEach(([x, y], index) => {
+      const [cx, cy] = toCanvas(x, y);
+      if (index === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    });
+    if (state.mouseImg) {
+      const [cx, cy] = toCanvas(state.mouseImg[0], state.mouseImg[1]);
+      ctx.lineTo(cx, cy);
+    }
+    ctx.strokeStyle = "#ffb020";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    state.drawPath.forEach(([x, y]) => {
+      const [cx, cy] = toCanvas(x, y);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffb020";
+      ctx.fill();
+    });
+  }
+}
+
+// ---------------------------------------------------------------- 命中测试
+function pointInRing(px, py, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > py) !== (yj > py) &&
+        px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function hitTest(x, y) {
+  for (let i = state.instances.length - 1; i >= 0; i--) {
+    const item = state.instances[i];
+    for (const ring of item.polygons_px || []) {
+      if (pointInRing(x, y, ring)) return item;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- 实例列表
+function renderInstances() {
+  const count = state.instances.length;
+  els.instCount.textContent = `${count} 个实例${state.selected.size ? `（选中 ${state.selected.size}）` : ""}`;
+  els.deleteSelected.disabled = state.selected.size === 0;
+  els.clearAll.disabled = count === 0;
+  els.applyBatch.disabled = state.selected.size === 0;
+  els.exportCoco.disabled = count === 0;
+
+  if (!count) {
+    els.instList.innerHTML = `<div class="empty">暂无实例</div>`;
+    return;
+  }
+  els.instList.innerHTML = "";
+  for (const item of state.instances) {
+    const row = document.createElement("div");
+    row.className = "item" + (state.selected.has(item.id) ? " sel" : "");
+    const options = state.classes.map((cls, index) =>
+      `<option value="${index}" ${index === item.class_index ? "selected" : ""}>${escapeHtml(cls.name)}</option>`
+    ).join("");
+    row.innerHTML = `
+      <span class="swatch" style="background:${state.classes[item.class_index]?.color || "#fff"}"></span>
+      <select>${options}</select>
+      <span class="score">${item.score == null ? "手绘" : fmt(item.score, 3)} · ${fmt(item.area_px / 1000, 1)}k</span>
+      <span class="del" title="删除">✕</span>`;
+    row.querySelector("select").onchange = (e) => {
+      item.class_index = Number(e.target.value);
+      item.name = state.classes[item.class_index].name;
+      item.edited = true;
+      renderInstances(); draw();
+    };
+    row.querySelector(".del").onclick = (event) => {
+      event.stopPropagation();
+      removeInstances([item.id]);
+    };
+    row.onclick = (event) => {
+      if (event.target.tagName === "SELECT" || event.target.classList.contains("del")) return;
+      if (!event.shiftKey) state.selected.clear();
+      if (state.selected.has(item.id)) state.selected.delete(item.id);
+      else state.selected.add(item.id);
+      renderInstances(); draw();
+    };
+    els.instList.appendChild(row);
+  }
+}
+
+function removeInstances(ids) {
+  const drop = new Set(ids);
+  state.instances = state.instances.filter(item => !drop.has(item.id));
+  ids.forEach(id => state.selected.delete(id));
+  renderInstances(); draw();
+}
+
+// ---------------------------------------------------------------- 候选生成
+async function generate() {
+  if (!state.image) return;
+  if (state.busy) return;
+  const classes = state.classes
+    .map(item => ({
+      name: (item.name || "").trim(),
+      prompts: (item.prompts && item.prompts.length ? item.prompts : [item.name])
+        .map(s => String(s).trim()).filter(Boolean),
+      color: colorOf(state.classes.indexOf(item)),
+    }))
+    .filter(item => item.name);
+  if (!classes.length) { logLine("类别表为空"); return; }
+
+  const payload = {
+    image_path: state.imageInfo?.path || els.imagePath.value,
+    classes,
+    box: state.box ? [state.box.x0, state.box.y0, state.box.x1, state.box.y1] : null,
+    min_area: Number(els.minArea.value) || 0,
+    resolution: Number(els.resolution.value) || 1008,
+    conf_thd: Number(els.confThd.value) || 0.1,
+  };
+  state.busy = true;
+  els.generate.disabled = true;
+  setStatus("SAM3 推理中（首次加载约 30–40s）…", "busy");
+  logLine(`生成候选：${classes.map(c => c.name).join("/")}${payload.box ? " · 框选" : " · 整幅"}`);
+  const started = performance.now();
+  try {
+    const resp = await fetch("/api/candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+
+    state.imageInfo = data.image;
+    state.instances = (data.instances || []).map(item => ({
+      ...item,
+      class_index: resolveClassIndex(item.name),
+    }));
+    state.selected.clear();
+    renderInstances();
+    draw();
+    const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+    setStatus(`候选 ${state.instances.length} 个 · ${elapsed}s`, "ok");
+    logLine(`推理完成：${state.instances.length} 实例，服务端 ${data.seconds}s`);
+  } catch (err) {
+    setStatus("生成失败", "");
+    logLine("生成失败：" + err.message);
+  } finally {
+    state.busy = false;
+    els.generate.disabled = !state.image;
+  }
+}
+
+function resolveClassIndex(name) {
+  const index = state.classes.findIndex(item => item.name === name);
+  return index >= 0 ? index : 0;
+}
+
+// ---------------------------------------------------------------- 保存与导出
+function buildPayload() {
+  return {
+    image: state.imageInfo || {
+      path: els.imagePath.value,
+      width: state.image?.width, height: state.image?.height,
+    },
+    classes: state.classes.map((item, index) => ({
+      id: index + 1, name: item.name, prompts: item.prompts, color: colorOf(index),
+    })),
+    instances: state.instances.map(item => ({
+      id: item.id,
+      class_index: item.class_index,
+      name: state.classes[item.class_index]?.name || item.name,
+      score: item.score,
+      source: item.source || "grounding",
+      polygons_px: item.polygons_px,
+      bbox_px: item.bbox_px,
+      area_px: item.area_px,
+      edited: !!item.edited,
+    })),
+  };
+}
+
+async function saveAnnotations() {
+  if (!state.instances.length) { logLine("没有实例可保存"); return; }
+  const taskDir = (els.taskDir.value || "").trim();
+  if (!taskDir) { logLine("请填写任务目录"); return; }
+  setStatus("保存中…", "busy");
+  try {
+    const resp = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_dir: taskDir, payload: buildPayload() }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    setStatus(`已保存 ${data.instance_count} 实例`, "ok");
+    logLine("已保存：" + data.path);
+    els.saveHint.textContent = data.path;
+  } catch (err) {
+    setStatus("保存失败", "");
+    logLine("保存失败：" + err.message);
+  }
+}
+
+function exportCoco() {
+  const taskDir = (els.taskDir.value || "").trim();
+  if (!taskDir) { logLine("请填写任务目录"); return; }
+  window.open(`/api/export?task_dir=${encodeURIComponent(taskDir)}&format=coco`, "_blank");
+}
+
+// ---------------------------------------------------------------- 画布交互
+function stagePoint(event) {
+  const rect = els.canvas.getBoundingClientRect();
+  return [event.clientX - rect.left, event.clientY - rect.top];
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  state.drawPath = [];
+  state.mouseImg = null;
+  for (const [key, el] of [["select", els.modeSelect], ["box", els.modeBox], ["draw", els.modeDraw]]) {
+    el.classList.toggle("on", key === mode);
+  }
+  els.canvas.style.cursor = mode === "select" ? "pointer" : "crosshair";
+  draw();
+}
+
+els.canvas.addEventListener("mousedown", (event) => {
+  if (!state.image) return;
+  const [cx, cy] = stagePoint(event);
+  const [ix, iy] = toImage(cx, cy);
+  if (ix < 0 || iy < 0 || ix > state.image.width || iy > state.image.height) return;
+
+  if (state.mode === "box") {
+    state.dragging = true;
+    state.dragStart = [ix, iy];
+    state.box = { x0: ix, y0: iy, x1: ix, y1: iy };
+    els.clearBox.disabled = false;
+  } else if (state.mode === "draw") {
+    state.drawPath.push([ix, iy]);
+    state.mouseImg = [ix, iy];
+    draw();
+  } else {
+    const hit = hitTest(ix, iy);
+    if (!hit) {
+      if (!event.shiftKey) { state.selected.clear(); renderInstances(); draw(); }
+      return;
+    }
+    if (!event.shiftKey) state.selected.clear();
+    if (state.selected.has(hit.id)) state.selected.delete(hit.id);
+    else state.selected.add(hit.id);
+    renderInstances();
+    draw();
+  }
+});
+
+els.canvas.addEventListener("mousemove", (event) => {
+  const [cx, cy] = stagePoint(event);
+  const [ix, iy] = toImage(cx, cy);
+  state.mouseImg = [ix, iy];
+  els.coords.textContent = `x ${fmt(ix)}  y ${fmt(iy)}`;
+
+  if (state.dragging && state.dragStart) {
+    state.box = {
+      x0: Math.min(state.dragStart[0], ix), y0: Math.min(state.dragStart[1], iy),
+      x1: Math.max(state.dragStart[0], ix), y1: Math.max(state.dragStart[1], iy),
+    };
+    draw();
+  } else if (state.mode === "draw" && state.drawPath.length) {
+    draw();
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (!state.dragging) return;
+  state.dragging = false;
+  if (state.box && (state.box.x1 - state.box.x0 < 6 || state.box.y1 - state.box.y0 < 6)) {
+    state.box = null;
+    els.clearBox.disabled = true;
+  } else {
+    els.boxHint.textContent = `框选 ${fmt(state.box.x1 - state.box.x0)}×${fmt(state.box.y1 - state.box.y0)} px（点「生成候选」）`;
+  }
+  draw();
+});
+
+els.canvas.addEventListener("dblclick", () => {
+  if (state.mode === "draw") closeDrawPath();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Delete" && state.selected.size) {
+    removeInstances([...state.selected]);
+    return;
+  }
+  if (state.mode === "draw") {
+    if (event.key === "Enter") { closeDrawPath(); return; }
+    if (event.key === "Escape") { state.drawPath = []; draw(); return; }
+    if (event.key === "Backspace") {
+      state.drawPath.pop(); draw(); event.preventDefault(); return;
+    }
+  }
+  if (event.key === "Escape") {
+    state.box = null; els.clearBox.disabled = true; draw();
+  }
+});
+
+function closeDrawPath() {
+  if (state.drawPath.length < 3) { state.drawPath = []; draw(); return; }
+  const classIndex = Number(els.batchClass.value || 0);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of state.drawPath) {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  }
+  state.instances.push({
+    id: `m${String(state.nextId++).padStart(4, "0")}`,
+    name: state.classes[classIndex]?.name || "object",
+    class_index: classIndex,
+    score: null,
+    source: "manual",
+    polygons_px: [state.drawPath.map(([x, y]) => [x, y])],
+    bbox_px: [minX, minY, maxX, maxY],
+    area_px: Math.abs(polygonArea(state.drawPath)),
+    edited: true,
+  });
+  state.drawPath = [];
+  renderInstances();
+  draw();
+  setStatus(`手绘新增实例（共 ${state.instances.length}）`, "ok");
+}
+
+function polygonArea(path) {
+  let area = 0;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    area += path[j][0] * path[i][1] - path[i][0] * path[j][1];
+  }
+  return area / 2;
+}
+
+// ---------------------------------------------------------------- 绑定
+els.refreshFiles.onclick = refreshFiles;
+els.loadImage.onclick = loadImage;
+els.fileSelect.onchange = () => {
+  const value = els.fileSelect.value;
+  if (value) els.imagePath.value = value;
+};
+els.addClass.onclick = () => {
+  state.classes.push({
+    name: `class_${state.classes.length + 1}`,
+    prompts: [`class_${state.classes.length + 1}`],
+    color: COLORS[state.classes.length % COLORS.length],
+  });
+  renderClasses();
+};
+els.resetClasses.onclick = () => {
+  state.classes = clone(DEFAULT_CLASSES);
+  renderClasses();
+};
+els.generate.onclick = generate;
+els.clearBox.onclick = () => {
+  state.box = null;
+  els.clearBox.disabled = true;
+  els.boxHint.textContent = "在图上拖拽框选后生成；不框选则对整幅推理。";
+  draw();
+};
+els.deleteSelected.onclick = () => removeInstances([...state.selected]);
+els.clearAll.onclick = () => { state.instances = []; state.selected.clear(); renderInstances(); draw(); };
+els.applyBatch.onclick = () => {
+  const classIndex = Number(els.batchClass.value || 0);
+  for (const item of state.instances) {
+    if (state.selected.has(item.id)) {
+      item.class_index = classIndex;
+      item.name = state.classes[classIndex].name;
+      item.edited = true;
+    }
+  }
+  renderInstances();
+  draw();
+};
+els.save.onclick = saveAnnotations;
+els.exportCoco.onclick = exportCoco;
+els.modeSelect.onclick = () => setMode("select");
+els.modeBox.onclick = () => setMode("box");
+els.modeDraw.onclick = () => setMode("draw");
+
+// ---------------------------------------------------------------- 初始化
+function initTaskDir() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+  els.taskDir.value = `agent-files/samples/_test/studio_${stamp}`;
+}
+
+(async function init() {
+  renderClasses();
+  initTaskDir();
+  await refreshFiles();
+  resizeCanvas();
+  try {
+    const resp = await fetch("/api/health");
+    const data = await resp.json();
+    logLine(`服务就绪 · 设备 ${data.device} · 模型${data.model_loaded ? "已加载" : "未加载"}`);
+  } catch (err) { /* 忽略 */ }
+})();
+</script>
+</body>
+</html>

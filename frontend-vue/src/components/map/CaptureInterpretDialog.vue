@@ -5,6 +5,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import Icon from '@/shared/ui/Icon.vue'
+import BaseButton from '@/shared/ui/BaseButton.vue'
+import BaseDialog from '@/shared/ui/BaseDialog.vue'
 import { captureImagery } from '@/services/imagery'
 import { useCaptureInterpret } from '@/composables/useCaptureInterpret'
 
@@ -126,14 +128,13 @@ async function submit() {
 </script>
 
 <template>
-  <el-dialog
+  <BaseDialog
     v-model="dialogOpen"
     width="560px"
-    top="8vh"
+    align-center
     class="capture-dialog"
     :show-close="false"
     :close-on-click-modal="false"
-    append-to-body
   >
     <template #header>
       <div class="cap-head">
@@ -141,9 +142,9 @@ async function submit() {
           <Icon name="map" :size="17" />
           <span>区域选择</span>
         </div>
-        <button type="button" class="cap-icon-btn" title="关闭" @click="closeDialog">
+        <BaseButton variant="icon" muted title="关闭" @click="closeDialog">
           <Icon name="close" :size="16" />
-        </button>
+        </BaseButton>
       </div>
     </template>
 
@@ -194,13 +195,13 @@ async function submit() {
       </div>
 
       <div class="cap-actions">
-        <button type="button" class="cap-ghost" :disabled="loading" @click="closeDialog">取消</button>
-        <button type="button" class="cap-primary" :disabled="loading || previewLoading" @click="submit">
+        <BaseButton variant="ghost" :disabled="loading" @click="closeDialog">取消</BaseButton>
+        <BaseButton variant="primary" :disabled="loading || previewLoading" @click="submit">
           {{ loading ? '发送中…' : '发送并解译' }}
-        </button>
+        </BaseButton>
       </div>
     </div>
-  </el-dialog>
+  </BaseDialog>
 </template>
 
 <style>
@@ -219,7 +220,7 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
+  height: 36px;
   padding: 0 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -231,19 +232,6 @@ async function submit() {
   font-weight: 600;
   color: var(--text-primary);
 }
-.cap-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.cap-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .cap-body { padding: 14px 18px 16px; }
 
@@ -283,12 +271,13 @@ async function submit() {
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
 }
 .cap-retry {
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+
+  background: transparent;
   border-radius: 4px;
   padding: 2px 8px;
   cursor: pointer;
@@ -315,7 +304,6 @@ async function submit() {
   line-height: 1.55;
   outline: none;
 }
-.cap-instruction:focus { border-color: var(--accent); box-shadow: var(--shadow-focus); }
 .cap-hint { font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.5; }
 
 .cap-bbox {
@@ -339,24 +327,4 @@ async function submit() {
   justify-content: flex-end;
   gap: 8px;
 }
-.cap-ghost,
-.cap-primary {
-  height: 32px;
-  padding: 0 14px;
-  border-radius: var(--r-md);
-  font-size: var(--fs-md);
-  cursor: pointer;
-}
-.cap-ghost {
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text-secondary);
-}
-.cap-primary {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-.cap-primary:disabled,
-.cap-ghost:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

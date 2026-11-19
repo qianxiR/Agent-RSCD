@@ -10,21 +10,27 @@ import { always } from 'ol/events/condition'
 import { defaults as defaultControls, ScaleLine, MousePosition } from 'ol/control'
 import { createStringXY } from 'ol/coordinate'
 import { fromLonLat, transformExtent } from 'ol/proj'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   setMap, clearMap, loadDefaultLayers, setupFeatureInfo, getBasemapType,
   clearImageryLayers, listImageryLayers, getImageryVersion,
-  addFootprintLayer, removeLayer,
+  addFootprintLayer, removeLayer, getViewBbox, setFeatureInfoEnabled,
 } from '@/composables/useMap'
 import { useImagerySearch } from '@/composables/useImagerySearch'
 import { useCaptureInterpret } from '@/composables/useCaptureInterpret'
 import { useSwipeCompare } from '@/composables/useSwipeCompare'
+import { useSampleStudio } from '@/composables/useSampleStudio'
+import { useSampleScene } from '@/composables/useSampleScene'
+import { useSampleEditor } from '@/composables/useSampleEditor'
 import { restoreBasemap } from '@/composables/useBasemap'
 import { captureWaybackImage } from '@/composables/useWaybackCapture'
 import { captureImagery, georeferenceImagery, getEsriWaybackReleases } from '@/services/imagery'
 import LayerPanel from '@/components/map/LayerPanel.vue'
 import ChangeDetectDialog from '@/components/map/ChangeDetectDialog.vue'
+import SamplePhaseDialog from '@/components/map/SamplePhaseDialog.vue'
+import SamplePanel from '@/components/map/SamplePanel.vue'
 import Icon from '@/shared/ui/Icon.vue'
+import BaseButton from '@/shared/ui/BaseButton.vue'
 import 'ol/ol.css'
 
 const mapRef = useTemplateRef('mapRef')
@@ -79,6 +85,34 @@ const drawMode = ref(null)
 const pendingBBox = ref(null)
 let dragBox = null
 let compareDragging = false
+
+// ==================== 样本制作 ====================
+const {
+  active: sampleActive,
+  phaseDialogOpen: samplePhaseOpen,
+  mode: sampleMode,
+  dirty: sampleDirty,
+  instances: sampleInstances,
+  beginSession,
+  resetSession,
+  beginRange,
+  setWorkFrame,
+  clearInstances,
+} = useSampleStudio()
+const {
+  capturing: sampleCapturing,
+  progress: sampleProgress,
+  rangeError: sampleRangeError,
+  prepareScene,
+  startRange: startSampleRange,
+  clearRange: clearSampleRange,
+  confirmRange: confirmSampleRangeRaw,
+  resetRange: resetSampleRange,
+  exitScene,
+} = useSampleScene()
+const sampleEditor = useSampleEditor()
+const sampleBBox = ref(null)
+const sampleEntering = ref(false)
 
 const drawHint = computed(() => {
   if (captureLoading.value) return '正在抓取 Esri 最高分辨率影像…'
@@ -264,6 +298,117 @@ function toggleLayerPanel() {
   if (layerPanelOpen.value) comparePanelOpen.value = false
 }
 
+// 入参: 无 | 方法: 样本制作入口，按当前视图范围选择时相 | 出参: 无
+function onSampleClick() {
+  if (sampleActive.value || sampleEntering.value) return
+  layerPanelOpen.value = false
+  comparePanelOpen.value = false
+  changeDialogOpen.value = false
+  if (compareActive.value) stopCompareSwipe()
+  if (dragBox) stopDraw()
+  if (pendingBBox.value) {
+    pendingBBox.value = null
+    removeLayer('outline:capture-bbox', 'imagery-outline')
+  }
+  capture.cancelDraw()
+  imagery.drawRequested.value = false
+  changeDrawRequested.value = false
+  if (!waybackReleases.value.length) loadWaybackReleases()
+  sampleBBox.value = getViewBbox()
+  samplePhaseOpen.value = true
+}
+
+// 入参: { taskName, releaseA, releaseB, bbox, projectId }
+// 方法: 抓取所选时相影像 → 铺图/卷帘 → 进入标注会话
+// 出参: 无
+async function onSampleConfirm(payload) {
+  if (sampleEntering.value) return
+  samplePhaseOpen.value = false
+  sampleEntering.value = true
+  try {
+    const scene = await prepareScene({
+      releaseA: payload.releaseA,
+      releaseB: payload.releaseB,
+      bbox: payload.bbox,
+      taskName: payload.taskName,
+    })
+    beginSession({
+      projectId: payload.projectId,
+      taskName: payload.taskName,
+      frameData: scene.frame,
+      phaseList: scene.phases,
+    })
+    sampleEditor.enter(map)
+    setFeatureInfoEnabled(false)
+    if (popupRef.value) popupRef.value.innerHTML = ''
+    startSampleRange({ onConfirm: confirmSampleRange })
+    ElMessage.success('影像已载入，请在影像上拖动框选工作范围')
+  } catch (e) {
+    ElMessage.error(e.message || '影像抓取失败')
+    samplePhaseOpen.value = true
+  } finally {
+    sampleEntering.value = false
+  }
+}
+
+// 入参: 无 | 方法: Enter/双击确认红框，切到框内视图并开始标注 | 出参: 无
+function confirmSampleRange() {
+  const workFrame = confirmSampleRangeRaw()
+  if (!workFrame) {
+    ElMessage.warning(sampleRangeError.value || '请先框选工作范围')
+    return
+  }
+  setWorkFrame(workFrame)
+  sampleEditor.setMode('draw')
+  ElMessage.success('工作范围已确定，可开始标注')
+}
+
+// 入参: 无 | 方法: 重选工作范围；已有标注时二次确认并清空 | 出参: 无
+async function reselectSampleRange() {
+  if (!sampleActive.value) return
+  if (sampleInstances.value.length) {
+    try {
+      await ElMessageBox.confirm(
+        '重选工作范围会清空已有标注，是否继续？',
+        '重选工作范围',
+        { confirmButtonText: '重选', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch (e) {
+      return
+    }
+  }
+  clearInstances()
+  beginRange()
+  resetSampleRange()
+  sampleEditor.setMode('range')
+  startSampleRange({ onConfirm: confirmSampleRange })
+}
+
+// 入参: 模式 draw | edit | select | 方法: 切换标注模式，再次点击回到浏览 | 出参: 无
+function toggleSampleMode(next) {
+  if (!sampleActive.value) return
+  sampleEditor.setMode(sampleMode.value === next ? 'browse' : next)
+}
+
+// 入参: 无 | 方法: 退出样本制作，未保存时二次确认 | 出参: 无
+async function requestExitSample() {
+  if (sampleDirty.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前标注尚未保存，退出将丢失修改。',
+        '退出样本制作',
+        { confirmButtonText: '退出', cancelButtonText: '继续编辑', type: 'warning' },
+      )
+    } catch (e) {
+      return
+    }
+  }
+  sampleEditor.exit()
+  exitScene()
+  resetSession()
+  setFeatureInfoEnabled(true)
+}
+
 // 入参: 无 | 方法: 打开/关闭卷帘面板，首次打开时懒加载版本清单 | 出参: 无
 function toggleComparePanel() {
   comparePanelOpen.value = !comparePanelOpen.value
@@ -273,16 +418,17 @@ function toggleComparePanel() {
   }
 }
 
-// 入参: 无 | 方法: 叠加左右时相并开启卷帘；先清掉会遮挡对比的检索预览层 | 出参: 无
-function applyCompare() {
+// 入参: { closePanel, notify } | 方法: 叠加左右时相；卷帘已开启时按新时相热更新并保留分隔线位置
+// 出参: 无
+function renderCompare({ closePanel = false, notify = false } = {}) {
   const left = compareLeftRelease.value
   const right = compareRightRelease.value
   if (!left || !right) {
-    ElMessage.warning('请选择两个时相')
+    if (notify) ElMessage.warning('请选择两个时相')
     return
   }
   if (left.id === right.id) {
-    ElMessage.warning('左右时相不能相同')
+    if (notify) ElMessage.warning('左右时相不能相同')
     return
   }
   if (imageryCount.value) {
@@ -299,8 +445,13 @@ function applyCompare() {
     ElMessage.error('地图尚未就绪，无法开启卷帘')
     return
   }
-  comparePanelOpen.value = false
-  ElMessage.success(`卷帘对比：${left.date} ↔ ${right.date}`)
+  if (closePanel) comparePanelOpen.value = false
+  if (notify) ElMessage.success(`卷帘：${left.date} ↔ ${right.date}`)
+}
+
+// 入参: 无 | 方法: 面板「开启/更新卷帘」按钮 | 出参: 无
+function applyCompare() {
+  renderCompare({ closePanel: true, notify: true })
 }
 
 // 入参: 无 | 方法: 退出卷帘对比并移除两个 Wayback 图层 | 出参: 无
@@ -308,6 +459,12 @@ function stopCompare() {
   stopCompareSwipe()
   comparePanelOpen.value = false
 }
+
+// 卷帘已开启时，改选时相立即热更新左右图层，不必再点「更新卷帘」
+watch([compareLeftId, compareRightId], () => {
+  if (!compareActive.value || !canApplyCompare.value) return
+  renderCompare()
+})
 
 // 入参: pointerdown | 方法: 开始拖动卷帘分隔线 | 出参: 无
 function onComparePointerDown(event) {
@@ -451,6 +608,20 @@ function isTypingTarget(target) {
 
 // 入参: event 键盘事件 | 方法: Enter 确认待选区；Esc 取消待选区或退出框选模式 | 出参: 无
 function onKeydown(event) {
+  if (sampleActive.value && sampleMode.value === 'range') {
+    if (isTypingTarget(event.target)) return
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      confirmSampleRange()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      clearSampleRange()
+      return
+    }
+  }
+  if (sampleActive.value && sampleEditor.onKeydown(event)) return
   if (event.key === 'Enter' && pendingBBox.value) {
     if (isTypingTarget(event.target)) return
     event.preventDefault()
@@ -565,6 +736,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('rsiis:change-submit', onChangeSubmitEvent)
   window.removeEventListener('rsiis:basemap-error', onBasemapErrorEvent)
+  sampleEditor.exit()
+  exitScene({ restoreView: false })
+  resetSession()
+  setFeatureInfoEnabled(true)
   stopCompareDrag()
   stopCompareSwipe()
   stopDraw()
@@ -595,6 +770,7 @@ onBeforeUnmount(() => {
           class="map-layer-toggle"
           :class="{ active: layerPanelOpen }"
           title="打开图层管理"
+          :disabled="sampleActive"
           @click="toggleLayerPanel"
         >
           <Icon name="layers" :size="14" />
@@ -604,13 +780,49 @@ onBeforeUnmount(() => {
           type="button"
           class="map-compare-toggle"
           :class="{ active: compareActive || comparePanelOpen }"
-          title="卷帘对比（Esri Wayback 历史影像）"
+          title="卷帘（Esri Wayback 历史影像）"
+          :disabled="sampleActive"
           @click="toggleComparePanel"
         >
           <Icon name="image" :size="14" />
           <span>卷帘</span>
         </button>
         <button
+          type="button"
+          class="map-sample-toggle"
+          :class="{ active: sampleActive || samplePhaseOpen }"
+          title="样本制作"
+          :disabled="sampleActive || sampleEntering"
+          @click="onSampleClick"
+        >
+          <Icon name="audit" :size="14" />
+          <span>样本制作</span>
+        </button>
+        <template v-if="sampleActive && sampleMode !== 'range'">
+          <button
+            type="button"
+            class="sample-tool"
+            :class="{ active: sampleMode === 'draw' }"
+            title="画多边形：左键落点，F2/Enter 闭合，Backspace 撤销，Esc 取消"
+            @click="toggleSampleMode('draw')"
+          >绘制</button>
+          <button
+            type="button"
+            class="sample-tool"
+            :class="{ active: sampleMode === 'edit' }"
+            title="编辑顶点：拖动、点边加点、Shift 点顶点删除"
+            @click="toggleSampleMode('edit')"
+          >顶点</button>
+          <button
+            type="button"
+            class="sample-tool"
+            :class="{ active: sampleMode === 'select' }"
+            title="框选标注：拖框选中，Delete 批量删除"
+            @click="toggleSampleMode('select')"
+          >框选</button>
+        </template>
+        <button
+          v-if="!sampleActive"
           type="button"
           class="map-extract-toggle"
           :class="{ active: capture.drawRequested.value || pendingBBox || captureLoading }"
@@ -622,6 +834,7 @@ onBeforeUnmount(() => {
           <span>地物提取</span>
         </button>
         <button
+          v-if="!sampleActive"
           type="button"
           class="map-change-toggle"
           :class="{ active: changeDrawRequested || changeDialogOpen }"
@@ -636,11 +849,11 @@ onBeforeUnmount(() => {
         <div class="compare-panel-head">
           <div class="compare-panel-title">
             <Icon name="image" :size="14" />
-            <span>卷帘对比</span>
+            <span>卷帘</span>
           </div>
-          <button type="button" class="compare-icon-btn" title="关闭" @click="comparePanelOpen = false">
+          <BaseButton variant="icon" size="sm" title="关闭" @click="comparePanelOpen = false">
             <Icon name="close" :size="14" />
-          </button>
+          </BaseButton>
         </div>
 
         <label class="compare-field">
@@ -648,7 +861,8 @@ onBeforeUnmount(() => {
           <el-select
             v-model="compareLeftId"
             size="small"
-            filterable
+            class="compare-date-select"
+            popper-class="basemap-date-popper"
             :loading="waybackLoading"
             placeholder="选择发布日期"
           >
@@ -665,7 +879,8 @@ onBeforeUnmount(() => {
           <el-select
             v-model="compareRightId"
             size="small"
-            filterable
+            class="compare-date-select"
+            popper-class="basemap-date-popper"
             :loading="waybackLoading"
             placeholder="选择发布日期"
           >
@@ -682,12 +897,6 @@ onBeforeUnmount(() => {
         <div v-if="waybackFallback" class="compare-warn">
           版本清单接口暂不可达，已使用内置年度版本快照；仍然可以对比，瓦片加载可能较慢。
         </div>
-        <div class="compare-note">
-          当前 Esri 底图是最新影像镶嵌，没有单一时相日期。这里使用 Wayback 发布版本：
-          日期为版本发布日期，不是单景成像日期；不同地区可用时相与分辨率不同。
-          灰色区域表示该时相在此处没有影像（不是加载失败）；相邻年份可能共用同一景，
-          Wayback 只发布全球版本，局部没更新时两侧看起来会一样。
-        </div>
         <div v-if="waybackError" class="compare-error">
           <span>{{ waybackError }}</span>
           <button type="button" @click="loadWaybackReleases(true)">重试</button>
@@ -697,13 +906,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="compare-actions">
-          <button
-            type="button"
-            class="compare-primary"
+          <BaseButton
+            class="compare-grow"
+            variant="primary"
+            bold
             :disabled="!canApplyCompare || waybackLoading"
             @click="applyCompare"
-          >{{ compareActive ? '更新卷帘' : '开启卷帘' }}</button>
-          <button v-if="compareActive" type="button" class="compare-ghost" @click="stopCompare">关闭</button>
+          >{{ compareActive ? '更新卷帘' : '开启卷帘' }}</BaseButton>
+          <BaseButton v-if="compareActive" variant="ghost" :px="12" @click="stopCompare">关闭</BaseButton>
         </div>
       </div>
 
@@ -730,6 +940,19 @@ onBeforeUnmount(() => {
         <LayerPanel floating @back="layerPanelOpen = false" />
       </div>
 
+      <!-- 样本制作：实例列表 / 保存导出 -->
+      <SamplePanel
+        v-if="sampleActive"
+        @exit="requestExitSample"
+        @reselect-range="reselectSampleRange"
+      />
+
+      <!-- 样本影像抓取进度 -->
+      <div v-if="sampleEntering || sampleCapturing" class="sample-capturing">
+        <span class="sample-spinner" />
+        <span>{{ sampleProgress || '正在准备影像…' }}</span>
+      </div>
+
       <!-- 影像预览清除（左下角，仅在存在预览图层时出现） -->
       <div v-if="imageryCount" class="map-actions">
         <button
@@ -746,6 +969,12 @@ onBeforeUnmount(() => {
       <!-- 底图署名（Esri 时显示，满足署名要求） -->
       <div v-if="currentBasemap === 'esri'" class="basemap-attribution">
         Esri, Maxar, Earthstar Geographics
+      </div>
+
+      <!-- 样本制作：工作范围红框提示 -->
+      <div v-if="sampleActive && sampleMode === 'range'" class="sample-range-hint">
+        <Icon name="map" :size="13" />
+        <span>{{ sampleRangeError || '在影像上拖动框选工作范围 · Enter/双击确认 · Esc 清除' }}</span>
       </div>
 
       <!-- 框选提示（仅框选模式显示） -->
@@ -766,6 +995,14 @@ onBeforeUnmount(() => {
       :loading="changeDialogLoading"
       :error="changeDialogError"
       @cancel="cancelChangeDetect"
+    />
+
+    <SamplePhaseDialog
+      v-model="samplePhaseOpen"
+      :releases="compareReleaseOptions"
+      :loading="waybackLoading"
+      :bbox="sampleBBox"
+      @confirm="onSampleConfirm"
     />
   </div>
 </template>
@@ -818,50 +1055,15 @@ onBeforeUnmount(() => {
   border-radius: var(--r-xs);
 }
 .ol-map-host :deep(.ol-zoom button:hover) {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+
 }
 .ol-map-host :deep(.ol-attribution) {
   bottom: 4px;
   left: 4px;
   font-size: var(--fs-xs);
 }
-/* ===== 底图切换按钮组（右上角，紧凑白底卡片，风格对齐 .ol-info-bar）===== */
-/* 入参: 无 | 方法: absolute 定位右上角，按钮 flex 横排；激活态用主题色填充 */
-/* 出参: 一组紧凑按钮，激活项高亮区分当前底图 */
-.basemap-switcher {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
-  gap: 2px;
-  background: #fff;
-  padding: 2px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-shell);
-  z-index: 10;
-}
-.basemap-btn {
-  padding: 3px 10px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.basemap-btn:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.basemap-btn.active {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-
 /* ===== 经纬度 + 比例尺 统一白底卡片（flex 横向自动拼接）===== */
 /* 入参: 无 | 方法: 父容器 absolute 定位右下角 + flex 子项并排；子控件去掉各自定位与背景回归文档流 */
 /* 出参: 单张白底圆角卡片，宽度随比例尺/经纬度自适应，永不产生缝隙 */
@@ -871,9 +1073,9 @@ onBeforeUnmount(() => {
   bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   background: #fff;
-  padding: 4px 10px;
+  padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
   box-shadow: var(--shadow-shell);
@@ -884,18 +1086,29 @@ onBeforeUnmount(() => {
   background: transparent;
   padding: 0;
   font-size: var(--fs-sm);
-  font-family: var(--mono);
-  color: var(--accent);
+  font-family: var(--sans);
+  color: var(--text-secondary);
 }
 .ol-map-host :deep(.ol-scale-line) {
   position: static;
   background: transparent;
-  padding: 0;
-  color: var(--accent);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
 }
 .ol-map-host :deep(.ol-scale-line-inner) {
-  border-color: var(--accent);
-  color: var(--accent);
+  border: 1px solid var(--text-secondary);
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-family: var(--sans);
+  line-height: 1.2;
+  text-align: center;
+  padding: 1px 6px 0;
+  min-width: 48px;
 }
 
 /* ===== 地物提取（左上角工具条） / 清除影像（左下角） ===== */
@@ -928,8 +1141,9 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border);
 }
 .map-zoom-control button:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-primary);
+
+  background: var(--bg-hover);
 }
 
 /* ===== 地图左上角工具条：新增地图功能按钮统一追加到此，从左到右排列 ===== */
@@ -947,8 +1161,10 @@ onBeforeUnmount(() => {
 
 /* ===== 卷帘对比（左上角工具条，图层右侧） ===== */
 .map-compare-toggle,
+.map-sample-toggle,
 .map-extract-toggle,
-.map-change-toggle {
+.map-change-toggle,
+.sample-tool {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -967,10 +1183,19 @@ onBeforeUnmount(() => {
 .map-extract-toggle:hover,
 .map-extract-toggle.active,
 .map-change-toggle:hover,
-.map-change-toggle.active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
+.map-change-toggle.active,
+.sample-tool:hover,
+.sample-tool.active {
+  color: var(--text-primary);
+
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.map-compare-toggle:disabled,
+.map-sample-toggle:disabled,
+.sample-tool:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .compare-panel {
   position: absolute;
@@ -1000,23 +1225,6 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--text-primary);
 }
-.compare-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  color: var(--text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-}
-.compare-icon-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
 .compare-field {
   display: flex;
   flex-direction: column;
@@ -1034,14 +1242,6 @@ onBeforeUnmount(() => {
 .compare-loading {
   font-size: var(--fs-sm);
   color: var(--text-muted);
-}
-.compare-note {
-  padding: 7px 8px;
-  font-size: var(--fs-xs);
-  line-height: 1.6;
-  color: var(--text-muted);
-  background: var(--bg-inset);
-  border-radius: var(--r-sm);
 }
 .compare-warn {
   padding: 7px 8px;
@@ -1063,6 +1263,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   padding: 0;
   color: var(--accent);
+
   background: none;
   border: 0;
   cursor: pointer;
@@ -1072,37 +1273,8 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 8px;
 }
-.compare-primary {
+.compare-grow {
   flex: 1;
-  height: 32px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-.compare-primary:hover {
-  background: var(--accent-hover);
-}
-.compare-primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-.compare-ghost {
-  height: 32px;
-  padding: 0 12px;
-  font-size: var(--fs-md);
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-.compare-ghost:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 
 /* 卷帘分隔线：白色细线 + 中央圆柄 */
@@ -1117,6 +1289,7 @@ onBeforeUnmount(() => {
   z-index: 18;
   cursor: ew-resize;
   touch-action: none;
+  transition: left 80ms var(--spring-drag);
 }
 .swipe-divider::before {
   content: '';
@@ -1138,6 +1311,7 @@ onBeforeUnmount(() => {
   transform: translate(-50%, -50%);
   font-size: 16px;
   color: var(--accent);
+
   background: #fff;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
@@ -1181,7 +1355,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .compare-exit:hover {
-  color: var(--accent-soft);
+  color: var(--text-primary);
 }
 
 /* ===== 图层管理（左上角工具条第一项） ===== */
@@ -1201,9 +1375,14 @@ onBeforeUnmount(() => {
 }
 .map-layer-toggle:hover,
 .map-layer-toggle.active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-primary);
+
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.map-layer-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .map-layer-panel {
   position: absolute;
@@ -1242,6 +1421,35 @@ onBeforeUnmount(() => {
   gap: 6px;
   z-index: 10;
 }
+
+/* ===== 样本影像抓取进度 ===== */
+.sample-capturing {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: var(--fs-md);
+  color: #fff;
+  background: rgba(26, 26, 26, 0.86);
+  border-radius: 999px;
+  box-shadow: var(--shadow-float);
+}
+.sample-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.32);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sample-spin 0.8s linear infinite;
+}
+@keyframes sample-spin {
+  to { transform: rotate(360deg); }
+}
 .imagery-entry {
   display: inline-flex;
   align-items: center;
@@ -1261,6 +1469,7 @@ onBeforeUnmount(() => {
 .imagery-entry:hover,
 .imagery-entry.capture-entry:hover {
   color: var(--accent);
+
   border-color: var(--accent);
   background: #fff;
 }
@@ -1280,6 +1489,7 @@ onBeforeUnmount(() => {
   bottom: 42px;
   padding: 2px 6px;
   font-size: var(--fs-xs);
+  font-family: var(--sans);
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.82);
   border-radius: var(--r-xs);
@@ -1294,8 +1504,9 @@ onBeforeUnmount(() => {
   border-radius: 2px;
 }
 
-/* ===== 框选提示（顶部居中） ===== */
-.draw-hint {
+/* ===== 框选提示（顶部居中）；样本工作范围红框提示复用同一外观 ===== */
+.draw-hint,
+.sample-range-hint {
   position: absolute;
   top: 48px;
   left: 50%;

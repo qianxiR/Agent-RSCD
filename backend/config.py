@@ -192,19 +192,23 @@ class Settings:
     )
 
     # ==================== 长期记忆 - 用户画像 (Long-term Memory) ====================
-    # ★ 记忆策略: 用户偏好/事实提取 与 错误案例学习 (lesson/workflow, 由自纠捕捉器产生) 双路并行.
+    # ★ 记忆策略: 用户 preference/profile 提取 与 全局 lesson 学习双路并行.
     #   enable_preference_extraction 默认 true: 对话收尾时与自纠捕捉器在同一触发点并行启动
-    #   (_async_memory_finale 提取偏好/事实, _async_self_correction_scan 沉淀教训).
-    #   历史背景: 此开关曾默认关闭 (实测偏好/事实 ~86% 是低价值空话, 会污染 system prompt),
-    #   后按需重新开启. 设 ENABLE_PREFERENCE_EXTRACTION=false 可单独关掉偏好提取, 只留错误案例学习.
+    #   (_async_memory_finale 提取 preference/profile, _async_self_correction_scan 沉淀 lesson).
+    #   设 ENABLE_PREFERENCE_EXTRACTION=false 可单独关掉用户记忆提取, 只留错误案例学习.
     enable_preference_extraction: bool = field(
         default_factory=lambda: _env("ENABLE_PREFERENCE_EXTRACTION", "true").lower() == "true"
     )
-    # 收尾时自动提取用户偏好/关键事实的模型
+    # 收尾时自动提取 preference/profile 的模型
     long_term_memory_model: str = field(default_factory=lambda: _env(
         "LONG_TERM_MEMORY_MODEL", "GLM-5.3-Flash"))
     # 单轮最多提取的记忆条数 (避免 LLM 一次吐太多噪声)
-    long_term_memory_max_items: int = 5
+    long_term_memory_max_items: int = 3
+    # 注入 system prompt 的最低置信度与条数上限
+    memory_min_confidence: float = field(
+        default_factory=lambda: float(_env("MEMORY_MIN_CONFIDENCE", "0.6")))
+    memory_inject_max_items: int = field(
+        default_factory=lambda: int(_env("MEMORY_INJECT_MAX_ITEMS", "20")))
 
     # ==================== Plan-first / PlanGraph ====================
     # Shadow 模式: 只构建并校验 PlanGraph、写日志, 不改变现有 ReAct 执行。
@@ -391,6 +395,12 @@ class Settings:
         "SANDBOX_WORKSPACE_DIR",
         str(Path(__file__).resolve().parent.parent / "agent-files" / "sandbox" / "workspace"),
     ))
+    # 样本制作: 标注任务目录 (按 项目/任务 两级)
+    # 实际派生路径: {samples_output_root}/{project_id}/{task_dir}/
+    samples_output_root: str = field(default_factory=lambda: _env(
+        "SAMPLES_OUTPUT_ROOT",
+        str(Path(__file__).resolve().parent.parent / "agent-files" / "samples"),
+    ))
 
     # ==================== SamSeg 遥感分析配置 ====================
     # SamSeg = SegEarth-OV3 (基于 SAM 3 的训练免开放词汇遥感分割/变化检测)
@@ -410,39 +420,44 @@ class Settings:
     # 计算设备: cuda / cpu (ViT-L 模型在 CPU 上极慢, 实际需 CUDA)
     samseg_device: str = field(default_factory=lambda: _env("SAMSEG_DEVICE", "cuda"))
 
-    # ==================== ProC-SAM3 (替换 SegEarth-OV3) ====================
-    # 2026-10: 语义分割主引擎改为 ProC-SAM3（Prompt-Calibrated SAM3）。
-    # 类别使用英文 + 英文同义词；旧引擎保留但默认不启用。
-    samseg_engine: str = field(default_factory=lambda: _env(
-        "SAMSEG_ENGINE", "proc_sam3").lower())
-    # 代码已 vendor 到 backend/model/ProC_SAM3/vendor；权重仍通过 PROC_SAM3_WEIGHTS_ROOT 外置
-    proc_sam3_root: str = field(default_factory=lambda: _env(
-        "PROC_SAM3_ROOT",
-        str(Path(__file__).resolve().parent / "model" / "ProC_SAM3" / "vendor"),
+    # ==================== 原生 SAM3 引擎（替换 ProC-SAM3） ====================
+    # 2026-11: 感知引擎切换为原生 SAM3（工作站实例分割口径：文本接地逐实例 + 语义图）。
+    sam3_native_weights_root: str = field(default_factory=lambda: _env(
+        "SAM3_NATIVE_WEIGHTS_ROOT",
+        str(Path(__file__).resolve().parent / "model" / "sam3native" / "weights"),
     ))
-    proc_sam3_weights_root: str = field(default_factory=lambda: _env(
-        "PROC_SAM3_WEIGHTS_ROOT",
-        str(Path(__file__).resolve().parent / "model" / "ProC_SAM3" / "weights"),
+    sam3_native_ckpt: str = field(default_factory=lambda: _env(
+        "SAM3_NATIVE_CKPT",
+        str(Path(__file__).resolve().parent / "model" / "sam3native" / "weights" / "sam3" / "sam3.pt"),
     ))
-    # 504 为交互默认：显存占用低、单次推理 ~5-8s；精度优先可设 1008
-    proc_sam3_resolution: int = field(default_factory=lambda: int(
-        _env("PROC_SAM3_RESOLUTION", "504")))
-    # 启动后台预热模型 + 默认 3 类提示，首解译不再等 ~60s 权重加载
-    proc_sam3_warmup: bool = field(
-        default_factory=lambda: _env("PROC_SAM3_WARMUP", "true").lower() == "true")
-    proc_sam3_device: str = field(default_factory=lambda: _env("PROC_SAM3_DEVICE", ""))
+    sam3_native_bpe: str = field(default_factory=lambda: _env(
+        "SAM3_NATIVE_BPE",
+        str(Path(__file__).resolve().parent / "model" / "sam3native" / "weights" / "sam3" / "bpe_simple_vocab_16e6.txt.gz"),
+    ))
+    # 1008 为精度优先档；显存紧张可降 672/504
+    sam3_native_resolution: str = field(default_factory=lambda: _env("SAM3_NATIVE_RESOLUTION", "1008"))
+    sam3_native_device: str = field(default_factory=lambda: _env("SAM3_NATIVE_DEVICE", ""))
+    # 启动后台预热模型，首解译不再等 ~60s 权重加载
+    sam3_native_warmup: bool = field(
+        default_factory=lambda: _env("SAM3_NATIVE_WARMUP", "true").lower() == "true")
     # ==================== SamSeg 官方推理流程 (2026-10) ====================
     # ★ 对齐 earth-insights/SegEarth-OV-3 的 demo.py / segearthov3_segmentor.py:
     #   单次前向 + 大图滑窗 + 双头/存在性融合 + prob_thd 阈值回背景。
-    #   multipass = 旧的“多轮涂黑残差 + 阈值衰减”自研流程，仅保留作回退。
-    samseg_inference_mode: str = field(default_factory=lambda: _env(
-        "SAMSEG_INFERENCE_MODE", "official").lower())
+    #   地物提取只此一条口径；原生 SAM3 已归样本制作功能，不再由配置切换。
     # 官方 demo.py: confidence_threshold=0.1（Sam3Processor 的实例置信度）
     samseg_confidence_threshold: float = field(default_factory=lambda: float(
         _env("SAMSEG_CONFIDENCE_THRESHOLD", "0.1")))
     # 官方 demo.py: prob_thd=0.1（argmax 后低于该置信度的像素压回背景）
     samseg_prob_thd: float = field(default_factory=lambda: float(
         _env("SAMSEG_PROB_THD", "0.1")))
+    # 阈值口径（参考 H:/图文描述数据集/SAM推理 掩码提取）：
+    #   ratio = 按本图峰值分位自适应（默认），abs = 固定 prob_thd。
+    #   绝对概率随成像亮度整体漂移，固定阈值会让暗图整幅掉成背景、凭空造出变化。
+    samseg_prob_mode: str = field(default_factory=lambda: _env(
+        "SAMSEG_PROB_MODE", "ratio").lower())
+    # ratio 口径的目标前景占比：阈值取峰值图 (1-fg_ratio) 分位
+    samseg_fg_ratio: float = field(default_factory=lambda: float(
+        _env("SAMSEG_FG_RATIO", "0.90")))
     # 官方 demo.py: slide_stride=512, slide_crop=512；0 表示关闭滑窗
     samseg_slide_crop: int = field(default_factory=lambda: int(
         _env("SAMSEG_SLIDE_CROP", "512")))
@@ -452,10 +467,22 @@ class Settings:
     samseg_autocast: bool = field(
         default_factory=lambda: _env("SAMSEG_AUTOCAST", "true").lower() == "true"
     )
-    # 官方流程不做形态学后处理；保留开关用于产物降噪（默认关闭，严格对齐官方）
+    # 形态学后处理（参考掩码提取流程，默认开启）：
+    #   平滑 → 去小连通域 → 填小背景孔；参数与图文数据集掩码提取一致（3 / 64 / 128）
     samseg_postprocess: bool = field(
-        default_factory=lambda: _env("SAMSEG_POSTPROCESS", "false").lower() == "true"
+        default_factory=lambda: _env("SAMSEG_POSTPROCESS", "true").lower() == "true"
     )
+    samseg_smooth_kernel: int = field(default_factory=lambda: int(
+        _env("SAMSEG_SMOOTH_KERNEL", "3")))
+    samseg_postprocess_min_area: int = field(default_factory=lambda: int(
+        _env("SAMSEG_POSTPROCESS_MIN_AREA", "64")))
+    samseg_postprocess_max_hole: int = field(default_factory=lambda: int(
+        _env("SAMSEG_POSTPROCESS_MAX_HOLE", "128")))
+    # 双时相色调一致性（参考 H:/图文描述数据集/SAM推理/harmonize.py）：
+    # 变化检测前把 T2 拉齐到 T1 的色调，避免亮度漂移造成整幅背景、凭空造变化。
+    # none / lab（CIELAB 均值方差匹配，默认）/ lum / hist / linear
+    samseg_change_harmonize: str = field(default_factory=lambda: _env(
+        "SAMSEG_CHANGE_HARMONIZE", "lab").lower())
     # 官方变化检测: 实例覆盖率阈值 / 最小实例面积 / 配准膨胀半径
     samseg_instance_iou_threshold: float = field(default_factory=lambda: float(
         _env("SAMSEG_INSTANCE_IOU_THRESHOLD", "0.3")))

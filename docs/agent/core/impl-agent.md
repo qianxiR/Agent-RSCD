@@ -227,11 +227,11 @@ sequenceDiagram
 
 | 层级 | 表 | 范围 | 内容 | 触发/注入 |
 |------|-----|------|------|-----------|
-| 🔒 **长期** | `user_memory` | 跨会话 | 自纠学习教训（category=lesson，user_id='global'）+ 环境事实（envfact） | 自纠捕捉器自动沉淀；注入 system prompt |
+| 🔒 **长期** | `user_memory` | 跨会话 | preference（行为偏好）+ profile（稳定画像）+ accepted lesson（scope=global） | 偏好/画像提取 + 自纠捕捉器沉淀；注入 system prompt |
 | 📝 **短期** | `conversation_summary` | 会话内 | 旧消息的 LLM 压缩摘要（v2.5 多级：compress_level 0/1/2） | 两级压缩；注入 system prompt |
 | 💾 **工作** | `message` | 近期 N 条 | 完整消息（含 tool_calls JSONB）+ DAG 分支 | 每轮 persist_turn；以消息列表喂 LLM |
 
-> ★ **记忆策略（阶段 17）**：长期记忆**只保留错误案例与解决方案**，不再主动提取用户偏好/事实（`enable_preference_extraction` 默认 False）。偏好提取曾导致 86% 低价值空话污染 system prompt。
+> ★ **记忆策略（v2，2026-11-02）**：长期记忆只保留三类——`preference`（行为偏好）、`profile`（稳定画像）、`lesson`（改错教训，scope=global）。`fact` 已并入 `profile`，`entity` / `workflow` / `envfact` 不再作为独立类别。
 
 ### 3.2 实现方法：上下文构建（build_context_messages）
 
@@ -321,7 +321,7 @@ async def _distill_correction_to_structured(correction) -> Optional[str]:
     """
 
 async def save_lesson_to_memory(correction) -> bool:
-    """沉淀为全局教训 (user_id='global', category='lesson', 1 小时去重)"""
+    """沉淀为全局教训 (scope='global', category='lesson', 1 小时去重)"""
 
 async def scan_and_save_corrections(messages, user_id) -> List[saved]:
     """一站式入口 (chat_service 在对话收尾 fire-and-forget 调用)"""

@@ -12,6 +12,10 @@
 `knowledge_store.py` 定义了统一访问接口（`search` / `ingest` / `knowledge_available`），
 当前为骨架，`knowledge_available()` 恒返回 `False`，`search` 返回空列表，`ingest` 返回 0。
 
+> 2026-11-02：`backend/integrations/vendor/knowledge/` 下的 13 个知识 Markdown 已移除，
+> `external_knowledge_query` 工具与标准技能条目也已撤下。当前**不提供任何知识库检索入口**，
+> 本骨架仅保留接口，后续需要时再选型实现。
+
 目的：先建立分层骨架，不引入具体实现与新依赖，后续按需选型填充。
 
 ## 后续选型方向（任选其一）

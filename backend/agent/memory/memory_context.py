@@ -10,7 +10,7 @@ Agent 记忆与上下文管理 (Agent 层)
   - agent/chat_service.py : Agent 推理循环
 
 三层记忆 (对应工业级 harness 的标准分层):
-  1. 长期记忆 (long-term): user_memory 表, 跨会话偏好 + 自纠学习教训 (category=lesson 的记忆融入此层), 注入 system prompt
+  1. 长期记忆 (long-term): user_memory 表, 三类 preference/profile/lesson, 注入 system prompt
   2. 短期记忆 (summary): conversation_summary 表, 本会话旧消息摘要, 注入 system prompt
   3. 工作记忆 (buffer): message 表近期消息 (含 tool_calls), 以消息列表形式喂给 LLM
 
@@ -709,18 +709,21 @@ def _format_messages_for_summary(messages: List[BaseMessage]) -> str:
 
 # ==================== 长期记忆: 用户画像 (Long-term Memory) ====================
 
-# 提取提示词: 让 LLM 从对话中识别抽象的用户行为模式 (不存储具体参数值)
+# 提取提示词: 只产出长期记忆 v2 的两类用户记忆。
 _EXTRACT_SYSTEM = (
-    "你是对话行为分析助手。请分析以下对话, 提取用户的操作行为模式和工作习惯。\n"
-    "要求: 只记录抽象的行为类型, 不要存储具体的参数值 (如图层名、表名、文件路径等)。\n"
-    "正例: {{\"key\": \"操作偏好\", \"value\": \"偏好以表格形式查看数据\", \"category\": \"preference\"}}\n"
-    "正例: {{\"key\": \"操作偏好\", \"value\": \"经常进行多图层叠加分析\", \"category\": \"preference\"}}\n"
-    "正例: {{\"key\": \"工作习惯\", \"value\": \"倾向于先查看数据结构再执行查询\", \"category\": \"fact\"}}\n"
-    "反例: {{\"key\": \"常用图层\", \"value\": \"建筑用地\", \"category\": \"entity\"}}  ← 含具体参数值, 禁止!\n"
-    "反例: {{\"key\": \"常用数据表\", \"value\": \"land_use\", \"category\": \"entity\"}}  ← 含具体参数值, 禁止!\n"
+    "你是长期记忆提取助手。只提取两类稳定的用户信息:\n"
+    "1. preference: 用户希望系统怎么做事 (交互方式/输出形式/任务偏好/输入习惯)。\n"
+    "2. profile: 用户稳定的身份、领域、项目上下文事实。\n"
+    "不要提取具体实体、文件路径、表名、图层名、一次性参数或临时任务；这些应查业务数据。\n"
+    "不要输出 fact/entity/envfact/workflow 等旧类别。\n"
+    "正例: {{\"key\": \"交互偏好\", \"value\": \"偏好简短中文指令，不需要逐步解释\", \"category\": \"preference\", \"kind\": \"interaction\", \"confidence\": 0.9}}\n"
+    "正例: {{\"key\": \"输出偏好\", \"value\": \"偏好 Excel + 地图叠加 + 可下载矢量\", \"category\": \"preference\", \"kind\": \"output\", \"confidence\": 0.8}}\n"
+    "正例: {{\"key\": \"关注领域\", \"value\": \"关注建筑物类地物的变化检测\", \"category\": \"profile\", \"kind\": \"domain\", \"confidence\": 0.8}}\n"
+    "反例: {{\"key\": \"常用图层\", \"value\": \"建筑用地\", \"category\": \"profile\"}}  ← 具体实体, 禁止!\n"
+    "反例: {{\"key\": \"常用数据表\", \"value\": \"land_use\", \"category\": \"profile\"}}  ← 具体表名, 禁止!\n"
     # ★ JSON 示例里的花括号已用 {{ }} 转义, 确保 str.format 不会误解析为占位符
-    '仅返回 JSON 数组, 每项格式: {{"key": "简短标识", "value": "抽象行为描述", "category": "preference|fact"}}\n'
-    "如果没有值得记住的行为模式, 返回 []。最多提取 {max_items} 条。不要输出任何解释。"
+    '仅返回 JSON 数组, 每项格式: {{"key": "简短标识", "value": "稳定的抽象描述", "category": "preference|profile", "kind": "interaction|output|task|input|domain|context", "confidence": 0.8}}\n'
+    "同一语义只输出一次；key 用稳定短标签。没有可提取内容返回 []。最多提取 {max_items} 条。不要输出任何解释。"
 )
 
 
@@ -731,26 +734,21 @@ async def extract_and_save_long_term_memory(
     new_start_idx: int,
 ) -> int:
     """
-    从对话中提取抽象的用户行为模式并存入 user_memory。
+    从对话中提取稳定的用户记忆并写入 user_memory。
 
-    抽象化设计:
-      - 不存储具体参数值 (图层名/表名/文件路径等), 只记录抽象行为模式
-      - 例如: 不记"常用图层: 建筑用地", 而记"操作偏好: 偏好图层叠加分析"
-      - category 只使用 preference/fact, 不再使用 entity (不含具体实体)
+    长期记忆 v2 设计:
+      - preference: 交互/输出/任务/输入偏好；
+      - profile: 稳定的身份、领域、项目上下文事实；
+      - 不写具体实体、路径、表名、图层名、一次性参数。
+      - 旧类别 fact/entity/envfact 在写入层做兼容映射，不再作为独立类别。
 
     - 入参: 会话 id / 用户 id / 消息列表 / 新消息起始 index
-    - 方法: 用 deepseek-v4-flash 分析对话, 返回 JSON 数组, 批量 UPSERT
+    - 方法: 用轻量 LLM 分析对话, 返回 JSON 数组, 批量 UPSERT
     - 出参: 成功写入的记忆条数
 
-    设计权衡:
-      - 每轮多一次便宜 LLM 调用 (deepseek-v4-flash, 走百炼免费额度), 不占主对话模型额度
-      - 用户无感, 记忆自动积累
-      - 同 user_id+key 覆盖, 不会无限增长
-
     ★ 开关 enable_preference_extraction (默认 true):
-      与自纠捕捉器 (self_correction.py) 并行 — 两者在对话收尾时由同一触发点并行启动,
-      本函数提取"偏好/事实"抽象行为, 自纠捕捉器沉淀"错误案例+解决方案" (lesson/workflow).
-      若需只保留错误案例学习, 设 ENABLE_PREFERENCE_EXTRACTION=false 单独关闭本路.
+      与自纠捕捉器 (self_correction.py) 并行；本函数只写用户记忆，
+      自纠捕捉器只写 scope=global、category=lesson。
     """
     if not _is_db_mode():
         return 0
@@ -781,6 +779,10 @@ async def extract_and_save_long_term_memory(
         logger.info(f"[Memory] 长期记忆提取: 本轮无可提取内容 conv={conversation_id}")
         return 0
 
+    evidence = {
+        "conversation_id": conversation_id,
+        "message_count": len(new_msgs),
+    }
     saved = 0
     for item in items:
         # 防御性取值: LLM 可能返回不规范结构, 用 .get 避免 KeyError
@@ -789,11 +791,33 @@ async def extract_and_save_long_term_memory(
         key = (item.get("key") or "").strip() if isinstance(item.get("key"), str) else ""
         value = (item.get("value") or "").strip() if isinstance(item.get("value"), str) else ""
         category_raw = item.get("category", "preference")
-        category = category_raw.strip() if isinstance(category_raw, str) else "preference"
-        category = category or "preference"
+        category = category_raw.strip().lower() if isinstance(category_raw, str) else "preference"
+        category = {"fact": "profile", "entity": "profile", "envfact": "profile"}.get(
+            category or "preference", category or "preference"
+        )
+        if category not in {"preference", "profile"}:
+            continue
+        kind_raw = item.get("kind")
+        kind = kind_raw.strip() if isinstance(kind_raw, str) and kind_raw.strip() else None
+        if kind is None:
+            kind = "interaction" if category == "preference" else "domain"
+        try:
+            confidence = max(0.0, min(1.0, float(item.get("confidence", 0.7))))
+        except (TypeError, ValueError):
+            confidence = 0.7
         if not key or not value:
             continue
-        if get_memory_stores().long_term.save(user_id, key, value, category):
+        if get_memory_stores().long_term.save(
+            user_id,
+            key,
+            value,
+            category,
+            scope="user",
+            kind=kind,
+            confidence=confidence,
+            source="conversation",
+            evidence=evidence,
+        ):
             saved += 1
 
     if saved:
@@ -830,80 +854,80 @@ def _parse_json_items(raw: str) -> List[dict]:
 
 def build_user_profile_text(user_id: str) -> str:
     """
-    加载用户的长期记忆, 格式化为可注入 system prompt 的文本。
-    - 入参: 用户 id
-    - 出参: 多行文本 (如 "- 常用图层: <图层名>"), 无记忆时返回空串
+    加载长期记忆并格式化为可注入 system prompt 的文本。
 
-    注入位置: system prompt 的「用户画像」section (见 model/llm_client.py)
-
-    ★ 含全局教训/过程记忆: user_id='global' 的 category='lesson' / 'workflow'
-      会被合并注入到长期记忆, 让 Agent 跨会话记住"曾经犯过的错 + 自己摸索的修复方法
-      + 从失败到成功的执行过程"。(仍属于长期记忆的一部分)
-
-    ★ 记忆策略 (enable_preference_extraction):
-      - 开启 (默认): 全量注入. 偏好/事实提取 与 错误案例学习 并行: 对话收尾时
-        _async_memory_finale (本路偏好/事实) 与 _async_self_correction_scan (lesson/workflow)
-        在同一触发点并行启动.
-      - 关闭 (ENABLE_PREFERENCE_EXTRACTION=false): 只注入"错误案例+解决方案"类记忆
-        (lesson/workflow) + 环境事实 (envfact, 如沙盒字体知识), 屏蔽 preference/entity/fact 噪声.
+    长期记忆 v2:
+      - scope=user 的 preference/profile；
+      - scope=global 的 lesson；
+      - 只注入 active 且 confidence 达标的记录；
+      - 按 lesson → preference → profile 排序，最多 memory_inject_max_items 条。
     """
     if not _is_db_mode():
         return ""
-    # 1. 当前用户的偏好/实体/事实记忆
-    memories = get_memory_stores().long_term.load(user_id)
-    # 2. 全局教训记忆 (跨用户共享, 自纠捕捉器写入, 融入长期记忆)
-    global_memories = get_memory_stores().long_term.load("global")
-    memories = (memories or []) + (global_memories or [])
+    memories = (
+        get_memory_stores().long_term.load(user_id, scope="user")
+        + get_memory_stores().long_term.load("global", scope="global")
+    )
     if not memories:
         return ""
 
-    # ★ 记忆策略过滤: 默认关闭偏好提取时, 只保留高价值类别
-    #   lesson   = 工具错误+自纠方案 (核心价值)
-    #   workflow = 失败→探索→修复的过程记忆
-    #   envfact  = 环境事实 (沙盒字体/依赖等, 本质是"已知答案的问题")
+    allowed = {"preference", "profile", "lesson"}
+    min_confidence = float(getattr(settings, "memory_min_confidence", 0.6))
+    memories = [
+        m for m in memories
+        if m.get("category") in allowed
+        and (m.get("status") or "active") == "active"
+        and float(m.get("confidence") or 0.0) >= min_confidence
+    ]
     if not settings.enable_preference_extraction:
-        keep_cats = {"lesson", "workflow", "envfact"}
-        memories = [m for m in memories if m["category"] in keep_cats]
-        if not memories:
-            return ""
+        memories = [m for m in memories if m.get("category") == "lesson"]
+    if not memories:
+        return ""
 
-    # 按 category 分组, 每组列条目
-    by_cat: dict = {}
+    cat_order = {"lesson": 0, "preference": 1, "profile": 2}
+    memories.sort(
+        key=lambda m: (
+            cat_order.get(m.get("category"), 9),
+            -float(m.get("confidence") or 0.0),
+            -(int(m.get("id") or 0)),
+        )
+    )
+    # 同一类别 + 同一 key 只保留置信度最高的一条
+    deduped = []
+    seen = set()
     for m in memories:
-        by_cat.setdefault(m["category"], []).append(m)
+        marker = (m.get("category"), m.get("key"))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(m)
+    max_items = max(1, int(getattr(settings, "memory_inject_max_items", 20)))
+    memories = deduped[:max_items]
+
     cat_labels = {
         "preference": "偏好",
-        "entity": "常用实体",
-        "fact": "已知事实",
+        "profile": "用户画像",
         "lesson": "已学教训",
-        "workflow": "已学流程",
-        "envfact": "环境事实",
     }
+    by_cat: dict = {}
+    for m in memories:
+        by_cat.setdefault(m.get("category"), []).append(m)
+
     lines = []
-    # 教训优先显示在最前面 (最重要的反思学习, 融入长期记忆)
-    cat_order = ["workflow", "lesson", "envfact", "preference", "entity", "fact"]
-    for cat in cat_order:
+    for cat in ("lesson", "preference", "profile"):
         items = by_cat.get(cat, [])
         if not items:
             continue
-        label = cat_labels.get(cat, cat)
+        label = cat_labels[cat]
         for it in items:
-            value = it["value"]
+            value = it.get("value") or ""
             if cat == "lesson":
                 value = format_accepted_lesson_for_prompt(value)
                 if not value:
                     continue
             # value 可能含换行 (结构化教训五段格式), 换行后补 4 空格缩进保持结构
-            indented = value.replace("\n", "\n    ")
-            lines.append(f"- [{label}] {it['key']}:\n    {indented}")
-    # 兜底: 处理未归类的 category
-    for cat, items in by_cat.items():
-        if cat in cat_order:
-            continue
-        label = cat_labels.get(cat, cat)
-        for it in items:
-            indented = it['value'].replace("\n", "\n    ")
-            lines.append(f"- [{label}] {it['key']}:\n    {indented}")
+            indented = str(value).replace("\n", "\n    ")
+            lines.append(f"- [{label}] {it.get('key', '')}:\n    {indented}")
     return "\n".join(lines)
 
 

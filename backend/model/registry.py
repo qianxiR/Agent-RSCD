@@ -3,7 +3,7 @@
 解译模型注册表 (Model Layer)
 
 按 capability 注册模型工厂，懒加载实例：
-- Agent/工具只调用 resolve("change_detection")，不感知 ProC/SegEarth；
+- Agent/工具只调用 resolve("change_detection")，不感知引擎实现；
 - 同一 capability 可注册多个实现，按 name 选择；
 - singleton=False 时每次新建实例（用于轻量/远程模型）。
 

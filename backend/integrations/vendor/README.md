@@ -15,8 +15,9 @@ raster_io.py                 GeoTIFF I/O 与地理信息
 spectral/                    NDVI/NDWI 等光谱指数
 spatial/                     buffer / intersection / erase / 几何工具
 mask_postprocess/            掩码后处理与栅格转矢量（仅必要模块）
-knowledge/                   KnowledgeRAG 知识条目、案例、工具说明（md）
 ```
+
+> 2026-11-02：KnowledgeRAG 的 13 个知识 Markdown 已移除，暂不提供知识库检索。
 
 ## 不包含
 

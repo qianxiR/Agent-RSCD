@@ -113,6 +113,7 @@ defineProps({
   background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--accent);
+
   display: grid;
   place-items: center;
   flex: 0 0 auto;

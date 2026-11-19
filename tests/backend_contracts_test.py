@@ -14,9 +14,8 @@ from backend.data.base import AssetRef, validate_asset_ref  # noqa: E402
 from backend.data.catalog import AssetCatalog  # noqa: E402
 from backend.model.base import ModelRequest, ModelResult  # noqa: E402
 from backend.model.builtins import ensure_builtin_models  # noqa: E402
-from backend.model.change_detection.proc_sam3 import ProCSam3ChangeModel  # noqa: E402
 from backend.model.registry import ModelRegistry  # noqa: E402
-from backend.model.segmentation.proc_sam3 import ProCSam3SegmentModel  # noqa: E402
+from backend.model.segmentation.sam3_native import Sam3NativeSegmentModel  # noqa: E402
 
 
 class FakeSegmentModel:
@@ -105,16 +104,14 @@ class FakeRunner:
         return {"output_path": output_path, "stats": {"regions": 1}, "vector_path": vector_output_path}
 
 
-def test_proc_sam3_adapters() -> None:
+def test_sam3_native_adapters() -> None:
     runner = FakeRunner()
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         t1 = tmp_path / "t1.tif"
-        t2 = tmp_path / "t2.tif"
         t1.write_bytes(b"t1")
-        t2.write_bytes(b"t2")
 
-        seg = ProCSam3SegmentModel(runner=runner).predict(ModelRequest(
+        seg = Sam3NativeSegmentModel(runner=runner).predict(ModelRequest(
             task="segmentation",
             inputs=[AssetRef(asset_id="t1", kind="imagery", uri=str(t1))],
             classes="building",
@@ -123,32 +120,21 @@ def test_proc_sam3_adapters() -> None:
         assert seg.status == "passed"
         assert any(item.kind == "vector" for item in seg.outputs)
 
-        change = ProCSam3ChangeModel(runner=runner).predict(ModelRequest(
-            task="change_detection",
-            inputs=[
-                AssetRef(asset_id="t1", kind="imagery", uri=str(t1)),
-                AssetRef(asset_id="t2", kind="imagery", uri=str(t2)),
-            ],
-            classes="building",
-            params={"output_dir": str(tmp_path / "change")},
-        ))
-        assert change.status == "passed"
-        assert change.vectors and Path(change.vectors[0].uri).is_file()
-
 
 def test_builtin_registration() -> None:
     registry = ModelRegistry()
     ensure_builtin_models(registry)
     rows = registry.list_models()
     names = {(row["capability"], row["name"]) for row in rows}
-    assert ("segmentation", "proc_sam3") in names
-    assert ("change_detection", "proc_sam3_change") in names
+    assert ("segmentation", "sam3_native") in names
+    assert ("change_detection", "change_qwen") in names
+    assert ("change_detection", "sam3_native_change") not in names
 
 
 if __name__ == "__main__":
     test_asset_ref_and_catalog()
     test_invalid_asset()
     test_model_registry()
-    test_proc_sam3_adapters()
+    test_sam3_native_adapters()
     test_builtin_registration()
     print("backend_contracts: PASS")

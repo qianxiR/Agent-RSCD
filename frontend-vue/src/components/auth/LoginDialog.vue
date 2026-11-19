@@ -5,6 +5,7 @@
 //   权限语义 (接口拦截、按登录用户隔离数据) 在 enforce 阶段引入。
 import { computed, ref } from 'vue'
 import { login, logout, getAuthUser } from '@/services/api'
+import BaseDialog from '@/shared/ui/BaseDialog.vue'
 
 const emit = defineEmits(['auth-changed'])
 
@@ -65,7 +66,7 @@ function handleLogout() {
     </template>
     <el-button v-else link size="small" @click="visible = true">登录</el-button>
 
-    <el-dialog v-model="visible" title="登录工作台" width="340px" append-to-body>
+    <BaseDialog v-model="visible" title="登录工作台" width="340px">
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="用户名">
           <el-input v-model="username" placeholder="请输入用户名" autocomplete="username" />
@@ -81,7 +82,7 @@ function handleLogout() {
         <el-button @click="visible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="handleLogin">登录</el-button>
       </template>
-    </el-dialog>
+    </BaseDialog>
   </div>
 </template>
 

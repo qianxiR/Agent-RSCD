@@ -361,6 +361,33 @@ def resolve_layer_name(name: str) -> Optional[str]:
     return full_name
 
 
+def ensure_workspace(ws: str) -> bool:
+    """确保工作空间存在, 不存在则创建 (供用户自选/新建工作空间的上传流程使用)
+
+    入参: ws 工作空间名 (调用方已校验 [A-Za-z0-9_]+)
+    方法: 先查 REST, 404 时 POST 创建
+    出参: bool 是否可用
+    """
+    try:
+        r = requests.get(
+            f"{settings.geoserver_rest_url}/workspaces/{ws}.json",
+            auth=_auth(),
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return True
+        r = requests.post(
+            f"{settings.geoserver_rest_url}/workspaces.json",
+            auth=_auth(),
+            json={"workspace": {"name": ws}},
+            timeout=10,
+        )
+        return r.status_code in (200, 201)
+    except Exception as e:
+        logger.warning(f"确保工作空间 {ws} 失败: {e}")
+        return False
+
+
 def list_workspaces() -> list:
     """列出所有 GeoServer 工作空间"""
     try:
@@ -384,9 +411,8 @@ def list_workspaces() -> list:
 def list_services() -> Dict[str, Any]:
     """列出 GeoServer 支持的 OGC 服务 (WMS/WFS/WCS) 及各工作空间下的图层
 
-    ★ 工作空间白名单: 仅返回名称以 cd / samseg 开头的工作空间 (大小写不敏感),
-      覆盖所有"展示用"消费者 (REST /services 端点 + AI 工具 list_geoserver_services);
-      与前端图层管理面板 (layer-panel.js) 的显示过滤规则保持一致。
+    ★ 返回全部工作空间 (2026-11-14 起上传允许用户自选/新建工作空间, 不再按前缀白名单过滤;
+      前端图层管理面板按分组段展示, 不再依赖此处的过滤)。
       边界: 仅作用于本展示接口, 不影响 list_workspaces / resolve_layer_name 等图层操作
       (下载/删除/类型检测) 使用的全量工作空间查询。
     """
@@ -397,9 +423,6 @@ def list_services() -> Dict[str, Any]:
 
     for ws in workspaces:
         ws_name = ws["name"]
-        # ★ 白名单过滤: 仅保留 cd* / samseg* 工作空间 (大小写不敏感), 剔除其余以减少展示干扰
-        if not ws_name.lower().startswith(("cd", "samseg")):
-            continue
         layers = list_layers(ws_name)
         result["workspaces"].append({"workspace": ws_name, "layers": layers, "layer_count": len(layers)})
 
@@ -1301,24 +1324,24 @@ def _extract_feature_values(data: dict) -> dict:
 
 def _ensure_samseg_edge_style() -> Optional[str]:
     """
-    确保 GeoServer 中存在线样式 "edge_line_blue" (颜色 #2C6FBD, 与 GeoAI Copilot 标题同色)。
+    确保 GeoServer 中存在线样式 "edge_line_red" (颜色 #FF0000, 分割边界统一红色)。
     若不存在则创建。
 
-    出参: 样式名 "edge_line_blue" 或 None (失败)
+    出参: 样式名 "edge_line_red" 或 None (失败)
     """
-    style_name = "edge_line_blue"
+    style_name = "edge_line_red"
     sld_body = """<?xml version="1.0" encoding="UTF-8"?>
 <StyledLayerDescriptor xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.0.0">
   <NamedLayer>
-    <Name>edge_line_blue</Name>
+    <Name>edge_line_red</Name>
     <UserStyle>
-      <Name>edge_line_blue</Name>
-      <Title>SamSeg Edge (GeoAI Blue)</Title>
+      <Name>edge_line_red</Name>
+      <Title>SamSeg Edge (Red)</Title>
       <FeatureTypeStyle>
         <Rule>
           <LineSymbolizer>
             <Stroke>
-              <CssParameter name="stroke">#2C6FBD</CssParameter>
+              <CssParameter name="stroke">#FF0000</CssParameter>
               <CssParameter name="stroke-width">2</CssParameter>
             </Stroke>
           </LineSymbolizer>
@@ -1327,7 +1350,7 @@ def _ensure_samseg_edge_style() -> Optional[str]:
               <CssParameter name="fill-opacity">0</CssParameter>
             </Fill>
             <Stroke>
-              <CssParameter name="stroke">#2C6FBD</CssParameter>
+              <CssParameter name="stroke">#FF0000</CssParameter>
               <CssParameter name="stroke-width">2</CssParameter>
             </Stroke>
           </PolygonSymbolizer>
@@ -1357,7 +1380,7 @@ def _ensure_samseg_edge_style() -> Optional[str]:
                          headers={"Content-Type": "application/vnd.ogc.sld+xml"}, timeout=10)
 
         if r.status_code in (200, 201):
-            logger.info(f"GeoServer 样式 {style_name} 创建成功 (stroke=#2C6FBD)")
+            logger.info(f"GeoServer 样式 {style_name} 创建成功 (stroke=#FF0000)")
             return style_name
 
         logger.warning(f"上传 SLD 失败: {style_name}, HTTP {r.status_code}")
@@ -1370,28 +1393,28 @@ def _ensure_samseg_edge_style() -> Optional[str]:
 
 def _ensure_samseg_polygon_style() -> Optional[str]:
     """
-    确保 GeoServer 中存在面样式 "polygon_blue" (fill=#2C6FBD 30%透明, stroke=#2C6FBD)。
+    确保 GeoServer 中存在面样式 "polygon_red" (fill=#FF0000 30%透明, stroke=#FF0000)。
     若不存在则创建。
 
-    出参: 样式名 "polygon_blue" 或 None (失败)
+    出参: 样式名 "polygon_red" 或 None (失败)
     """
-    style_name = "polygon_blue"
+    style_name = "polygon_red"
     sld_body = """<?xml version="1.0" encoding="UTF-8"?>
 <StyledLayerDescriptor xmlns="http://www.opengis.net/sld" xmlns:ogc="http://www.opengis.net/ogc" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.0.0">
   <NamedLayer>
-    <Name>polygon_blue</Name>
+    <Name>polygon_red</Name>
     <UserStyle>
-      <Name>polygon_blue</Name>
-      <Title>SamSeg Polygon (GeoAI Blue)</Title>
+      <Name>polygon_red</Name>
+      <Title>SamSeg Polygon (Red)</Title>
       <FeatureTypeStyle>
         <Rule>
           <PolygonSymbolizer>
             <Fill>
-              <CssParameter name="fill">#2C6FBD</CssParameter>
+              <CssParameter name="fill">#FF0000</CssParameter>
               <CssParameter name="fill-opacity">0.3</CssParameter>
             </Fill>
             <Stroke>
-              <CssParameter name="stroke">#2C6FBD</CssParameter>
+              <CssParameter name="stroke">#FF0000</CssParameter>
               <CssParameter name="stroke-width">2</CssParameter>
             </Stroke>
           </PolygonSymbolizer>
@@ -1421,7 +1444,7 @@ def _ensure_samseg_polygon_style() -> Optional[str]:
                          headers={"Content-Type": "application/vnd.ogc.sld+xml"}, timeout=10)
 
         if r.status_code in (200, 201):
-            logger.info(f"GeoServer 样式 {style_name} 创建成功 (fill=#2C6FBD, stroke=#2C6FBD)")
+            logger.info(f"GeoServer 样式 {style_name} 创建成功 (fill=#FF0000, stroke=#FF0000)")
             return style_name
 
         logger.warning(f"上传 SLD 失败: {style_name}, HTTP {r.status_code}")

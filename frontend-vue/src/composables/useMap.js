@@ -41,13 +41,31 @@ const DEFAULT_BOUNDARY = {
   strokeColor: '#4d6bfe',
 }
 
-// 矢量边界线样式(fill 透明 + stroke 主题蓝, 与 makeBoundarySLD 视觉一致)
+// 普通矢量样式(透明填充 + 主题蓝描边, 与 makeBoundarySLD 视觉一致)
 const _vectorStyle = new Style({
   fill: new Fill({ color: 'rgba(0,0,0,0)' }),
   stroke: new Stroke({ color: '#4d6bfe', width: 2 }),
 })
 
+// 分割/变化检测结果样式: 红色半透明掩码填充 + 红色边界线
+const _resultVectorStyle = new Style({
+  fill: new Fill({ color: 'rgba(255,0,0,0.28)' }),
+  stroke: new Stroke({ color: '#ff0000', width: 2 }),
+})
+
+// 识别解译结果图层: {conv}_{类别}_seg_{4位} / {conv}_{类别}_change_{4位}
+const RESULT_LAYER_RE = /_(?:seg|change)_[a-z0-9]{4}$/i
+function isResultLayerName(name) {
+  return RESULT_LAYER_RE.test(String(name || ''))
+}
+
 let _map = null // 模块级单例
+// 属性查询开关：样本制作等编辑模式下关闭，避免每次落点弹出 WFS 属性框
+let _featureInfoEnabled = true
+
+export function setFeatureInfoEnabled(enabled) {
+  _featureInfoEnabled = Boolean(enabled)
+}
 
 // 图例浮层状态（响应式，供 MapPanel.vue 渲染 LegendOverlay）
 const _legendState = ref({ title: '', items: [] })
@@ -139,12 +157,12 @@ export function addWmsLayer({ name, workspace, bbox = null, sldBody = null, laye
   return { loaded: true }
 }
 
-// 入参: { name, workspace, bbox?, forceFit? }
+// 入参: { name, workspace, bbox?, forceFit?, resultLayer? }
 // 方法: 构造 WFS GetFeature URL（走代理 outputFormat=application/json）→ VectorSource(GeoJSON)
-//   + VectorLayer（边界线样式，与 WMS makeBoundarySLD 视觉一致）→ addLayer
+//   + VectorLayer（解译结果红色掩码/边界, 普通矢量蓝色描边）→ addLayer
 //   bbox && forceFit 时定位（polygon/edge 传 false 避免抢底图视角）
 // 出参: Promise<{loaded, error?}> —— 监听 featuresloadend/error + 10s 超时
-export function addWfsLayer({ name, workspace, bbox = null, forceFit = false }) {
+export function addWfsLayer({ name, workspace, bbox = null, forceFit = false, resultLayer = null }) {
   if (!_map) return Promise.resolve({ loaded: false, error: '地图未初始化' })
   const normalizedBbox = normalizeBbox(bbox)
   const typeName = workspace ? `${workspace}:${name}` : name
@@ -162,7 +180,13 @@ export function addWfsLayer({ name, workspace, bbox = null, forceFit = false }) 
     srsName: 'EPSG:4326',
   })
   const source = new VectorSource({ url: `${WMS_URL}?${params}`, format: new GeoJSON() })
-  const layer = new VectorLayer({ source, style: _vectorStyle, zIndex: 15 }) // 矢量在最上层，不被影像遮盖
+  // 解译结果（分割/变化检测）用红色掩码+边界；普通业务矢量保持蓝色描边
+  const useResultStyle = resultLayer === null ? isResultLayerName(name) : !!resultLayer
+  const layer = new VectorLayer({
+    source,
+    style: useResultStyle ? _resultVectorStyle : _vectorStyle,
+    zIndex: 15,
+  }) // 矢量在最上层，不被影像遮盖
   layer.set('layerName', name)
   layer.set('workspace', workspace)
   layer.set('business', true)
@@ -628,6 +652,7 @@ export function setupFeatureInfo(popupEl) {
   const overlay = new Overlay({ element: popupEl, autoPan: true, autoPanAnimation: { duration: 250 } })
   _map.addOverlay(overlay)
   _map.on('singleclick', (evt) => {
+    if (!_featureInfoEnabled) return
     const vectorHit = findVectorFeatureAtPixel(evt.pixel)
     if (vectorHit) {
       renderFeaturePopup(popupEl, [featureToPopupData(vectorHit.feature)], vectorHit.layer)
@@ -893,6 +918,7 @@ export function useMap() {
     setWaybackBasemap,
     getBasemapType,
     setupFeatureInfo,
+    setFeatureInfoEnabled,
     getLegendState,
     setLegend,
     clearLegend,

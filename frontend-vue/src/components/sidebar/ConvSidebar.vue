@@ -5,18 +5,19 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { Search, Delete, EditPen, Folder, Connection, Check, Plus, MagicStick, Box, Picture, User } from '@element-plus/icons-vue'
+import { Search, Delete, EditPen, Folder, Connection, Check, Plus, MagicStick, Box, Picture } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 import { useConversationStore } from '@/stores/conversation'
 import { useChat } from '@/composables/useChat'
-import { deleteConversation, patchConversation, createProject, patchProject, deleteProject } from '@/services/api'
+import { deleteConversation, patchConversation, createProject, patchProject, deleteProject, getGeoServerServices, getLayerBbox } from '@/services/api'
+import { useMap } from '@/composables/useMap'
 
 const projectStore = useProjectStore()
 const convStore = useConversationStore()
 const { projects, grouped, activeProjectId } = storeToRefs(projectStore)
 const { activeConvId } = storeToRefs(convStore)
 const { newConversation, switchTo } = useChat()
-const emit = defineEmits(['open-plugins', 'open-skills', 'open-mcp', 'open-multi-agent', 'open-imagery'])
+const emit = defineEmits(['open-extensions', 'open-library', 'open-imagery'])
 const searchOpen = ref(false)
 const searchInputRef = ref(null)
 const searchQuery = ref('')
@@ -33,6 +34,79 @@ onMounted(() => {
   projectStore.setSearch('')
   projectStore.loadAll()
 })
+
+// ==================== 图层搜索（自图层面板迁入） ====================
+// 入参: 无
+// 方法: 拉取 GeoServer 工作空间树（后端已按白名单过滤），按关键词过滤图层，选中即定位加载
+// 出参: 无
+const layerSearchOpen = ref(false)
+const layerSearchInputRef = ref(null)
+const layerSearchQuery = ref("")
+const layerTree = ref(null)
+
+const layerSearchResults = computed(() => {
+  const kw = layerSearchQuery.value.trim().toLowerCase()
+  const rows = []
+  ;(layerTree.value?.workspaces || []).forEach((ws) => {
+    ;(ws.layers_typed || ws.layers || []).forEach((l) => {
+      const name = typeof l === "string" ? l : l.name
+      const type = typeof l === "string" ? "unknown" : l.type || "unknown"
+      rows.push({ workspace: ws.workspace, name, type, full_name: `${ws.workspace}:${name}` })
+    })
+  })
+  return rows
+    .filter((r) => !kw || `${r.workspace}:${r.name}`.toLowerCase().includes(kw))
+    .slice(0, kw ? 30 : 12)
+})
+
+// 入参: 无 | 方法: 打开图层搜索浮层并懒加载工作空间树，DOM 更新后聚焦输入框 | 出参: 无
+async function openLayerSearch() {
+  layerSearchOpen.value = true
+  nextTick(() => layerSearchInputRef.value?.focus())
+  if (!layerTree.value) {
+    try {
+      layerTree.value = await getGeoServerServices()
+    } catch {
+      ElMessage.error("图层加载失败")
+    }
+  }
+}
+
+function closeLayerSearch() {
+  layerSearchOpen.value = false
+}
+
+function onLayerSearchInput(e) {
+  layerSearchQuery.value = e.target.value
+}
+
+function clearLayerSearchKeyword() {
+  layerSearchQuery.value = ""
+  nextTick(() => layerSearchInputRef.value?.focus())
+}
+
+// 入参: result 图层搜索结果（workspace/name/type） | 方法: 取 bbox 按 WFS/WMS 加载，成功即关闭浮层 | 出参: Promise<void>
+async function selectLayerResult(result) {
+  if (!result?.workspace || !result?.name) return
+  try {
+    const bb = await getLayerBbox(result.workspace, result.name)
+    const bbox = bb?.status === "success" ? bb.bbox : null
+    if (result.type === "vector") {
+      addWfsLayer({ name: result.name, workspace: result.workspace, bbox, forceFit: true })
+    } else {
+      addWmsLayer({ name: result.name, workspace: result.workspace, bbox, layerType: result.type })
+    }
+    ElMessage.success(`已加载图层 ${result.workspace}:${result.name}`)
+    layerSearchOpen.value = false
+  } catch {
+    ElMessage.error("定位失败")
+  }
+}
+
+async function selectFirstLayerResult() {
+  const first = layerSearchResults.value[0]
+  if (first) await selectLayerResult(first)
+}
 
 // ==================== 新对话 → 项目选择浮层 ====================
 // ★ 交互对齐 Claude Desktop: 点「新对话」先选项目 (含「不在项目中工作」),
@@ -256,32 +330,24 @@ function fmtTime(t) {
     <div class="sidebar-actions">
       <button type="button" class="new-task-btn" @click="onNewConv">
         <el-icon><Plus /></el-icon>
-        <span>新建解译任务</span>
+        <span>新建任务</span>
       </button>
       <div class="tool-row">
-        <button type="button" class="tool-btn" title="搜索会话" @click="openSearch">
-          <el-icon><Search /></el-icon>
-          <span>搜索</span>
-        </button>
-        <button type="button" class="tool-btn" title="插件" @click="emit('open-plugins')">
-          <el-icon><Connection /></el-icon>
-          <span>插件</span>
-        </button>
-        <button type="button" class="tool-btn" title="MCP 工具" @click="emit('open-mcp')">
-          <el-icon><Box /></el-icon>
-          <span>MCP</span>
-        </button>
-        <button type="button" class="tool-btn" title="技能库" @click="emit('open-skills')">
+        <button type="button" class="tool-btn" title="专家、技能、连接器" @click="emit('open-extensions')">
           <el-icon><MagicStick /></el-icon>
-          <span>技能</span>
+          <span>专家·技能·连接器</span>
         </button>
-        <button type="button" class="tool-btn" title="多智能体管理" @click="emit('open-multi-agent')">
-          <el-icon><User /></el-icon>
-          <span>多智能体</span>
+        <button type="button" class="tool-btn" title="资料库" @click="emit('open-library')">
+          <el-icon><Folder /></el-icon>
+          <span>资料库</span>
         </button>
         <button type="button" class="tool-btn" title="检索开源遥感影像" @click="emit('open-imagery')">
           <el-icon><Picture /></el-icon>
-          <span>影像</span>
+          <span>影像检索</span>
+        </button>
+        <button type="button" class="tool-btn" title="搜索并加载 GeoServer 图层" @click="openLayerSearch">
+          <el-icon><Search /></el-icon>
+          <span>搜索图层</span>
         </button>
       </div>
     </div>
@@ -418,6 +484,38 @@ function fmtTime(t) {
         </div>
       </div>
     </Teleport>
+
+    <Teleport to="body">
+      <div v-if="layerSearchOpen" class="layer-search-overlay" @click.self="closeLayerSearch" @keydown.esc="closeLayerSearch">
+        <div class="layer-search-modal" role="dialog" aria-modal="true" aria-label="搜索图层">
+          <div class="layer-search-modal-head">
+            <el-icon><Search /></el-icon>
+            <input
+              ref="layerSearchInputRef"
+              class="layer-search-modal-input"
+              :value="layerSearchQuery"
+              placeholder="搜索图层或工作空间"
+              @input="onLayerSearchInput"
+              @keydown.enter="selectFirstLayerResult"
+            />
+            <button v-if="layerSearchQuery" type="button" class="layer-search-clear-btn" @click="clearLayerSearchKeyword">清除</button>
+          </div>
+          <div class="layer-search-results">
+            <button
+              v-for="item in layerSearchResults"
+              :key="item.full_name"
+              type="button"
+              class="layer-search-result-row"
+              @click="selectLayerResult(item)"
+            >
+              <span class="layer-search-result-title">{{ item.name }}</span>
+              <span class="layer-search-result-meta">{{ item.workspace }} · {{ item.type }}</span>
+            </button>
+            <div v-if="!layerSearchResults.length" class="layer-search-result-empty">没有匹配的图层</div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -449,7 +547,7 @@ function fmtTime(t) {
   background: var(--bg-panel);
   color: var(--text-primary);
   font-size: var(--fs-lg);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   cursor: pointer;
 }
 .new-task-btn:hover {
@@ -473,7 +571,7 @@ function fmtTime(t) {
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--fs-lg);
   cursor: pointer;
   text-align: left;
@@ -520,7 +618,8 @@ function fmtTime(t) {
 
 .search-modal-head .el-icon {
   flex-shrink: 0;
-  color: var(--text-secondary);
+  color: var(--accent);
+
   font-size: 13px;
 }
 
@@ -555,13 +654,15 @@ function fmtTime(t) {
   border: 1px solid var(--glass-border-strong);
   border-radius: var(--r-sm);
   background: var(--glass-surface);
-  color: var(--text-secondary);
+  color: var(--accent);
+
   cursor: pointer;
   font-size: 12px;
 }
 
 .search-clear-btn:hover {
   color: var(--accent);
+
   border-color: var(--glass-accent-border);
 }
 
@@ -590,7 +691,7 @@ function fmtTime(t) {
 }
 
 .search-result-row:hover {
-  background: var(--accent-soft);
+  background: var(--bg-hover);
 }
 
 .search-result-title {
@@ -625,7 +726,7 @@ function fmtTime(t) {
   padding: 14px 10px 6px;
   font-size: var(--fs-md);
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   letter-spacing: 0;
 }
 
@@ -654,14 +755,15 @@ function fmtTime(t) {
 .project-row-icon {
   width: 15px;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--accent);
+
 }
 
 .project-row-title {
   flex: 1;
   min-width: 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -686,6 +788,7 @@ function fmtTime(t) {
 }
 .project-row-add:hover {
   color: var(--accent);
+
 }
 .project-row-add.danger:hover {
   color: var(--accent-red, #d03050);
@@ -723,7 +826,7 @@ function fmtTime(t) {
   text-overflow: ellipsis;
   font-size: var(--fs-lg);
   color: var(--text-primary);
-  font-weight: 400;
+  font-weight: var(--fw-body);
   line-height: 18px;
 }
 .conversation-card-time {
@@ -775,7 +878,7 @@ function fmtTime(t) {
   border: none;
   border-radius: var(--r-md);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   font-size: var(--fs-lg);
 }
@@ -790,15 +893,150 @@ function fmtTime(t) {
   width: 380px;
 }
 .project-pick-icon {
-  color: var(--text-secondary);
+  color: var(--accent);
+
   flex-shrink: 0;
 }
 .project-pick-check {
   color: var(--accent);
+
   flex-shrink: 0;
   margin-left: auto;
 }
 .project-pick-none {
+  color: var(--accent);
+
+}
+.layer-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--glass-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.layer-search-modal {
+  width: min(520px, calc(100vw - 40px));
+  padding: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-surface);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur);
+}
+
+.layer-search-modal-head {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--glass-surface-strong);
+}
+
+.layer-search-modal-head .el-icon {
+  flex-shrink: 0;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.layer-search-modal-head:focus-within {
+  outline: none;
+  box-shadow: none;
+}
+
+.layer-search-modal-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.layer-search-modal-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.layer-search-modal-input::placeholder {
+  color: var(--text-muted);
+}
+
+.layer-search-clear-btn {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--r-sm);
+  background: var(--glass-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.layer-search-clear-btn:hover {
+  color: var(--accent);
+
+  border-color: var(--glass-accent-border);
+}
+
+.layer-search-results {
+  margin-top: 6px;
+  max-height: min(360px, 52vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.layer-search-result-row {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.layer-search-result-row:hover {
+  background: var(--bg-hover);
+}
+
+.layer-search-result-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.layer-search-result-meta {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.layer-search-result-empty {
+  padding: 8px 8px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 </style>

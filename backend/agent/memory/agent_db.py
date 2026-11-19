@@ -237,7 +237,7 @@ def init_schema() -> bool:
                     ALTER TABLE conversation_summary
                     ADD COLUMN IF NOT EXISTS compress_level INT DEFAULT 0
                 """)
-                # 长期记忆 - 用户画像表 (跨会话, 按 user_id 隔离)
+                # 长期记忆 - 用户画像表 (跨会话, scope=user/global)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS user_memory (
                         id         BIGSERIAL PRIMARY KEY,
@@ -252,6 +252,74 @@ def init_schema() -> bool:
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_um_user
                     ON user_memory(user_id)
+                """)
+                # ★ 长期记忆 v2: 三类 preference/profile/lesson + 生命周期元数据。
+                #   旧库幂等补列; 旧 fact -> profile, 旧 entity/envfact/workflow 归档,
+                #   不再作为可注入类别。
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'user'")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS kind TEXT")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS confidence REAL DEFAULT 0.7")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS source TEXT")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS evidence JSONB DEFAULT '{}'::jsonb")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS supersedes_id BIGINT")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0")
+                cur.execute("ALTER TABLE user_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ")
+
+                # 旧唯一约束 (user_id, key) 会阻止同一 key 的历史版本; 改为 active 部分唯一索引。
+                try:
+                    from psycopg2 import sql as _pg_sql
+                    cur.execute("""
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'user_memory'::regclass
+                          AND contype = 'u'
+                          AND pg_get_constraintdef(oid) = 'UNIQUE (user_id, key)'
+                    """)
+                    for (constraint_name,) in cur.fetchall():
+                        cur.execute(_pg_sql.SQL(
+                            "ALTER TABLE user_memory DROP CONSTRAINT IF EXISTS {}"
+                        ).format(_pg_sql.Identifier(constraint_name)))
+                except Exception as migrate_err:
+                    logger.warning(f"user_memory 旧唯一约束清理跳过: {migrate_err}")
+
+                cur.execute("UPDATE user_memory SET scope = 'global' WHERE user_id = 'global'")
+                cur.execute("UPDATE user_memory SET category = 'profile' WHERE category = 'fact'")
+                cur.execute("""
+                    UPDATE user_memory
+                    SET category = 'profile', status = 'archived'
+                    WHERE category IN ('entity', 'envfact')
+                """)
+                cur.execute("""
+                    UPDATE user_memory
+                    SET category = 'lesson', status = 'archived'
+                    WHERE category = 'workflow'
+                """)
+                cur.execute("""
+                    UPDATE user_memory
+                    SET kind = CASE
+                        WHEN category = 'preference' THEN 'interaction'
+                        WHEN category = 'profile' THEN 'context'
+                        ELSE 'repair'
+                    END
+                    WHERE kind IS NULL
+                """)
+                cur.execute("UPDATE user_memory SET source = 'legacy' WHERE source IS NULL OR source = ''")
+                cur.execute("UPDATE user_memory SET confidence = 0.6 WHERE source = 'legacy'")
+                cur.execute("UPDATE user_memory SET status = 'active' WHERE status IS NULL OR status = ''")
+                cur.execute("UPDATE user_memory SET use_count = 0 WHERE use_count IS NULL")
+                cur.execute("UPDATE user_memory SET updated_at = COALESCE(updated_at, created_at, now())")
+                cur.execute("ALTER TABLE user_memory ALTER COLUMN source SET DEFAULT 'manual'")
+                cur.execute("ALTER TABLE user_memory ALTER COLUMN updated_at SET DEFAULT now()")
+                cur.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_user_memory_active
+                    ON user_memory (user_id, scope, category, key)
+                    WHERE status = 'active'
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_um_scope_status
+                    ON user_memory(scope, status, category)
                 """)
 
                 # ★ AI 任务表 (P3 任务持久化): 追踪重工具的执行状态/进度/IO, 支持断点续算
@@ -1198,23 +1266,93 @@ def delete_messages_upto(conversation_id: str, upto_id: int) -> int:
 
 # ==================== 长期记忆 - 用户画像 ====================
 
-def save_user_memory(user_id: str, key: str, value: str, category: str = "preference") -> bool:
+# 长期记忆 v2 只允许三类:
+#   preference = 用户偏好; profile = 稳定画像; lesson = 全局教训。
+# 旧类别在写入时做兼容映射，避免历史调用方把 fact/entity 写回来。
+_MEMORY_CATEGORY_ALIASES = {
+    "fact": "profile",
+    "entity": "profile",
+    "envfact": "profile",
+    "workflow": "lesson",
+}
+_MEMORY_CATEGORIES = {"preference", "profile", "lesson"}
+
+
+def _normalize_memory_category(category: str) -> str:
+    """把历史类别归一化为 preference/profile/lesson。"""
+    value = (category or "preference").strip().lower()
+    value = _MEMORY_CATEGORY_ALIASES.get(value, value)
+    return value if value in _MEMORY_CATEGORIES else "profile"
+
+
+def _normalize_memory_scope(user_id: str, scope: str = "user") -> str:
+    """global 用户固定为 global scope，其余为 user scope。"""
+    if user_id == "global" or (scope or "").strip().lower() == "global":
+        return "global"
+    return "user"
+
+
+def _as_iso(value) -> Optional[str]:
+    """把数据库时间转为可 JSON 序列化的 ISO 字符串。"""
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def save_user_memory(
+    user_id: str,
+    key: str,
+    value: str,
+    category: str = "preference",
+    *,
+    scope: str = "user",
+    kind: str = None,
+    confidence: float = 0.7,
+    source: str = "manual",
+    evidence: Optional[Dict[str, Any]] = None,
+) -> bool:
     """
-    写入/更新一条用户长期记忆 (同 user_id+key 覆盖, UPSERT)。
-    - category: preference(偏好) / entity(实体) / fact(事实)
+    写入/更新一条长期记忆 (active 记录按 user_id+scope+category+key UPSERT)。
+
+    入参:
+      - user_id: 用户 id；global 表示全局教训。
+      - category: preference / profile / lesson；旧 fact/entity/envfact/workflow 自动映射。
+      - scope: user / global；user_id='global' 时强制 global。
+      - kind: preference 的 interaction/output/task/input，profile 的 domain/context 等。
+      - confidence: 0~1，低于注入阈值时仍保留但不注入。
+      - source: conversation / self_correction / pattern / manual / legacy。
+      - evidence: 结构化证据 (conversation_id / tool_call_id / verification 等)。
+    出参: 是否写入成功。
     """
+    category = _normalize_memory_category(category)
+    scope = _normalize_memory_scope(user_id, scope)
+    try:
+        confidence_value = max(0.0, min(1.0, float(confidence)))
+    except (TypeError, ValueError):
+        confidence_value = 0.7
+    evidence_value = evidence if isinstance(evidence, dict) else {}
+    _, _, Json = _get_psycopg2()
+
     with get_conn() as conn:
         if conn is None:
             return False
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """INSERT INTO user_memory (user_id, key, value, category)
-                       VALUES (%s, %s, %s, %s)
-                       ON CONFLICT (user_id, key) DO UPDATE
-                       SET value = EXCLUDED.value,
-                           category = EXCLUDED.category""",
-                    (user_id, key, value, category),
+                    """INSERT INTO user_memory
+                           (user_id, scope, category, kind, key, value,
+                            confidence, source, evidence, status, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', now())
+                       ON CONFLICT (user_id, scope, category, key) WHERE status = 'active'
+                       DO UPDATE SET
+                           value = EXCLUDED.value,
+                           kind = COALESCE(EXCLUDED.kind, user_memory.kind),
+                           confidence = EXCLUDED.confidence,
+                           source = EXCLUDED.source,
+                           evidence = EXCLUDED.evidence,
+                           updated_at = now()""",
+                    (
+                        user_id, scope, category, kind, key, value,
+                        confidence_value, source, Json(evidence_value),
+                    ),
                 )
             conn.commit()
             return True
@@ -1224,43 +1362,90 @@ def save_user_memory(user_id: str, key: str, value: str, category: str = "prefer
             return False
 
 
-def load_user_memory(user_id: str, category: str = None) -> List[Dict[str, Any]]:
+def load_user_memory(
+    user_id: str,
+    category: str = None,
+    *,
+    scope: str = None,
+    active_only: bool = True,
+    limit: int = None,
+) -> List[Dict[str, Any]]:
     """
-    加载用户的长期记忆。返回 [{key, value, category}, ...]
-    - category=None: 全量加载 (学习项目记忆量小, 全量注入 system prompt)
+    加载用户的长期记忆。
+
+    入参:
+      - user_id: 用户 id；global 表示全局教训。
+      - category: 可选类别过滤。
+      - scope: 可选 user/global 过滤。
+      - active_only: 默认只返回 active；迁移/运维可传 False。
+      - limit: 可选条数上限。
+    出参: [{id, user_id, scope, category, kind, key, value,
+            confidence, source, evidence, status, last_used_at, use_count}, ...]
     """
+    where = ["user_id = %s"]
+    params: List[Any] = [user_id]
+    if category:
+        where.append("category = %s")
+        params.append(_normalize_memory_category(category))
+    if scope:
+        where.append("scope = %s")
+        params.append(_normalize_memory_scope(user_id, scope))
+    if active_only:
+        where.append("status = 'active'")
+    sql = (
+        "SELECT id, user_id, scope, category, kind, key, value, confidence, "
+        "source, evidence, status, last_used_at, use_count "
+        "FROM user_memory WHERE " + " AND ".join(where) + " ORDER BY id"
+    )
+    if limit:
+        sql += " LIMIT %s"
+        params.append(max(1, int(limit)))
+
     with get_conn() as conn:
         if conn is None:
             return []
         try:
             with conn.cursor() as cur:
-                if category:
-                    cur.execute(
-                        "SELECT key, value, category FROM user_memory WHERE user_id = %s AND category = %s ORDER BY id",
-                        (user_id, category),
-                    )
-                else:
-                    cur.execute(
-                        "SELECT key, value, category FROM user_memory WHERE user_id = %s ORDER BY id",
-                        (user_id,),
-                    )
+                cur.execute(sql, tuple(params))
                 rows = cur.fetchall()
-            return [{"key": r[0], "value": r[1], "category": r[2]} for r in rows]
+            return [
+                {
+                    "id": r[0],
+                    "user_id": r[1],
+                    "scope": r[2],
+                    "category": r[3],
+                    "kind": r[4],
+                    "key": r[5],
+                    "value": r[6],
+                    "confidence": float(r[7]) if r[7] is not None else 0.7,
+                    "source": r[8] or "legacy",
+                    "evidence": r[9] or {},
+                    "status": r[10] or "active",
+                    "last_used_at": _as_iso(r[11]),
+                    "use_count": int(r[12] or 0),
+                }
+                for r in rows
+            ]
         except Exception as e:
             logger.error(f"加载用户记忆失败 [user={user_id}]: {e}")
             return []
 
 
-def delete_user_memory(user_id: str, key: str) -> bool:
-    """删除一条用户记忆"""
+def delete_user_memory(user_id: str, key: str, *, scope: str = None) -> bool:
+    """删除一条用户记忆 (可按 scope 限定)。"""
+    where = ["user_id = %s", "key = %s"]
+    params: List[Any] = [user_id, key]
+    if scope:
+        where.append("scope = %s")
+        params.append(_normalize_memory_scope(user_id, scope))
     with get_conn() as conn:
         if conn is None:
             return False
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM user_memory WHERE user_id = %s AND key = %s",
-                    (user_id, key),
+                    "DELETE FROM user_memory WHERE " + " AND ".join(where),
+                    tuple(params),
                 )
             conn.commit()
             return True
@@ -1268,6 +1453,33 @@ def delete_user_memory(user_id: str, key: str) -> bool:
             conn.rollback()
             logger.error(f"删除用户记忆失败 [user={user_id}, key={key}]: {e}")
             return False
+
+
+def clear_user_memory(user_id: str, *, scope: str = "user") -> int:
+    """
+    清空某用户的长期记忆，返回删除条数。
+
+    入参:
+      - user_id: 用户 id。
+      - scope: 默认只清 user scope；global 教训不随用户清空。
+    """
+    scope_value = _normalize_memory_scope(user_id, scope)
+    with get_conn() as conn:
+        if conn is None:
+            return 0
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM user_memory WHERE user_id = %s AND scope = %s",
+                    (user_id, scope_value),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+            return max(0, int(deleted or 0))
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"清空用户记忆失败 [user={user_id}, scope={scope_value}]: {e}")
+            return 0
 
 
 # ==================== 会话列表与历史加载 (供前端侧栏) ====================

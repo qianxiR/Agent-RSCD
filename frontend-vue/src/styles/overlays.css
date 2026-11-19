@@ -33,7 +33,7 @@
 .el-message-box__header,
 .el-dialog__header {
   border-bottom: 1px solid var(--glass-border-soft);
-  padding: 14px 16px 12px !important;
+  padding: 10px 16px 8px !important;
 }
 
 .el-message-box__title,
@@ -74,21 +74,21 @@
 
 .el-message-box .el-button:hover,
 .el-dialog .el-button:hover {
-  border-color: var(--glass-accent-border) !important;
-  color: var(--accent) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-primary) !important;
 }
 
 .el-message-box .el-button--primary,
 .el-dialog .el-button--primary {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
+  background: #1a1a1a !important;
+  border-color: #1a1a1a !important;
   color: #fff !important;
 }
 
 .el-message-box .el-button--primary:hover,
 .el-dialog .el-button--primary:hover {
-  background: var(--accent-hover) !important;
-  border-color: var(--accent-hover) !important;
+  background: #111110 !important;
+  border-color: #111110 !important;
   color: #fff !important;
 }
 
@@ -194,6 +194,25 @@
 .el-dropdown-menu__item:hover {
   background: var(--bg-hover) !important;
   color: var(--text-primary) !important;
+}
+
+/* 底图日期下拉：选项文字一律近黑（含选中态的 accent 蓝也改黑） */
+.basemap-date-popper .el-select-dropdown__item,
+.basemap-date-popper .el-select-dropdown__item.is-selected,
+.basemap-date-popper .el-select-dropdown__item.is-hovering,
+.basemap-date-popper .el-select-dropdown__item.hover,
+.basemap-date-popper .el-select-dropdown__item:hover {
+  color: #1a1a18 !important;
+}
+
+/* 底图日期选择框 / 卷帘时相选择框：任何状态（默认/悬停/聚焦展开）背景都与面板背景一致 */
+.basemap-date-select .el-select__wrapper,
+.basemap-date-select .el-select__wrapper.is-hovering,
+.basemap-date-select .el-select__wrapper.is-focused,
+.compare-date-select .el-select__wrapper,
+.compare-date-select .el-select__wrapper.is-hovering,
+.compare-date-select .el-select__wrapper.is-focused {
+  background: transparent !important;
 }
 
 .el-image-viewer__mask {

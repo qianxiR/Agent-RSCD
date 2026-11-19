@@ -76,7 +76,7 @@
 
 - **工作记忆（buffer）**：`message` 表，存近期对话消息（含 tool_calls 的 JSONB）。检索方式：`load_messages_since`（`agent_db.py:1269`）按 id 取摘要边界之后的活跃消息。
 - **短期记忆（summary）**：`conversation_summary` 表，本会话旧消息的 LLM 摘要 + `summarized_upto` 水位线。
-- **长期记忆（long-term）**：`user_memory` 表，跨会话的偏好/事实/教训/流程（`category` 字段区分），UPSERT 去重。
+- **长期记忆（long-term）**：`user_memory` 表，跨会话的 `preference`（行为偏好）/ `profile`（稳定画像）/ `lesson`（全局改错教训），按 `scope + category` 区分。
 - **任务/计划记忆**：`ai_task` 表 + 内存状态机（`task_state.py`），存显式执行计划的步骤状态。
 
 **注入顺序**：长期→短期→任务状态→工作记忆，全部组装进 system prompt 或消息列表，再经 token 裁剪。
@@ -85,27 +85,27 @@
 
 ---
 
-### Q5. 【关键题】本项目用向量检索还是规则检索？为什么？长期记忆全量注入会不会有问题？
+### Q5. 【关键题】本项目用向量检索还是规则检索？为什么？长期记忆注入会不会有问题？
 
 **要点**：本项目**完全没有** embedding/向量检索/相似度排序。这是面试官常挖的坑——不要想当然说"肯定用了 RAG"。
 
-**参考答案**（依据探索结论 + `agent_db.py:1356-1380`）：
+**参考答案**（依据 `memory_context.py` + `agent_db.py`）：
 
-本项目长期记忆用**全量扫描注入**（`load_user_memory` 取该用户全部 + `user_id='global'` 全局教训），靠 `UNIQUE(user_id, key)` 的 UPSERT 去重控制规模。代码注释明确"学习项目记忆量小，全量注入"。
+本项目长期记忆用**按类别读取 + 置信度/条数上限注入**：`load_user_memory` 取该用户 `scope=user` 的 `preference`/`profile` + `scope=global` 的 `lesson`，只保留 `status=active` 且 `confidence >= MEMORY_MIN_CONFIDENCE` 的记录，默认最多注入 20 条。靠 `(user_id, scope, category, key)` 的 active 部分唯一索引 UPSERT 去重控制规模。
 
 **为什么不用向量检索**：
 
-1. 记忆量小，向量检索的建索引/查询开销 > 全量注入。
+1. 记忆量小、条目少，向量索引/查询开销大于直接读取。
 2. 确定性优先：规则检索可复现，向量检索有随机性（近似最近邻），与本项目"确定性 verification/repair"的哲学冲突。
-3. 教训类记忆价值密度高、条数少，全量注入反而召回更全。
+3. 长期记忆是少量高价值条目，按类别 + 置信度排序比语义近邻更可控。
 
-**全量注入的风险与缓解**：当记忆膨胀到数百条时，会挤占 token 预算。本项目的缓解策略：
+**注入膨胀的缓解**：
 
-1. 偏好提取默认收敛（实测 86% 是低价值污染，已弱化）；
-2. lesson 入库有严格门控（必须修复成功 + verification passed 才入库，`self_correction.py:31-35`）；
-3. UPSERT 同 key 覆盖天然防增长。
+1. 只允许 `preference` / `profile` / `lesson` 三类，具体实体、路径、表名不进记忆；
+2. `lesson` 入库有严格门控（必须修复成功 + verification passed 才入库）；
+3. UPSERT 同 key 覆盖 + 置信度阈值 + 注入条数上限。
 
-这是"用质量门控替代检索"的取舍。
+这是"质量门控 + 预算上限"替代检索的取舍，不是"全量注入"。
 
 ---
 
@@ -148,37 +148,34 @@
 
 ---
 
-### Q8. 讲讲 SAM（Segment Anything）在本项目里的推理流程。为什么从多轮迭代改成官方单次前向？
+### Q8. 讲讲 SAM（Segment Anything）在本项目里的推理流程。
 
-**要点**：开放词汇 + 官方双头/存在性融合 + 单次前向/滑窗 + `prob_thd`。这是算法核心题。
+**要点**：三部分各司其职——地物提取走 SamSeg 本体；变化检测走 change_qwen 专用 ONNX；原生 SAM3 归样本制作。这是算法核心题。
 
-**参考答案**（依据 `backend/model/SamSeg/engine.py` + `official.py` + `runner.py`）：
+**参考答案**（依据 `backend/model/SamSeg/runner.py` + `sam3native/service.py` + `change_detection/change_qwen_runtime/`）：
 
-本项目用的是 **SegEarth-OV3 / SAM3 开放词汇分割模型**（非原版 SAM 的 points/box 提示，而是**文本提示 text prompt**）。
+**① 地物提取（`segment_image`）** 走 **SamSeg 本体**（SegEarth-OV3 官方口径，`SamSeg/official.py`）：
 
-**官方推理流程**（阶段 24 起，对齐 `demo.py` / `segearthov3_segmentor.py`）：
+1. 类别解析：中文/英文类别 → 英文同义词行（第 0 行固定 `background`），展开为 query 列表；
+2. 单次前向 + 512 滑窗：`official.infer_logits` 对每个 query 取实例头 `sigmoid(masks) × (sigmoid(logits) × presence)` 与语义头 `sigmoid(semantic_seg) × presence` 逐像素 max；
+3. 同义词 one-hot 聚合 → argmax → `prob_thd` 压背景，得到类别图；
+4. 后处理与产物：彩色 PNG + 带 CRS GeoTIFF + GeoJSON/Shapefile 图斑 + legend + 连通域统计。
 
-1. **官方引擎**：`engine.py` 清理子项目旧版 `sam3/` 的路径/模块遮蔽，使用 conda 环境 site-packages 的官方 `sam3` + `sam3.pt`；`Sam3Processor(resolution=1008)`。
-2. **单图或滑窗**：图像任一边 > `slide_crop=512` 时按 512/512 滑窗，重叠区域简单平均；否则整图一次前向。
-3. **逐 query 双头融合**：
-   - 实例头：`sigmoid(pred_masks) × (sigmoid(pred_logits) × presence)`，按 `confidence_threshold=0.1` 过滤；
-   - 语义头：`sigmoid(semantic_seg) × presence`；
-   - 两者 element-wise max，写入该 query 的 `(H,W)`。
-4. **类别聚合**：同义词 query 用 one-hot 按类别取 max → `argmax` → 置信度低于 `prob_thd=0.1` 的像素压回背景。
-5. **默认不做形态学后处理**（官方流程）；需要降噪时用 `SAMSEG_POSTPROCESS=true` 打开。
+**② 原生 SAM3（`sam3native/`）** 供**样本制作**使用（文本接地逐实例，交互头另支持 points/box）：
 
-**为什么弃用旧 multipass（Remote SAMsing）**：
+1. 模型构建：清掉子项目旧版 `sam3/` 遮蔽，用 site-packages 官方 `sam3` + 权重，`build_sam3_image_model(enable_inst_interactivity=True)` + `Sam3Processor`，交互头与接地头共享权重；
+2. `set_image` 编码一次并缓存；分辨率 `SAM3_NATIVE_RESOLUTION` 默认 1008；
+3. `run_classes` 逐类发文本提示（同义词增强）→ 逐实例掩码/分数/框 + 该提示的语义图；
+4. 逐像素语义图 argmax + 阈值回背景得到类别图；`MAX_INSTANCES=255`、`_merge_same_box`、`min_area` 过滤；
+5. 后处理按需开启（`SAMSEG_POSTPROCESS`）。
 
-- 旧流程最多 10 轮、每轮涂黑已分割区域 + 阈值 ×0.7 衰减，单图耗时高且两期分割不一致；
-- 它绕过了官方 `prob_thd` 和滑窗，大图容易漏检/OOM；
-- 本地旧版 `sam3` 还被改成 336 输入/简化 neck，与官方权重不匹配，检测头实际为空。
-- 现保留 `mode=multipass` 入参仅为兼容旧调用，runner 会告警并强制走 official。
+**③ 变化检测** 走 **change_qwen 专用 ONNX**（`detect_change` 工具实际调用）：
 
-**变化检测**（官方混合策略）：
+1. 两期影像按 CRS 读入（rasterio + WarpedVRT），336×336 分块、步长 168、重叠区加权；
+2. 两类权重：`jzg`（九寨沟滑坡）/ `cdcd`（成都 2016–2023 建筑变化），文本提示用预计算 tokens；
+3. 概率图按阈值二值化 + `min_area` 过滤 → 变化 mask / 概率 GeoTIFF / 图斑 GeoJSON / 面积统计。
 
-1. **实例级**：两期前景 mask 连通域在另一期的覆盖率 < 0.3 且面积 ≥ 20 → 变化；目标 mask 先膨胀 2px 吸收配准漂移，双向并集。
-2. **语义级**：SAM3 FPN 最后一层余弦相似度 → `1-sim`；每类 `energy = max_conf × |Δlogit| × feature_change`，逐类 Otsu（下限 0.01）。
-3. **融合**：实例级 ∩ 语义级，类别取语义级结果。
+> `sam3_native_change` 适配器已移除；`runner.run_change_detection`（双时相实例对比 + 转移矩阵）函数保留但不再注册、工具链不调用。
 
 ---
 

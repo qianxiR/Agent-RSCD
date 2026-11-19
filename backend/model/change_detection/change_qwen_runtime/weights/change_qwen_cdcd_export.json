@@ -1,0 +1,22 @@
+{
+  "model": "cdcd",
+  "checkpoint": "H:\\exp_bcd\\文本编码器消融_表10\\CDCD\\LLaVA-1.5-7B\\best_model.pth",
+  "text_cache": "G:\\dataes\\text_cache\\CDCDdataes_text_cache_generic_llava15_7b.pt",
+  "prompt": "Detecting building changes in urban scenes from bi-temporal images.",
+  "img_size": 336,
+  "opset": 17,
+  "onnx": "E:\\1代码\\系统\\Agent-RSCD\\backend\\model\\change_detection\\change_qwen_runtime\\weights\\change_qwen_cdcd.onnx",
+  "text_tokens": "E:\\1代码\\系统\\Agent-RSCD\\backend\\model\\change_detection\\change_qwen_runtime\\weights\\change_qwen_cdcd_text.pt",
+  "onnx_size_gb": 1.958,
+  "verification": {
+    "sample": "val_1",
+    "max_abs_diff": 0.000274658203125,
+    "mean_abs_diff": 5.269967005006038e-06,
+    "mask_iou": 1.0,
+    "changed_pixels_ref": 26920,
+    "changed_pixels_onnx": 26920,
+    "providers": [
+      "CPUExecutionProvider"
+    ]
+  }
+}

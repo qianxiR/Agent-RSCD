@@ -365,7 +365,7 @@ onMounted(() => load())
   background: var(--bg-hover);
 }
 .role-item.is-active {
-  background: var(--accent-soft);
+  background: #ececec;
 }
 .role-item-main {
   display: flex;
@@ -384,6 +384,7 @@ onMounted(() => load())
 }
 .role-item.is-active .role-name {
   color: var(--accent);
+
 }
 .role-code {
   font-size: var(--fs-xs);
@@ -429,7 +430,7 @@ onMounted(() => load())
   padding: 3px 0;
 }
 .perm-check input {
-  accent-color: var(--accent);
+  accent-color: #1a1a18;
 }
 .perm-check.is-off .perm-name {
   color: var(--text-muted);

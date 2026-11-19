@@ -345,7 +345,7 @@ class PlanetaryComputerProvider(BaseProvider):
         colls = [c for c in query.collections if self.collection(c)] or [c.key for c in self.collections]
         # ★ PC 的 STAC 后端不允许跨 collection 检索 (不同 collection 可能落在不同后端),
         #   因此按集合拆成并发子请求, 任一集合失败不影响其他集合。
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             async def _one(coll_key: str):
                 body: Dict[str, Any] = {
@@ -410,7 +410,7 @@ class PlanetaryComputerProvider(BaseProvider):
         return item
 
     async def get_item(self, collection: str, item_id: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             resp = await client.get(f"{PC_STAC}/collections/{collection}/items/{item_id}")
             if resp.status_code >= 400:
@@ -458,7 +458,7 @@ class EarthSearchProvider(BaseProvider):
         stac_q = stac_filter_query(query)
         if stac_q:
             body["query"] = stac_q
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             resp = await client.post(f"{ES_STAC}/search", json=body)
             if resp.status_code >= 400:
@@ -497,7 +497,7 @@ class EarthSearchProvider(BaseProvider):
         return item
 
     async def get_item(self, collection: str, item_id: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             resp = await client.get(f"{ES_STAC}/collections/{collection}/items/{item_id}")
             if resp.status_code >= 400:
@@ -532,7 +532,7 @@ class CopernicusProvider(BaseProvider):
         stac_q = stac_filter_query(query)
         if stac_q:
             body["query"] = stac_q
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             resp = await client.post(f"{CDSE_STAC}/search", json=body)
             if resp.status_code >= 400:
@@ -571,7 +571,7 @@ class CopernicusProvider(BaseProvider):
         return item
 
     async def get_item(self, collection: str, item_id: str) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=settings.imagery_http_timeout,
+        async with httpx.AsyncClient(trust_env=False, timeout=settings.imagery_http_timeout,
                                      headers=REQUEST_HEADERS, follow_redirects=True) as client:
             resp = await client.get(f"{CDSE_STAC}/collections/{collection}/items/{item_id}")
             if resp.status_code >= 400:

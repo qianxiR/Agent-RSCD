@@ -6,6 +6,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Icon from '@/shared/ui/Icon.vue'
+import BaseButton from '@/shared/ui/BaseButton.vue'
+import BaseDialog from '@/shared/ui/BaseDialog.vue'
 import { getImageryProviders, searchImagery, downloadImagery } from '@/services/imagery'
 import { useImagerySearch, REGION_PRESETS } from '@/composables/useImagerySearch'
 import { useMap } from '@/composables/useMap'
@@ -24,7 +26,7 @@ const {
 const providers = ref([])
 const maxArea = ref(0.5)
 const providerKeys = ref(['pc'])
-const collectionKeys = ref([])
+const collectionChoice = ref('all-optical')
 const dateRange = ref([])
 const region = ref('chengdu')
 const cloudRange = ref([0, 30])
@@ -106,6 +108,16 @@ const collectionOptions = computed(() => {
   return [...map.values()]
 })
 
+// 当前检索生效的集合：全部光学 = 各数据源所有 optical 集合；单项 = 所选集合
+const selectedCollections = computed(() => {
+  if (collectionChoice.value === 'all-optical') {
+    return collectionOptions.value.filter((c) => c.kind === 'optical').map((c) => c.key)
+  }
+  return collectionOptions.value.some((c) => c.key === collectionChoice.value)
+    ? [collectionChoice.value]
+    : []
+})
+
 const errorEntries = computed(() => Object.entries(errors.value).map(([key, msg]) => ({
   key,
   label: providers.value.find((p) => p.key === key)?.label || key,
@@ -157,17 +169,13 @@ async function loadProviders() {
   }
 }
 
-// 入参: 无 | 方法: 保证已选产品集合在当前数据源中存在；为空时默认全选（去航拍） | 出参: 无
+// 入参: 无 | 方法: 数据源增减后保证所选卫星/产品仍可用，失效则回退全部光学 | 出参: 无
 function syncCollections() {
+  if (collectionChoice.value === 'all-optical') return
   const available = collectionOptions.value.map((c) => c.key)
-  const kept = collectionKeys.value.filter((key) => available.includes(key))
-  if (kept.length) {
-    collectionKeys.value = kept
-    return
+  if (!available.includes(collectionChoice.value)) {
+    collectionChoice.value = 'all-optical'
   }
-  collectionKeys.value = collectionOptions.value
-    .filter((c) => c.kind !== 'aerial')
-    .map((c) => c.key)
 }
 
 // ==================== 检索 ====================
@@ -177,7 +185,8 @@ function searchKey() {
     bbox.value?.join(','),
     dateRange.value?.join(','),
     providerKeys.value.join(','),
-    collectionKeys.value.join(','),
+    collectionChoice.value,
+
     cloudRange.value.join('-'),
     platform.value,
     orbitDirection.value,
@@ -195,6 +204,10 @@ async function runSearch(reset = true) {
     ElMessage.warning('请至少选择一个数据源')
     return
   }
+  if (!selectedCollections.value.length) {
+    ElMessage.warning('请先选择卫星 / 产品')
+    return
+  }
   if (!bbox.value?.length) {
     ElMessage.warning('请先选择区域范围')
     return
@@ -208,7 +221,7 @@ async function runSearch(reset = true) {
   try {
     const res = await searchImagery({
       providers: providerKeys.value,
-      collections: collectionKeys.value,
+      collections: selectedCollections.value,
       bbox: bbox.value,
       start: dateRange.value[0],
       end: dateRange.value[1],
@@ -294,7 +307,7 @@ function onRegionChange(value) {
   if (preset) setRegion(preset.label, [...preset.bbox])
 }
 
-// 入参: event 复选框变化 | 方法: 数据源增减后同步产品集合 | 出参: 无
+// 入参: 无 | 方法: 数据源增减后同步所选卫星/产品 | 出参: 无
 function onProvidersChange() {
   syncCollections()
 }
@@ -509,14 +522,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-dialog
+  <BaseDialog
     v-model="open"
-    width="1080px"
-    top="4vh"
+    width="min(1080px, calc(100vw - 24px))"
+    align-center
     class="imagery-dialog"
     :show-close="false"
     :close-on-click-modal="false"
-    append-to-body
   >
     <template #header>
       <div class="im-head">
@@ -526,9 +538,9 @@ onMounted(() => {
         </div>
         <div class="im-head-right">
           <span v-if="searched" class="im-head-count">共 {{ total }} 景</span>
-          <button type="button" class="im-icon-btn" title="关闭" @click="open = false">
+          <BaseButton variant="icon" title="关闭" @click="open = false">
             <Icon name="close" :size="16" />
-          </button>
+          </BaseButton>
         </div>
       </div>
     </template>
@@ -567,13 +579,12 @@ onMounted(() => {
             class="im-control"
           />
           <div class="im-quick">
-            <button
+            <BaseButton
               v-for="quick in quickRanges"
               :key="quick.label"
-              type="button"
-              class="im-quick-btn"
+              variant="quick"
               @click="setRangeDays(quick.days)"
-            >{{ quick.label }}</button>
+            >{{ quick.label }}</BaseButton>
           </div>
         </div>
 
@@ -604,19 +615,21 @@ onMounted(() => {
 
         <div class="im-field">
           <div class="im-label">卫星 / 产品</div>
-          <div class="im-chips">
-            <label
+          <el-select
+            v-model="collectionChoice"
+            size="small"
+            filterable
+            placeholder="选择卫星 / 产品"
+          >
+            <el-option label="全部光学" value="all-optical" />
+            <el-option
               v-for="collection in collectionOptions"
               :key="collection.key"
-              class="im-chip"
-              :class="{ active: collectionKeys.includes(collection.key) }"
+              :label="collection.gsd ? `${collection.label} · ${gsdText(collection.gsd)}` : collection.label"
+              :value="collection.key"
               :title="collection.note"
-            >
-              <input v-model="collectionKeys" type="checkbox" :value="collection.key" />
-              <span>{{ collection.label }}</span>
-              <em v-if="collection.gsd">{{ gsdText(collection.gsd) }}</em>
-            </label>
-          </div>
+            />
+          </el-select>
         </div>
 
         <div class="im-field">
@@ -694,10 +707,10 @@ onMounted(() => {
         </div>
 
         <div class="im-side-actions">
-          <button type="button" class="im-primary" :disabled="loading" @click="runSearch()">
+          <BaseButton class="im-grow" variant="primary" size="lg" bold :disabled="loading" @click="runSearch()">
             {{ loading ? '检索中…' : '检索' }}
-          </button>
-          <button type="button" class="im-ghost" @click="resetFilters">重置</button>
+          </BaseButton>
+          <BaseButton variant="ghost" size="lg" @click="resetFilters">重置</BaseButton>
         </div>
 
         <div class="im-side-note">
@@ -811,9 +824,9 @@ onMounted(() => {
           </div>
 
           <div v-if="items.length < total" class="im-more">
-            <button type="button" class="im-ghost" :disabled="loading" @click="loadMore">
+            <BaseButton variant="ghost" size="lg" :disabled="loading" @click="loadMore">
               {{ loading ? '加载中…' : '加载更多' }}
-            </button>
+            </BaseButton>
           </div>
         </div>
 
@@ -832,14 +845,14 @@ onMounted(() => {
               {{ publishing ? '发布中…' : '发布为图层' }}
             </button>
             <a class="im-link" :href="downloadResult.download_url" download>下载文件</a>
-            <button type="button" class="im-icon-btn" title="关闭" @click="downloadResult = null">
+            <BaseButton variant="icon" title="关闭" @click="downloadResult = null">
               <Icon name="close" :size="14" />
-            </button>
+            </BaseButton>
           </div>
         </div>
       </main>
     </div>
-  </el-dialog>
+  </BaseDialog>
 </template>
 
 <style>
@@ -864,7 +877,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
+  height: 36px;
   padding: 0 18px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
@@ -885,22 +898,6 @@ onMounted(() => {
 .im-head-count {
   font-size: var(--fs-md);
   color: var(--text-secondary);
-}
-.im-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-}
-.im-icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 .im-body {
@@ -932,6 +929,7 @@ onMounted(() => {
   border: 0;
   background: transparent;
   color: var(--accent);
+
   font-size: var(--fs-sm);
   text-align: left;
   cursor: pointer;
@@ -955,7 +953,8 @@ onMounted(() => {
 }
 .im-label-value {
   font-weight: 400;
-  color: var(--accent);
+  color: var(--text-secondary);
+
 }
 .im-control {
   width: 100%;
@@ -975,19 +974,6 @@ onMounted(() => {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-}
-.im-quick-btn {
-  padding: 2px 8px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-.im-quick-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
 }
 .im-sources {
   display: flex;
@@ -1012,15 +998,15 @@ onMounted(() => {
 }
 .im-source.active {
   color: var(--text-primary);
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--border-strong);
+  background: #ececec;
 }
 .im-source.off {
   opacity: 0.55;
   cursor: not-allowed;
 }
 .im-source input {
-  accent-color: var(--accent);
+  accent-color: #1a1a18;
   margin: 0;
 }
 .im-source-name {
@@ -1051,9 +1037,9 @@ onMounted(() => {
   cursor: pointer;
 }
 .im-chip.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  color: var(--text-primary);
+  background: #ececec;
+  border-color: var(--border-strong);
 }
 .im-chip input {
   display: none;
@@ -1088,46 +1074,11 @@ onMounted(() => {
   border-top: 1px solid var(--border);
   z-index: 2;
 }
-.im-side-actions .im-primary {
+.im-grow {
   flex: 1;
   min-width: 0;
 }
-.im-side-actions .im-ghost {
-  flex: 0 0 auto;
-}
 
-.im-primary {
-  flex: 1;
-  height: 34px;
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-.im-primary:hover {
-  background: var(--accent-hover);
-}
-.im-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.im-ghost {
-  height: 34px;
-  padding: 0 14px;
-  font-size: var(--fs-lg);
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-.im-ghost:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
 .im-side-note {
   font-size: var(--fs-xs);
   line-height: 1.6;
@@ -1164,6 +1115,7 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   color: var(--accent);
+
 }
 .im-alert {
   display: flex;
@@ -1271,6 +1223,7 @@ onMounted(() => {
   padding: 0;
   font-size: var(--fs-sm);
   color: var(--accent);
+
   background: none;
   border: none;
   cursor: pointer;
@@ -1374,6 +1327,7 @@ onMounted(() => {
 }
 .im-side :deep(.el-slider) {
   padding: 0 4px;
+  --el-slider-main-bg-color: #1a1a18;
 }
 .im-side :deep(.el-slider__button) {
   width: 12px;

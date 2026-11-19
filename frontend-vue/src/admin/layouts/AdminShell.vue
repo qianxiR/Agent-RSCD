@@ -101,7 +101,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
       </nav>
       <div class="sidebar-foot">
         <p>国土智察 · 管理控制台</p>
-        <p class="mono" style="font-size: 10px">v0.1 · DEV</p>
+        <p class="mono" style="font-size: 12px">v0.1 · DEV</p>
       </div>
     </aside>
 

@@ -8,14 +8,18 @@ SegEarth-OV3 官方推理流程封装（Model 层 / SamSeg）
 
 与旧 multipass 流程的核心差异:
   1. 单次前向 (single-pass)，不再多轮涂黑残差 + 阈值衰减；
-  2. 大图按 slide_crop/slide_stride 滑窗，重叠区域简单平均（官方无 Gaussian / padding）；
+  2. 大图按 slide_crop/slide_stride 滑窗，重叠区按高斯窗加权平均（中心权重大、边缘低），
+     避免拼缝；口径参考 H:/图文描述数据集/SAM推理 的掩码提取流程；
   3. 每个 query 做双头融合:
        instance head logits × object_score  ─┐
        semantic head logits                 ─┼─ element-wise max
        × presence_score                     ─┘
   4. 同义词 query 用 one-hot 按类别取 max 聚合成 class logits；
-  5. argmax 后用 prob_thd 把低置信像素压回背景；
-  6. 变化检测 = 实例级(膨胀容差 + 覆盖率) ∩ 语义级(FPN 余弦 + Δlogits + Otsu)。
+  5. argmax 后用阈值把低置信像素压回背景；默认 ratio 自适应阈值
+     （按本图峰值图的 (1-fg_ratio) 分位，fg_ratio 默认 0.90），
+     也可用 abs 固定 prob_thd；暗图/亮图概率整体漂移时不会整幅掉成背景；
+  6. 形态学后处理：平滑 → 去小连通域 → 填小背景孔（由 runner 按配置调用）；
+  7. 变化检测 = 实例级(膨胀容差 + 覆盖率) ∩ 语义级(FPN 余弦 + Δlogits + Otsu)。
 
 本模块只负责“算”，输出仍是 (H, W) 类别索引图，PNG/GeoTIFF/矢量/统计由 runner 负责。
 依赖方向: official.py → SamSeg/infer.py（同层子项目），不依赖 tools/agent。
@@ -150,12 +154,30 @@ def infer_single_view(processor, query_words: List[str], device: torch.device,
     return seg_logits
 
 
+def _gaussian_weight(height: int, width: int, device: torch.device,
+                     sigma_scale: float = 0.125) -> torch.Tensor:
+    """
+    入参: tile 高宽、device、sigma 比例（边缘权重随距中心衰减）。
+    方法: 二维各向同性高斯窗，中心权重 1、边缘低；用于滑窗重叠区加权融合，消除拼缝。
+          口径参考 H:/图文描述数据集/SAM推理/proc_engine.py::_weights。
+    出参: (H,W) float32 权重张量。
+    """
+    sy = max(height * sigma_scale, 1.0)
+    sx = max(width * sigma_scale, 1.0)
+    ys = torch.arange(height, dtype=torch.float32, device=device)[:, None]
+    xs = torch.arange(width, dtype=torch.float32, device=device)[None, :]
+    wy = torch.exp(-0.5 * ((ys - height / 2.0) / sy) ** 2)
+    wx = torch.exp(-0.5 * ((xs - width / 2.0) / sx) ** 2)
+    return wy * wx
+
+
 def slide_inference(processor, query_words: List[str], device: torch.device,
                     image: Image.Image, stride: int, crop_size: int,
                     autocast: bool = True) -> torch.Tensor:
     """
     入参: processor、query 词、device、图像、滑窗步长/裁剪尺寸、autocast。
-    方法: 官方滑窗 —— 逐 tile 单图推理，重叠区域按次数简单平均（无 padding/Gaussian）。
+    方法: 逐 tile 单图推理，重叠区域按高斯窗加权平均（中心权重大、边缘权重低），
+          避免简单平均带来的拼缝；口径参考图文数据集掩码提取流程。
     出参: (num_queries, H, W) logits。
     """
     w_img, h_img = image.size
@@ -183,8 +205,9 @@ def slide_inference(processor, query_words: List[str], device: torch.device,
 
             crop_img = image.crop((x1, y1, x2, y2))
             crop_logits = infer_single_view(processor, query_words, device, crop_img, autocast)
-            preds[:, y1:y2, x1:x2] += crop_logits
-            count_mat[:, y1:y2, x1:x2] += 1
+            weight = _gaussian_weight(y2 - y1, x2 - x1, device)
+            preds[:, y1:y2, x1:x2] += crop_logits * weight.unsqueeze(0)
+            count_mat[:, y1:y2, x1:x2] += weight
 
     if bool((count_mat == 0).any()):
         raise RuntimeError("滑窗覆盖不完整（count_mat 存在 0 值）")
@@ -224,18 +247,46 @@ def aggregate_logits(seg_logits: torch.Tensor, query_idx: torch.Tensor,
     return (seg_logits.unsqueeze(0) * cls_index).max(dim=1)[0]
 
 
-def discrete_pred(seg_logits: torch.Tensor, query_idx: torch.Tensor, num_cls: int,
-                  prob_thd: float = DEFAULT_PROB_THD, bg_idx: int = 0) -> np.ndarray:
+def resolve_threshold(class_logits: torch.Tensor, prob_mode: str = "abs",
+                      fg_ratio: float = 0.90, prob_thd: float = DEFAULT_PROB_THD,
+                      clip_min: float = 0.05, clip_max: float = 0.95) -> float:
     """
-    入参: query 级 logits、query→class 映射、类别数、官方 prob_thd、背景类别。
-    方法: 类别聚合 → argmax → 置信度低于 prob_thd 的像素压回背景。
+    入参: (C,H,W) 类别概率、阈值口径（ratio/abs）、ratio 口径的目标前景占比、
+          固定阈值、裁剪区间。
+    方法: ratio 口径取峰值图 (1-fg_ratio) 分位作阈值，即“让前景约占 fg_ratio”；
+          这是跨时相一致的关键：绝对概率随成像亮度整体漂移，固定阈值会让暗图
+          整幅掉成背景、凭空造出变化（口径参考图文数据集掩码提取流程）。
+    出参: 浮点阈值，ratio 口径裁剪到 [clip_min, clip_max]。
+    """
+    if str(prob_mode).lower() != "ratio":
+        return float(prob_thd)
+    values = class_logits.max(dim=0)[0].detach().float().cpu().numpy()
+    if values.size == 0:
+        return float(prob_thd)
+    tau = float(np.quantile(values, 1.0 - float(fg_ratio)))
+    return float(min(max(tau, clip_min), clip_max))
+
+
+def discrete_pred(seg_logits: torch.Tensor, query_idx: torch.Tensor, num_cls: int,
+                  prob_thd: float = DEFAULT_PROB_THD, bg_idx: int = 0,
+                  prob_mode: str = "abs", fg_ratio: float = 0.90) -> np.ndarray:
+    """
+    入参: query 级 logits、query→class 映射、类别数、固定阈值、背景类别、
+          阈值口径（abs 固定 / ratio 自适应）、ratio 口径目标前景占比。
+    方法: 类别聚合 → argmax → 置信度低于阈值的像素压回背景；
+          ratio 口径按本图峰值分位自适应出阈值。
     出参: (H,W) int64 类别索引图。
     """
     class_logits = aggregate_logits(seg_logits, query_idx, num_cls)
+    threshold = resolve_threshold(class_logits, prob_mode, fg_ratio, prob_thd)
     pred = class_logits.argmax(dim=0)
     max_vals = class_logits.max(dim=0)[0]
     pred = pred.clone()
-    pred[max_vals < float(prob_thd)] = int(bg_idx)
+    pred[max_vals < float(threshold)] = int(bg_idx)
+    logger.info(
+        f"[SamSeg-Official] 逐像素判类: 口径={prob_mode}, 阈值={threshold:.3f}"
+        + (f"（目标前景≈{fg_ratio:.2f}）" if str(prob_mode).lower() == "ratio" else "")
+    )
     return pred.cpu().numpy().astype(np.int64)
 
 

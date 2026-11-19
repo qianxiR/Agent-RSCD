@@ -46,7 +46,7 @@ class PublishLayerRequest(BaseModel):
     """前端发布图层请求 (图层面板"上传图层"按钮)。
     file_path: 已上传到服务器的文件绝对路径 (先经 /api/v1/files/upload 获得)
     layer_name: 发布后的图层名, 留空则用文件名
-    workspace: 已废弃 — 前端无传参入口, 后端按图层类型固定工作空间 (保留字段仅向后兼容)
+    workspace: 前端选择的发布目标工作空间; 留空则按图层类型回退默认 (raster→cd_raster, vector→cd_shp)
     layer_type: 强制指定类型 "raster"/"vector"; 留空则按扩展名推断
     """
     file_path: str

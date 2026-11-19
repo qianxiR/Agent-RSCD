@@ -72,7 +72,7 @@ const progress = computed(() => props.task.progress || 0)
 }
 .task-status {
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .task-progress-track {
   height: 4px;

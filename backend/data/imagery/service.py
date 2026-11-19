@@ -255,6 +255,7 @@ class ImageryService:
                 return cached, media
 
         async with httpx.AsyncClient(
+            trust_env=False,
             timeout=settings.imagery_http_timeout, follow_redirects=True,
             headers={"User-Agent": "RSCD-Imagery/1.0"},
         ) as client:
@@ -569,6 +570,7 @@ class ImageryService:
     async def _stream_to_file(url: str, temp: Path, max_bytes: int) -> int:
         total = 0
         async with httpx.AsyncClient(
+            trust_env=False,
             timeout=settings.imagery_http_timeout, follow_redirects=True,
             headers={"User-Agent": "RSCD-Imagery/1.0"},
         ) as client:

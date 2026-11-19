@@ -53,7 +53,8 @@ import backend.agent.tools  # noqa: F401
 #   conversations/tasks 由 Java 代理回本服务的 /internal/*; 本服务只保留
 #   AI 相关路由 + 内部接口。
 from backend.api import (  # noqa: E402
-    conversations, files, geoserver, imagery, internal, mcp, sandbox, skills, system, tasks, ws,
+    conversations, files, geoserver, imagery, internal, mcp, samples, sandbox, skills, system,
+    tasks, ws,
 )
 from backend.api.deps import (  # noqa: E402
     FILE_ROOT, SAMSEG_UPLOAD, SAMSEG_OUTPUT, GEOSERVER_DL, SANDBOX_ROOT,
@@ -74,10 +75,10 @@ async def lifespan(app: FastAPI):
     _init_schema()
     _log_storage_paths()
     await _diagnose_sandbox()
-    if settings.proc_sam3_warmup:
+    if settings.sam3_native_warmup:
         threading.Thread(
-            target=_warm_proc_sam3,
-            name="proc-sam3-warmup",
+            target=_warm_segmentation_engine,
+            name="segmentation-warmup",
             daemon=True,
         ).start()
 
@@ -88,30 +89,47 @@ async def lifespan(app: FastAPI):
     _close_pools()
 
 
-def _warm_proc_sam3() -> None:
-    """后台预热 ProC-SAM3，避免第一次解译等待 ~60s 权重加载。
+def _warm_segmentation_engine() -> None:
+    """
+    后台预热地物提取引擎, 避免首次解译等待权重加载 (~几十秒)。
 
-    只预热模型 + UI 默认 3 类提示；用户换类别时适配层只重建 PromptBank，不重载权重。
+    - 地物提取固定走 SamSeg 本体: 只加载 processor（权重 3.3GB，耗时在加载而非推理）
+    - 原生 SAM3 归样本制作功能, 由该功能首次调用时自行加载, 启动阶段不再预热
     """
     try:
-        from backend.model.ProC_SAM3 import proc_sam3_available, segment
+        from backend.model.SamSeg import runner
 
-        if not proc_sam3_available():
-            logger.info("[ProC-SAM3] 预热跳过: 目录/权重不可用")
-            return
+        import time as _time
+
+        started = _time.perf_counter()
+        _processor, dev = runner._get_processor(
+            settings.samseg_model_path,
+            settings.samseg_bpe_path,
+            settings.samseg_confidence_threshold,
+            settings.samseg_device,
+        )
+        logger.info(
+            "[SamSeg] 后台预热完成 (device=%s, %.1fs)",
+            dev, _time.perf_counter() - started,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[SamSeg] 后台预热失败: %s", exc)
+
+
+def _warm_sam3_native() -> None:
+    """后台预热原生 SAM3，避免第一次解译等待 ~60s 权重加载。"""
+    try:
+        from backend.model.sam3native import service as _native
+
         from PIL import Image
 
-        warmup = Path(settings.file_storage_root) / "proc_sam3" / "warmup.png"
+        warmup = Path(settings.file_storage_root) / "sam3_native" / "warmup.png"
         warmup.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (512, 512), (128, 128, 128)).save(warmup)
-        segment(
-            str(warmup),
-            "building, house, roof, structure; water, river, lake, pond; "
-            "vegetation, tree, grass, forest",
-        )
-        logger.info("[ProC-SAM3] 后台预热完成")
+        _native.segment(str(warmup), "building, water, vegetation")
+        logger.info("[SAM3-Native] 后台预热完成")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[ProC-SAM3] 后台预热失败: %s", exc)
+        logger.warning("[SAM3-Native] 后台预热失败: %s", exc)
 
 
 def _init_schema() -> None:
@@ -240,7 +258,7 @@ ws.set_chat_service(chat_service)
 
 # 挂载全部业务路由 (projects/workspace 由 Java 服务承载, 不再挂载;
 # conversations/tasks 保留对外端点作为迁移期回滚通道, 默认流量经 Java 代理)
-for _mod in (conversations, files, geoserver, imagery, sandbox, system, tasks, ws, internal, skills, mcp):
+for _mod in (conversations, files, geoserver, imagery, samples, sandbox, system, tasks, ws, internal, skills, mcp):
     app.include_router(_mod.router)
 
 

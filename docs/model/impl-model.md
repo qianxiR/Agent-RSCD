@@ -270,7 +270,9 @@ graph LR
 | 层 | 文件 | 职责 |
 |---|---|---|
 | **工具入口** | `samseg_tools.py` | 接收 LLM 调用参数，编排 runner + geoio + visualize，构造 `frontend_action` |
-| **推理核心** | `official.py` + `engine.py` | 官方 SegEarth-OV3 单次前向/滑窗、双头+presence 融合、`prob_thd`、实例∩语义变化 |
+| **推理核心** | `SamSeg/official.py` + `SamSeg/engine.py` | SamSeg 本体（SegEarth-OV3 官方口径）：单图/512 滑窗 + 双头融合 + `prob_thd`；engine 解析官方 sam3 包与权重 |
+| **变化检测** | `change_detection/change_qwen_runtime/` | change_qwen 专用 ONNX（滑坡 / 建筑双权重，336 分块 + 概率图），`detect_change` 工具实际调用 |
+| **样本制作推理** | `sam3native/service.py` | 原生 SAM3 文本接地逐实例 + 语义图、实例级变化对比（**归样本制作**，地物提取不调用） |
 | **编排** | `runner.py` | 模型全局缓存、`run_segment` / `run_change_detection`、类别映射、统计/上色/落盘、规则判读 |
 | **地理 IO** | `geoio.py` | 读源影像、存 GeoTIFF 掩膜、矢量化为 GeoJSON |
 | **可视化** | `visualize.py` | PNG 上色、颜色图注 legend |

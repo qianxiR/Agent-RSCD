@@ -190,8 +190,9 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+
   display: grid;
   place-items: center;
   font-size: var(--fs-md);
@@ -223,8 +224,9 @@
   white-space: nowrap;
 }
 .topbar .avatar {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+
   border: 1px solid transparent;
 }
 
@@ -305,8 +307,9 @@
   color: var(--text-primary);
 }
 .rail-item.is-active {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: #ececec;
+  color: var(--text-primary);
+
   font-weight: 600;
 }
 .rail-item .rail-icon {
@@ -584,13 +587,13 @@
   cursor: not-allowed;
 }
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: #1a1a1a;
+  border-color: #1a1a1a;
   color: #fff;
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: #111110;
+  border-color: #111110;
 }
 /* 管理端主操作按钮用近黑色（参考 DeepSeek 设置面板），发送/登录仍用品牌蓝 */
 .shell--admin .btn-primary {
@@ -598,8 +601,8 @@
   border-color: #1a1a1a;
 }
 .shell--admin .btn-primary:hover:not(:disabled) {
-  background: #000000;
-  border-color: #000000;
+  background: #111110;
+  border-color: #111110;
 }
 .btn-ghost {
   border-color: transparent;
@@ -644,6 +647,7 @@
   border: 0;
   background: transparent;
   color: var(--accent);
+
   font-size: inherit;
   cursor: pointer;
   padding: 0;
@@ -690,8 +694,6 @@ textarea.input {
 }
 .input:focus,
 .select:focus {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-focus);
   outline: none;
 }
 .input.is-invalid {
@@ -759,7 +761,7 @@ textarea.input {
   background: #fafafa;
 }
 .table tbody tr.is-selected {
-  background: var(--accent-soft);
+  background: #ececec;
 }
 .table .num {
   font-variant-numeric: tabular-nums;
@@ -812,9 +814,10 @@ textarea.input {
   border-color: #f3d3d3;
 }
 .badge-blue {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: #d5e3f4;
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+
+  border-color: var(--border);
 }
 .badge-gray {
   background: var(--bg-hover);
@@ -863,8 +866,9 @@ textarea.input {
   color: var(--text-primary);
 }
 .seg.is-active {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: #ececec;
+  color: var(--text-primary);
+
   font-weight: 600;
 }
 
@@ -959,9 +963,9 @@ textarea.input {
   color: #a93333;
 }
 .alert-info {
-  background: var(--accent-soft);
-  border-color: #d8e5f5;
-  color: var(--accent-hover);
+  background: var(--bg-inset);
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 .alert-warn {
   background: #fff8ec;

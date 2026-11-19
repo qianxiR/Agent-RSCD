@@ -3,7 +3,7 @@
 // ★ 对应原生 chat/msg-ui.js 的消息 DOM 结构
 //   AI 消息带机器人 SVG 头像；human 消息无头像（与原生一致）
 //   正文用 markdown-it 渲染 + 富表格增强（v-html）
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 import AssistantSteps from './AssistantSteps.vue'
@@ -34,6 +34,12 @@ const isUser = computed(() => props.message.role === 'human')
 const isTool = computed(() => props.message.role === 'tool')
 const isAssistant = computed(() => !isUser.value && !isTool.value)
 const rendered = computed(() => renderMarkdown(props.message.content))
+const copied = ref(false)
+let copyTimer = null
+
+onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer)
+})
 const copyText = computed(() => (props.message.content || props.message.thinking || '').trim())
 const toolResult = computed(() => parseToolResult(props.message.content, props.message.toolName))
 const userImages = computed(() => Array.isArray(props.message.images) ? props.message.images : [])
@@ -46,7 +52,11 @@ function onCopy() {
   const text = copyText.value
   if (!text) return
   copyTextToClipboard(text)
-    .then(() => ElMessage.success('已复制消息'))
+    .then(() => {
+      copied.value = true
+      clearTimeout(copyTimer)
+      copyTimer = setTimeout(() => { copied.value = false }, 2500)
+    })
     .catch(() => ElMessage.error('复制失败'))
 }
 
@@ -220,8 +230,11 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
         <AssistantSteps :message="message" :streaming="streaming">
           <template #content-actions>
             <div class="message-actions assistant-content-actions">
-              <button class="message-action-btn" title="复制消息" @click="onCopy">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <button class="message-action-btn" :class="{ 'is-copied': copied }" :title="copied ? '已复制' : '复制消息'" @click="onCopy">
+                <svg v-if="copied" class="copy-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2" />
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                 </svg>
@@ -253,8 +266,11 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
       </div>
 
       <div v-if="isUser || isTool" class="message-actions" :class="{ user: isUser }">
-        <button class="message-action-btn" title="复制消息" @click="onCopy">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="message-action-btn" :class="{ 'is-copied': copied }" :title="copied ? '已复制' : '复制消息'" @click="onCopy">
+          <svg v-if="copied" class="copy-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
@@ -301,6 +317,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   border-radius: 8px;
   background: #eef1ff;
   color: var(--accent);
+
   display: flex;
   align-items: center;
   justify-content: center;
@@ -308,7 +325,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   border: none;
   margin-top: 1px;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .message-avatar.user {
   display: none;
@@ -364,7 +381,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   padding: 9px 11px;
   border-radius: var(--r-sm);
   font-size: var(--fs-lg);
-  font-weight: 400;
+  font-weight: var(--fw-body);
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -394,8 +411,9 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   align-items: center;
   gap: 6px;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   color: var(--accent);
+
   margin-bottom: 6px;
 }
 .content-title {
@@ -455,19 +473,21 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
+
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   flex-shrink: 0;
 }
 .trace-icon.run {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
+
 }
 .trace-title {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   flex: 0 0 auto;
   color: var(--text-secondary);
 }
@@ -479,8 +499,9 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   flex: 1;
   padding: 1px 5px;
   border-radius: var(--r-xs);
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
+
   font-family: var(--mono);
   font-size: var(--fs-xs);
   white-space: nowrap;
@@ -495,8 +516,9 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
+
   font-family: var(--mono);
   font-size: var(--fs-xs);
 }
@@ -557,6 +579,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   gap: 8px;
   font-size: var(--fs-md);
   color: var(--accent);
+
   font-family: var(--mono);
 }
 .tool-call-index {
@@ -591,8 +614,9 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   gap: 8px;
   margin-bottom: 5px;
   color: var(--accent);
+
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 /* 工具结果：聊天面板只显示摘要，原始内容交给任务日志承载 */
@@ -607,15 +631,17 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 }
 .tool-result-title {
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   color: var(--accent);
+
 }
 .tool-result-status {
   margin-left: auto;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: transparent;
+  color: var(--text-secondary);
+
   font-size: var(--fs-xs);
   font-family: var(--mono);
 }
@@ -634,6 +660,7 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 
 .cursor {
   color: var(--accent);
+
   animation: blink 1s step-end infinite;
 }
 @keyframes blink {
@@ -658,39 +685,28 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
 .message.ai:hover .msg-ops {
   display: flex;
 }
-.msg-op-btn {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: var(--r-xs);
-  font-family: var(--mono);
-  transition: all var(--t-base) var(--ease-out);
-}
-.msg-op-btn:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
-
 .message-action-btn {
   width: 24px;
   height: 24px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--bg-elevated);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 35, 58, 0.05);
+  box-shadow: none;
 }
 .message-action-btn:hover {
   background: var(--bg-hover);
-  color: var(--accent);
-  border-color: var(--border);
+  color: var(--text-primary);
+}
+.message-action-btn.is-copied {
+  color: var(--accent-green);
+}
+.copy-check {
+  animation: check-pop 380ms var(--spring-soft) both;
 }
 
 /* 沙盒聊天图片: 缩略图卡片 + 点击 el-image 放大预览 */
@@ -767,8 +783,9 @@ function compactDisplayText(text, { maxChars = 360, maxLines = 6 } = {}) {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-secondary);
+
+  background: transparent;
   flex-shrink: 0;
 }
 .user-attachment-name {

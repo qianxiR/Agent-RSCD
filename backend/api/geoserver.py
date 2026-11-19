@@ -143,6 +143,16 @@ async def list_geoserver_services_tree():
         return {"status": "error", "msg": str(e)}
 
 
+@router.get("/api/v1/geoserver/workspaces")
+async def list_all_workspaces():
+    """列出 GeoServer 全部工作空间名 (上传时供"选择/新建工作空间"弹窗使用, 不过滤白名单)。"""
+    try:
+        names = [w["name"] for w in geoserver_client.list_workspaces()]
+        return {"status": "success", "workspaces": names}
+    except Exception as e:
+        return {"status": "error", "msg": str(e)}
+
+
 @router.get("/api/v1/geoserver/layers/{workspace}/{layer_name}/bbox")
 async def get_layer_bbox(workspace: str, layer_name: str):
     """
@@ -186,14 +196,14 @@ async def publish_geoserver_layer_rest(req: PublishLayerRequest):
     """
     发布本地文件为 GeoServer 图层 (供前端图层面板直接调用, 不经过 LLM)。
 
-    ★ 工作空间按图层类型固定 (前端无 workspace 传参入口):
-      - 栅格 (.tif/.tiff/.cog) → cd_raster
-      - 矢量 (.shp)            → cd_shp
+    ★ 目标工作空间 (2026-11-14 起前端上传弹窗可自选/新建):
+      - req.workspace 非空 → 校验 [A-Za-z0-9_]+ 后 ensure_workspace 建好再发布到该空间
+      - req.workspace 留空 → 按图层类型回退默认 (栅格 cd_raster / 矢量 cd_shp)
     路由到底层 upload_raster / upload_shapefile。
 
     返回: {status, layer_name, workspace, wms_url, msg} 或 {status:"error", msg}
     """
-    # ★ 按图层类型固定的目标工作空间 (前端无传参入口, 后端决策; 避免透传空串给 GeoServer
+    # ★ 类型留空时的兜底工作空间 (后端决策, 避免透传空串给 GeoServer
     #   触发 "workspace name must not be null")
     WS_BY_TYPE = {"raster": "cd_raster", "vector": "cd_shp"}
 
@@ -213,7 +223,14 @@ async def publish_geoserver_layer_rest(req: PublishLayerRequest):
         else:
             return {"status": "error", "msg": f"不支持的文件类型: {ext} (支持 .tif/.tiff/.cog/.shp)"}
 
-        target_ws = WS_BY_TYPE[layer_type]
+        # ★ 目标工作空间: 前端自选/新建优先 (须 [A-Za-z0-9_]+), 留空回退按类型默认
+        target_ws = (req.workspace or "").strip()
+        if target_ws and not __import__("re").fullmatch(r"[A-Za-z0-9_]+", target_ws):
+            return {"status": "error", "msg": "工作空间名只能包含英文、数字、下划线"}
+        if target_ws and not geoserver_client.ensure_workspace(target_ws):
+            return {"status": "error", "msg": f"创建工作空间失败: {target_ws}"}
+        if not target_ws:
+            target_ws = WS_BY_TYPE[layer_type]
         if layer_type == "raster":
             result = geoserver_client.upload_raster(req.file_path, req.layer_name or None, target_ws)
         else:

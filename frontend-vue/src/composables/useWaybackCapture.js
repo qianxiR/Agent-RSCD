@@ -40,10 +40,11 @@ function tileYToLat(y, zoom) {
   return (180 / Math.PI) * Math.atan(Math.sinh(n))
 }
 
-// 入参: bbox 4326, 输出上限像素 | 方法: 从 z19 向下找能放进 MAX_SIZE 的瓦片层级 | 出参: plan
-function planTiles(bbox, maxSize = MAX_SIZE) {
+// 入参: bbox 4326, 输出上限像素, forcedZoom 指定缩放 | 方法: 从 z19 向下找能放进 MAX_SIZE 的瓦片层级 | 出参: plan
+function planTiles(bbox, maxSize = MAX_SIZE, forcedZoom = null) {
   const [minx, miny, maxx, maxy] = bbox
-  for (let zoom = 19; zoom >= 7; zoom -= 1) {
+  const zoomList = forcedZoom ? [Number(forcedZoom)] : Array.from({ length: 13 }, (_, i) => 19 - i)
+  for (const zoom of zoomList) {
     const x0f = lonToTileX(minx, zoom)
     const x1f = lonToTileX(maxx, zoom)
     const y0f = latToTileY(maxy, zoom)
@@ -154,22 +155,51 @@ async function buildMosaic(release, plan) {
   return canvas
 }
 
-// 入参: { release, bbox, maxSize? }
-// 方法: 计算瓦片计划 → 拼接 → 裁到 bbox → PNG | 出参: { blob, bbox, width, height, zoom }
-export async function captureWaybackImage({ release, bbox, maxSize = MAX_SIZE }) {
+// 入参: { release, bbox, maxSize?, zoom?, exactBbox? }
+// 方法: 计算瓦片计划 → 拼接 → 裁剪 → PNG
+//   exactBbox=true 时输出严格裁到请求 bbox（双期共用同一像素帧）
+//   zoom 指定时复用另一期的缩放，保证两张图宽高一致
+// 出参: { blob, bbox, width, height, zoom }
+export async function captureWaybackImage({
+  release,
+  bbox,
+  maxSize = MAX_SIZE,
+  zoom = null,
+  exactBbox = false,
+}) {
   if (!release?.m) throw new Error('缺少 Esri Wayback 版本')
   if (!Array.isArray(bbox) || bbox.length !== 4) throw new Error('缺少有效范围')
-  const plan = planTiles(bbox, maxSize)
+  const plan = planTiles(bbox, maxSize, zoom)
   const mosaic = await buildMosaic(release, plan)
+
+  let cropLeft = plan.left
+  let cropTop = plan.top
+  let cropWidth = plan.width
+  let cropHeight = plan.height
+  let outBbox = plan.bbox
+
+  if (exactBbox) {
+    const [minx, miny, maxx, maxy] = bbox
+    const level = plan.zoom
+    cropLeft = lonToTileX(minx, level) * TILE_SIZE - plan.x0 * TILE_SIZE
+    cropTop = latToTileY(maxy, level) * TILE_SIZE - plan.y0 * TILE_SIZE
+    const cropRight = lonToTileX(maxx, level) * TILE_SIZE - plan.x0 * TILE_SIZE
+    const cropBottom = latToTileY(miny, level) * TILE_SIZE - plan.y0 * TILE_SIZE
+    cropWidth = Math.round(cropRight - cropLeft)
+    cropHeight = Math.round(cropBottom - cropTop)
+    if (cropWidth < 1 || cropHeight < 1) throw new Error('范围过小，无法生成影像')
+    outBbox = [minx, miny, maxx, maxy]
+  }
+
   const output = document.createElement('canvas')
-  output.width = plan.width
-  output.height = plan.height
+  output.width = cropWidth
+  output.height = cropHeight
   const ctx = output.getContext('2d')
   if (!ctx) throw new Error('浏览器不支持 canvas')
   ctx.drawImage(
     mosaic,
-    plan.left, plan.top, plan.width, plan.height,
-    0, 0, plan.width, plan.height,
+    cropLeft, cropTop, cropWidth, cropHeight,
+    0, 0, cropWidth, cropHeight,
   )
   const blob = await new Promise((resolve, reject) => {
     try {
@@ -180,9 +210,9 @@ export async function captureWaybackImage({ release, bbox, maxSize = MAX_SIZE })
   })
   return {
     blob,
-    bbox: plan.bbox,
-    width: plan.width,
-    height: plan.height,
+    bbox: outBbox,
+    width: cropWidth,
+    height: cropHeight,
     zoom: plan.zoom,
     release,
   }

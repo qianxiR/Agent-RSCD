@@ -162,7 +162,7 @@ async def _capture_esri(bbox: Tuple[float, float, float, float], gsd: float,
     }
     resp = None
     last_error: Optional[Exception] = None
-    async with httpx.AsyncClient(timeout=15,
+    async with httpx.AsyncClient(trust_env=False, timeout=15,
                                  follow_redirects=True,
                                  headers={"User-Agent": "RSCD-Imagery/1.0"}) as client:
         for host in ESRI_EXPORT_HOSTS:
@@ -218,6 +218,7 @@ async def _capture_esri_tiles(bbox: Tuple[float, float, float, float], dest: Pat
     from PIL import Image
 
     async with httpx.AsyncClient(
+        trust_env=False,
         timeout=12, follow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0 RSCD/1.0"},
     ) as client:
@@ -332,6 +333,7 @@ async def _capture_tianditu(bbox: Tuple[float, float, float, float], dest: Path,
     from PIL import Image
 
     async with httpx.AsyncClient(
+        trust_env=False,
         timeout=settings.imagery_http_timeout,
         follow_redirects=True,
         # 天地图浏览器端 Key 会校验 Referer/Origin；服务端 Key 也兼容这组头

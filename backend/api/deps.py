@@ -14,7 +14,8 @@ SAMSEG_UPLOAD = Path(settings.samseg_upload_root).resolve()
 SAMSEG_OUTPUT = Path(settings.samseg_output_root).resolve()
 GEOSERVER_DL = Path(settings.geoserver_download_root).resolve()
 SANDBOX_ROOT = Path(settings.sandbox_workspace_dir).resolve()
-for _d in [FILE_ROOT, SAMSEG_UPLOAD, SAMSEG_OUTPUT, GEOSERVER_DL, SANDBOX_ROOT]:
+SAMPLES_ROOT = Path(settings.samples_output_root).resolve()
+for _d in [FILE_ROOT, SAMSEG_UPLOAD, SAMSEG_OUTPUT, GEOSERVER_DL, SANDBOX_ROOT, SAMPLES_ROOT]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # 业务模块单例 (与原 main.py 顶层 import 一致)
@@ -29,6 +30,7 @@ __all__ = [
     "SAMSEG_OUTPUT",
     "GEOSERVER_DL",
     "SANDBOX_ROOT",
+    "SAMPLES_ROOT",
     "agent_db",
     "business_db",
     "geoserver_client",

@@ -1,16 +1,16 @@
 <script setup>
 // ==================== GeoServer 图层管理面板 ====================
 // ★ 对应原生 map/layer-panel.js + styles.css 的 .layer-tree 样式
-//   工作空间树（白名单 cd*/samseg*）+ 显隐/定位/删除 + 搜索过滤
+//   全量工作空间树（矢量/影像/解译成果/其他 分组）+ 显隐/定位/删除 + 搜索过滤
+//   上传影像/矢量前弹窗选择或新建发布目标工作空间
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineRound, Close, Delete, Folder, Location, Refresh, Search } from '@element-plus/icons-vue'
-import { getGeoServerServices, getLayerBbox, deleteGeoServerLayer, deleteWorkspace } from '@/services/api'
+import { ChatLineRound, Close, Delete, Folder, Location, Refresh, Upload } from '@element-plus/icons-vue'
+import { getGeoServerServices, getGeoServerWorkspaces, getLayerBbox, deleteGeoServerLayer, deleteWorkspace, uploadSamsegImages, publishGeoServerLayer, uploadShapefile } from '@/services/api'
 import { useMap } from '@/composables/useMap'
 import { BASEMAP_OPTIONS, useBasemap } from '@/composables/useBasemap'
 import { useProjectStore } from '@/stores/project'
 import { debugLog } from '@/utils/debugLog'
-import { clearTileCache, getTileCacheCount } from '@/utils/tileCache'
 
 const props = defineProps({
   // 悬浮在地图左上角时使用“关闭”而不是“对话管理”
@@ -36,17 +36,11 @@ const emit = defineEmits(['back'])
 
 const tree = ref(null)
 const loading = ref(false)
-const layerSearchOpen = ref(false)
-const layerSearchInputRef = ref(null)
-const layerSearchQuery = ref('')
 const collapsed = ref(new Set())
 const visibleSet = ref(new Set())
-// 底图瓦片缓存张数（Service Worker 写入的 Cache Storage），null = 统计中
-const tileCacheCount = ref(null)
 
 onMounted(() => {
   loadTree()
-  refreshTileCache()
 })
 // 监听图层列表版本号：发布/删除图层后自动刷新（跨组件通信，ChatPanel 发布后 bump）
 watch(() => projectStore.layerListVersion, () => loadTree({ silent: true }))
@@ -73,44 +67,180 @@ function goBack() {
   emit('back')
 }
 
-// 入参: 无
-// 方法: 打开图层搜索浮层，并在 DOM 更新后聚焦输入框
-// 出参: 无
-function openLayerSearch() {
-  layerSearchOpen.value = true
-  nextTick(() => layerSearchInputRef.value?.focus())
+// ==================== 上传目标工作空间选择 ====================
+// 入参: kind 显示用类型名（影像/矢量） | 方法: 弹出"选择现有/新建工作空间"浮层，取消返回 null
+// 出参: Promise<string|null>
+const wsPick = ref(null)
+
+function chooseWorkspace(kind) {
+  return new Promise((resolve) => {
+    wsPick.value = { kind, workspaces: [], choice: 'existing', existing: '', newName: '', resolve }
+    getGeoServerWorkspaces()
+      .then((d) => {
+        if (wsPick.value) wsPick.value.workspaces = d.workspaces || []
+      })
+      .catch(() => {})
+  })
 }
 
-// 入参: 无
-// 方法: 关闭图层搜索浮层；搜索词只影响浮层结果，不过滤左侧图层树
-// 出参: 无
-function closeLayerSearch() {
-  layerSearchOpen.value = false
+function confirmWsPick() {
+  const p = wsPick.value
+  if (!p) return
+  let ws = ''
+  if (p.choice === 'new') {
+    ws = (p.newName || '').trim()
+    if (!/^[A-Za-z0-9_]+$/.test(ws)) {
+      ElMessage.warning('工作空间名只能包含英文、数字、下划线')
+      return
+    }
+  } else {
+    ws = p.existing
+    if (!ws) {
+      ElMessage.warning('请选择一个工作空间，或选择"新建"')
+      return
+    }
+  }
+  wsPick.value = null
+  p.resolve(ws)
 }
 
-// 入参: e 原生 input 事件
-// 方法: 更新图层搜索浮层内的本地关键词
-// 出参: 无
-function onLayerSearchInput(e) {
-  layerSearchQuery.value = e.target.value
+function cancelWsPick() {
+  const p = wsPick.value
+  wsPick.value = null
+  if (p) p.resolve(null)
 }
 
-// 入参: 无
-// 方法: 清空图层搜索关键词，并保持搜索输入框聚焦
+// ==================== 上传影像/矢量（原对话区上传功能迁入） ====================
+// 入参: 无（内部创建 file input）
+// 方法: 影像(.tif/.tiff/.cog)走 samseg 上传后按 raster 发布；矢量只选 .shp 时经
+//   showDirectoryPicker 打开所在文件夹自动匹配同 stem 组件（.shx/.dbf/.prj/...），
+//   已选组件集则直接上传；统一走 upload-shapefile 端点落盘后按 vector 发布
 // 出参: 无
-function clearSearch() {
-  layerSearchQuery.value = ''
-  nextTick(() => layerSearchInputRef.value?.focus())
+function onUploadLayer() {
+  const fileInput = document.createElement('input')
+  fileInput.type = 'file'
+  fileInput.multiple = true
+  fileInput.accept = '.tif,.tiff,.cog,.shp,.shx,.dbf,.prj,.cpg,.sbn,.sbx'
+  fileInput.onchange = async () => {
+    const files = Array.from(fileInput.files || [])
+    if (!files.length) return
+    const tifFiles = files.filter((f) => /\.(tif|tiff|cog)$/i.test(f.name))
+    const shpFiles = files.filter((f) => /\.(shp|shx|dbf|prj|cpg|sbn|sbx)$/i.test(f.name))
+    let okCount = 0
+    // 发布目标工作空间：影像/矢量各确认一次（取消即中止本次上传）
+    let wsRaster = null
+    let wsVector = null
+    if (tifFiles.length) {
+      wsRaster = await chooseWorkspace('影像')
+      if (!wsRaster) return
+    }
+    if (shpFiles.length) {
+      wsVector = await chooseWorkspace('矢量')
+      if (!wsVector) return
+    }
+    try {
+      // ① 影像：samseg 上传落盘 → raster 发布 → WMS 叠加
+      if (tifFiles.length) {
+        const data = await uploadSamsegImages(tifFiles, null)
+        const paths = data.paths || []
+        for (const p of paths) {
+          const pub = await publishGeoServerLayer({ file_path: p, layer_type: 'raster', workspace: wsRaster })
+          if (pub.status !== 'success') {
+            ElMessage.warning(`影像发布失败: ${pub.msg || '未知原因'}`)
+            continue
+          }
+          let bbox = null
+          try {
+            const bb = await getLayerBbox(pub.workspace, pub.layer_name)
+            if (bb.status === 'success') bbox = bb.bbox
+          } catch {}
+          addWmsLayer({ name: pub.layer_name, workspace: pub.workspace, bbox, layerType: 'raster' })
+          okCount += 1
+        }
+        if (paths.length) ElMessage.success(`已上传并发布 ${okCount} 个影像图层`)
+      }
+      // ② 矢量：只选 .shp → 打开所在目录匹配组件；已选组件集 → 直接上传
+      if (shpFiles.length) {
+        if (!shpFiles.some((f) => /\.shp$/i.test(f.name))) {
+          ElMessage.warning('矢量上传缺少 .shp 主文件')
+        } else if (shpFiles.some((f) => /\.(shx|dbf)$/i.test(f.name)) || !window.showDirectoryPicker) {
+          // 组件已随选（或浏览器不支持目录选择）→ 按所选文件直接上传
+          const data = await uploadShapefile(shpFiles)
+          if (await publishVectorShp(data, wsVector)) okCount += 1
+        } else {
+          // 仅选 .shp → 目录扫描匹配同 stem 组件
+          const ok = await ElMessageBox.confirm(
+            '将打开 .shp 所在文件夹，自动匹配 .shx/.dbf/.prj 等组件后上传。',
+            '匹配矢量组件',
+            { confirmButtonText: '选择文件夹', cancelButtonText: '取消', type: 'info' }
+          ).catch(() => false)
+          if (!ok) return
+          const dirHandle = await window.showDirectoryPicker()
+          const byStem = new Map()
+          for await (const [name, handle] of dirHandle.entries()) {
+            if (handle.kind !== 'file') continue
+            const m = name.match(/^(.*)\.(shp|shx|dbf|prj|cpg|sbn|sbx)$/i)
+            if (!m) continue
+            if (!byStem.has(m[1])) byStem.set(m[1], [])
+            byStem.get(m[1]).push(await handle.getFile())
+          }
+          // 优先匹配所选 .shp 的 stem；未命中时上传目录内全部 .shp
+          const wanted = new Set(
+            shpFiles.filter((f) => /\.shp$/i.test(f.name)).map((f) => f.name.replace(/\.shp$/i, ''))
+          )
+          let groups = [...byStem.entries()].filter(([stem, comps]) =>
+            wanted.has(stem) && comps.some((f) => /\.shp$/i.test(f.name))
+          )
+          if (!groups.length) {
+            groups = [...byStem.entries()].filter(([stem, comps]) => comps.some((f) => /\.shp$/i.test(f.name)))
+          }
+          if (!groups.length) {
+            ElMessage.warning('所选文件夹内未找到 .shp 文件')
+            return
+          }
+          for (const [, comps] of groups) {
+            const data = await uploadShapefile(comps)
+            if (await publishVectorShp(data, wsVector)) okCount += 1
+          }
+        }
+      }
+      if (okCount > 0) {
+        await loadTree({ silent: true })
+      }
+    } catch (e) {
+      ElMessage.error('上传失败: ' + e.message)
+    }
+  }
+  fileInput.click()
 }
 
-// 白名单过滤（cd*/samseg*）
+// 入参: data upload-shapefile 端点返回（{status, shp_path, warnings}）
+// 方法: .shp 落盘路径 → vector 发布 → 取 bbox → WFS 叠加；失败弹提示
+// 出参: boolean 是否发布成功
+async function publishVectorShp(data, workspace) {
+  if (data?.status !== 'success' || !data.shp_path) {
+    ElMessage.warning(`矢量上传失败: ${(data && data.warnings && data.warnings.join('; ')) || '缺少必要组件'}`)
+    return false
+  }
+  const pub = await publishGeoServerLayer({ file_path: data.shp_path, layer_type: 'vector', workspace })
+  if (pub.status !== 'success') {
+    ElMessage.warning(`矢量发布失败: ${pub.msg || '未知原因'}`)
+    return false
+  }
+  let bbox = null
+  try {
+    const bb = await getLayerBbox(pub.workspace, pub.layer_name)
+    if (bb.status === 'success') bbox = bb.bbox
+  } catch {}
+  addWfsLayer({ name: pub.layer_name, workspace: pub.workspace, bbox })
+  ElMessage.success(`已上传并发布矢量图层 ${pub.workspace}:${pub.layer_name}`)
+  return true
+}
+
+// 全量工作空间 → 图层列表归一化（服务层已过滤 qh 系列）
 const filteredWorkspaces = computed(() => {
   if (!tree.value?.workspaces) return []
   return tree.value.workspaces
-    .filter((ws) => {
-      const name = (ws.workspace || '').toLowerCase()
-      return name.startsWith('cd') || name.startsWith('samseg')
-    })
     .map((ws) => {
       const layers = (ws.layers_typed || ws.layers || []).map((l) => ({
         name: typeof l === 'string' ? l : l.name,
@@ -121,16 +251,26 @@ const filteredWorkspaces = computed(() => {
     })
 })
 
-const layerSearchResults = computed(() => {
-  const kw = layerSearchQuery.value.trim().toLowerCase()
-  const rows = []
-  filteredWorkspaces.value.forEach((ws) => {
-    ws.layers.forEach((layer) => {
-      const haystack = `${ws.workspace}:${layer.name}`.toLowerCase()
-      if (!kw || haystack.includes(kw)) rows.push({ workspace: ws.workspace, ...layer })
-    })
-  })
-  return rows.slice(0, kw ? 30 : 12)
+// 工作空间显示名：samseg 存放解译后保存的掩码/矢量成果，面板显示为「解译成果」
+const WS_DISPLAY_NAMES = { samseg: '解译成果' }
+function wsDisplayName(name) {
+  return WS_DISPLAY_NAMES[(name || '').toLowerCase()] || name
+}
+
+// 分组展示：矢量 / 影像 / 解译成果（底图为在线底图，不经 GeoServer，见第一层级）
+const groupedSections = computed(() => {
+  const defs = [
+    { title: '矢量', match: (n) => n.startsWith('cd_shp') || n.startsWith('jzg_shp') },
+    { title: '影像', match: (n) => ['cd_raster', 'jzg_raster'].includes(n) },
+    { title: '解译成果', match: (n) => n.startsWith('samseg') },
+    { title: '其他', match: (n) => !['cd_shp', 'jzg_shp', 'cd_raster', 'jzg_raster', 'samseg'].includes(n) },
+  ]
+  return defs
+    .map((d) => ({
+      title: d.title,
+      workspaces: filteredWorkspaces.value.filter((ws) => d.match((ws.workspace || '').toLowerCase())),
+    }))
+    .filter((sec) => sec.workspaces.length)
 })
 
 function layerKey(ws, name) {
@@ -187,23 +327,6 @@ async function onLocate(ws, name, type = 'unknown') {
   } catch (e) {
     ElMessage.error('定位失败')
   }
-}
-
-// 入参: result 图层搜索结果对象（workspace/name/type）
-// 方法: 定位并加载用户从搜索浮层中选择的图层，然后关闭浮层
-// 出参: Promise<void>
-async function selectLayerSearchResult(result) {
-  if (!result?.workspace || !result?.name) return
-  await onLocate(result.workspace, result.name, result.type)
-  closeLayerSearch()
-}
-
-// 入参: 无
-// 方法: 回车时选择当前图层搜索结果的第一项
-// 出参: Promise<void>
-async function selectFirstLayerSearchResult() {
-  const first = layerSearchResults.value[0]
-  if (first) await selectLayerSearchResult(first)
 }
 
 async function onDelete(ws, name) {
@@ -296,20 +419,6 @@ async function changeBasemapDate(date) {
 // 入参: open 下拉是否展开 | 方法: 首次展开时懒加载历史版本，避免打开图层面板就发请求 | 出参: 无
 function onBasemapDropdown(open) {
   if (open && !basemapYears.value.length) loadBasemapReleases()
-  if (open) refreshTileCache()
-}
-
-// ==================== 底图瓦片缓存 ====================
-// 入参: 无 | 方法: 刷新已缓存的瓦片张数（Service Worker 写的 Cache Storage） | 出参: 无
-async function refreshTileCache() {
-  tileCacheCount.value = await getTileCacheCount()
-}
-
-// 入参: 无 | 方法: 清空底图瓦片缓存（下次浏览重新回源） | 出参: 无
-async function clearTiles() {
-  const count = await clearTileCache()
-  tileCacheCount.value = 0
-  ElMessage.success(count ? `已清理 ${count} 张底图瓦片缓存` : '底图瓦片缓存已是空的')
 }
 </script>
 
@@ -320,9 +429,9 @@ async function clearTiles() {
         <el-icon><Refresh /></el-icon>
         <span>刷新图层</span>
       </button>
-      <button type="button" class="layer-action" @click="openLayerSearch">
-        <el-icon><Search /></el-icon>
-        <span>搜索</span>
+      <button type="button" class="layer-action" @click="onUploadLayer">
+        <el-icon><Upload /></el-icon>
+        <span>上传影像/矢量</span>
       </button>
       <button type="button" class="layer-action" @click="goBack">
         <el-icon><Close v-if="props.floating" /><ChatLineRound v-else /></el-icon>
@@ -363,6 +472,7 @@ async function clearTiles() {
               size="small"
               filterable
               class="basemap-date-select"
+              popper-class="basemap-date-popper"
               :loading="basemapLoading"
               placeholder="最新影像（无单一日期）"
               @change="changeBasemapDate"
@@ -376,53 +486,29 @@ async function clearTiles() {
                 :value="release.date"
               />
             </el-select>
-            <div v-if="basemapLoading" class="basemap-note">正在加载 Esri 历史版本…</div>
-            <div v-else-if="basemapError" class="basemap-note error">
-              {{ basemapError }}
-              <button type="button" class="basemap-retry" @click="loadBasemapReleases({ force: true })">重试</button>
-            </div>
-            <div v-else-if="basemapFallback" class="basemap-note warn">
-              版本清单接口暂不可达，已用内置年度快照
-            </div>
-            <div v-else class="basemap-note">
-              历史时相取 Esri Wayback 发布版本（每年一版），非单景成像日期
-            </div>
           </div>
         </div>
       </div>
 
-      <!-- 瓦片缓存状态：Service Worker 首次加载后落盘，回看/平移直接命中本地 -->
-      <div class="basemap-cache-row">
-        <span class="basemap-cache-text">
-          瓦片缓存：{{ tileCacheCount === null ? '统计中…' : `${tileCacheCount} 张` }} · 已缓存区域重复浏览不再走公网
-        </span>
-        <button
-          type="button"
-          class="basemap-cache-clear"
-          :disabled="!tileCacheCount"
-          title="清空底图瓦片缓存"
-          @click="clearTiles"
-        >清理</button>
-      </div>
-
-      <!-- 第二个层级：工作空间 -->
-      <div class="layer-section-header">工作空间</div>
+      <!-- 第二个层级：矢量 / 影像 / 解译成果 分组（底图为在线底图，见第一层级） -->
       <div v-if="loading && !tree" class="layer-tree-empty">加载中…</div>
       <div v-else-if="!filteredWorkspaces.length" class="layer-tree-empty">
         GeoServer 中暂无工作空间/图层
       </div>
 
+      <template v-for="sec in groupedSections" :key="sec.title">
+      <div class="layer-section-header">{{ sec.title }}</div>
       <div
-        v-for="ws in filteredWorkspaces"
+        v-for="ws in sec.workspaces"
         :key="ws.workspace"
         class="layer-ws-group"
         :class="{ collapsed: collapsed.has(ws.workspace) }"
       >
-        <!-- 工作空间头（对齐原生 .layer-ws-header） -->
-        <div class="layer-ws-header" @click="toggleCollapse(ws.workspace)">
+        <!-- 工作空间头（对齐原生 .layer-ws-header）；段内仅一个工作空间时隐藏组头，避免与段标题重复 -->
+        <div v-if="sec.workspaces.length > 1" class="layer-ws-header" @click="toggleCollapse(ws.workspace)">
           <span class="layer-ws-toggle">▼</span>
           <el-icon class="layer-ws-icon"><Folder /></el-icon>
-          <span class="layer-ws-name">{{ ws.workspace }}</span>
+          <span class="layer-ws-name">{{ wsDisplayName(ws.workspace) }}</span>
           <span class="layer-ws-count">{{ ws.layers.length }} 个图层</span>
           <button class="layer-icon-btn danger" title="删除工作空间" @click.stop="onDeleteWorkspace(ws.workspace)">
             <el-icon><Delete /></el-icon>
@@ -462,35 +548,38 @@ async function clearTiles() {
           <div v-if="!ws.layers.length" class="layer-item empty"><span class="layer-name" style="color:var(--text-muted)">(空)</span></div>
         </div>
       </div>
+      </template>
     </div>
 
+    <!-- 上传目标工作空间选择浮层（影像/矢量各弹一次，取消即中止该类上传） -->
     <Teleport to="body">
-      <div v-if="layerSearchOpen" class="layer-search-overlay" @click.self="closeLayerSearch" @keydown.esc="closeLayerSearch">
-        <div class="layer-search-modal" role="dialog" aria-modal="true" aria-label="搜索图层">
-          <div class="layer-search-modal-head">
-            <el-icon><Search /></el-icon>
+      <div v-if="wsPick" class="layer-search-overlay" @click.self="cancelWsPick">
+        <div class="layer-search-modal" role="dialog" aria-modal="true" aria-label="选择工作空间">
+          <div class="ws-pick-title">上传{{ wsPick.kind }} — 选择目标工作空间</div>
+          <div class="ws-pick-body">
+            <label class="ws-pick-row">
+              <input v-model="wsPick.choice" type="radio" value="existing" />
+              <span>使用现有工作空间</span>
+            </label>
+            <select v-if="wsPick.choice === 'existing'" v-model="wsPick.existing" class="ws-pick-select">
+              <option value="" disabled>请选择…</option>
+              <option v-for="w in wsPick.workspaces" :key="w" :value="w">{{ w }}</option>
+            </select>
+            <label class="ws-pick-row">
+              <input v-model="wsPick.choice" type="radio" value="new" />
+              <span>新建工作空间</span>
+            </label>
             <input
-              ref="layerSearchInputRef"
-              class="layer-search-modal-input"
-              :value="layerSearchQuery"
-              placeholder="搜索图层或工作空间"
-              @input="onLayerSearchInput"
-              @keydown.enter="selectFirstLayerSearchResult"
+              v-if="wsPick.choice === 'new'"
+              v-model="wsPick.newName"
+              class="ws-pick-input"
+              placeholder="输入新工作空间名（英文/数字/下划线）"
+              @keydown.enter="confirmWsPick"
             />
-            <button v-if="layerSearchQuery" type="button" class="layer-search-clear-btn" @click="clearSearch">清除</button>
           </div>
-          <div class="layer-search-results">
-            <button
-              v-for="item in layerSearchResults"
-              :key="item.full_name"
-              type="button"
-              class="layer-search-result-row"
-              @click="selectLayerSearchResult(item)"
-            >
-              <span class="layer-search-result-title">{{ item.name }}</span>
-              <span class="layer-search-result-meta">{{ item.workspace }} · {{ item.type }}</span>
-            </button>
-            <div v-if="!layerSearchResults.length" class="layer-search-result-empty">没有匹配的图层</div>
+          <div class="ws-pick-actions">
+            <button type="button" class="ws-pick-btn" @click="cancelWsPick">取消</button>
+            <button type="button" class="ws-pick-btn primary" @click="confirmWsPick">确定</button>
           </div>
         </div>
       </div>
@@ -530,6 +619,7 @@ async function clearTiles() {
   cursor: pointer;
   font-size: 13px;
   text-align: left;
+  white-space: nowrap;
 }
 
 .layer-action:hover {
@@ -553,7 +643,7 @@ async function clearTiles() {
   padding: 4px 0 14px;
 }
 .layer-section-header {
-  padding: 13px 8px 7px;
+  padding: 8px 8px 5px;
   font-size: 13px;
   color: #8f98a6;
   font-weight: 500;
@@ -568,14 +658,14 @@ async function clearTiles() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--text-muted);
 }
 
 /* ===== 底基层级（类型 + Esri 历史时相） ===== */
 .basemap-list {
-  padding: 0 8px 4px;
+  padding: 0 8px 2px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -585,8 +675,8 @@ async function clearTiles() {
   border-radius: var(--r-sm);
 }
 .basemap-item.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: transparent;
+  border-color: transparent;
 }
 .basemap-item.disabled {
   opacity: 0.55;
@@ -629,7 +719,7 @@ async function clearTiles() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .basemap-date {
@@ -641,8 +731,12 @@ async function clearTiles() {
 .basemap-date-select {
   width: 100%;
 }
+.basemap-date-select :deep(.el-select__wrapper),
+.basemap-date-select :deep(.el-select__wrapper.is-focused) {
+  background: transparent !important;
+}
 .basemap-note {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -658,39 +752,11 @@ async function clearTiles() {
   border: none;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+
+  font-size: 12px;
   cursor: pointer;
 }
 
-/* 底图瓦片缓存：一行状态 + 清理 */
-.basemap-cache-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.basemap-cache-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.basemap-cache-clear {
-  flex: none;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--accent);
-  font-size: 11px;
-  cursor: pointer;
-}
-.basemap-cache-clear:disabled {
-  color: var(--text-muted);
-  cursor: default;
-}
 .layer-tree-empty {
   padding: 24px 12px;
   text-align: center;
@@ -700,7 +766,7 @@ async function clearTiles() {
 
 .layer-ws-group {
   border-bottom: none;
-  padding: 0 0 6px;
+  padding: 0 0 2px;
 }
 .layer-ws-header {
   display: flex;
@@ -723,7 +789,7 @@ async function clearTiles() {
   width: 12px;
   color: #6b7480;
   transition: transform 0.15s;
-  font-size: 10px;
+  font-size: 12px;
 }
 .layer-ws-icon {
   width: 16px;
@@ -788,7 +854,7 @@ async function clearTiles() {
   width: 14px;
   height: 14px;
   cursor: pointer;
-  accent-color: var(--accent);
+  accent-color: #1a1a18;
   flex-shrink: 0;
 }
 .layer-type-icon {
@@ -817,6 +883,7 @@ async function clearTiles() {
 }
 .layer-name:hover {
   color: var(--accent);
+
   text-decoration: none;
 }
 .layer-item-actions {
@@ -932,6 +999,7 @@ async function clearTiles() {
 
 .layer-search-clear-btn:hover {
   color: var(--accent);
+
   border-color: var(--glass-accent-border);
 }
 
@@ -960,7 +1028,7 @@ async function clearTiles() {
 }
 
 .layer-search-result-row:hover {
-  background: var(--accent-soft);
+  background: var(--bg-hover);
 }
 
 .layer-search-result-title {
@@ -976,7 +1044,7 @@ async function clearTiles() {
 .layer-search-result-meta {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 18px;
 }
 
@@ -985,5 +1053,67 @@ async function clearTiles() {
   color: var(--text-muted);
   font-size: 12px;
   text-align: center;
+}
+
+.ws-pick-title {
+  padding: 2px 4px 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.ws-pick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 4px;
+}
+
+.ws-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.ws-pick-select,
+.ws-pick-input {
+  margin-left: 22px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  background: var(--glass-surface-strong);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.ws-pick-input {
+  width: calc(100% - 22px);
+}
+
+.ws-pick-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 4px 2px;
+}
+
+.ws-pick-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ws-pick-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 </style>

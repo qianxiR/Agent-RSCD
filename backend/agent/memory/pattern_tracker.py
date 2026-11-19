@@ -159,7 +159,7 @@ def record(user_id: str, tool_name: str, tool_args: Dict[str, Any]) -> Optional[
 def _build_preference(tool_name: str, key_args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     把高频操作签名转成抽象的用户行为偏好条目.
-    返回 {key, value, category, source} 或 None (无法生成有意义的偏好时)
+    返回 {key, value, category, kind, confidence, source} 或 None
 
     抽象化设计:
       - value 只包含抽象行为描述 (如"频繁查看和切换图层"), 不含具体参数值
@@ -172,6 +172,8 @@ def _build_preference(tool_name: str, key_args: Dict[str, Any]) -> Optional[Dict
             "key": "操作偏好",
             "value": f"频繁{behavior}",
             "category": "preference",
+            "kind": "interaction",
+            "confidence": 0.7,
             "source": "pattern",
         }
     # 兜底: 工具不在映射表中时, 用工具名生成抽象描述
@@ -180,6 +182,8 @@ def _build_preference(tool_name: str, key_args: Dict[str, Any]) -> Optional[Dict
             "key": "操作偏好",
             "value": f"频繁使用 {tool_name} 工具",
             "category": "preference",
+            "kind": "interaction",
+            "confidence": 0.7,
             "source": "pattern",
         }
     return None

@@ -498,6 +498,7 @@ function switchAccount() {
 }
 .auth-points li svg {
   color: var(--accent);
+
   flex: 0 0 auto;
 }
 .auth-brand-foot {
@@ -552,7 +553,7 @@ function switchAccount() {
   padding: 9px 10px;
   margin-bottom: 14px;
   border-radius: var(--r-md);
-  background: var(--accent-soft);
+  background: var(--bg-inset);
   color: var(--accent-hover);
   font-size: var(--fs-sm);
   line-height: 1.55;

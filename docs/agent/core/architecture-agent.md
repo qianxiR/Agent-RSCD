@@ -404,7 +404,7 @@ def apply_skill_selection_to_plan(plan, skill_contract):
 
 ## 4. 三层记忆系统
 
-> **一句话**：工作记忆（近期消息）/ 短期记忆（会话摘要）/ 长期记忆（**只沉淀错误案例+解决方案**，偏好/事实提取默认关闭）三层协同，自动 trim 裁剪、阈值摘要、**犯错自纠自动沉淀为全局教训**（融入长期记忆）。
+> **一句话**：工作记忆（近期消息）/ 短期记忆（会话摘要）/ 长期记忆（**preference 行为偏好 + profile 稳定画像 + accepted lesson 改错教训**）三层协同，自动 trim 裁剪、阈值摘要、**犯错自纠自动沉淀为全局教训**。
 
 **关键文件**：
 - [`backend/agent/memory/memory_context.py`](../../../backend/agent/memory/memory_context.py) — 编排
@@ -417,11 +417,11 @@ def apply_skill_selection_to_plan(plan, skill_contract):
 
 | 层级 | 表 | 范围 | 内容 | 触发/注入 |
 |------|-----|------|------|-----------|
-| 🔒 **长期** | `user_memory` | 跨会话 | 🎓**自纠学习教训** (category=`lesson`/`workflow`) + 🧩**环境事实** (category=`envfact`，如沙盒字体知识)；偏好/事实提取**默认关闭** | 自纠捕捉器 `scan_and_save_corrections` 沉淀教训（唯一自动写入源）；`extract_and_save_long_term_memory` 受 `enable_preference_extraction` 开关控制（默认 False）；**注入 system prompt（教训优先显示）** |
+| 🔒 **长期** | `user_memory` | 跨会话 | `preference` 行为偏好 + `profile` 稳定画像 + `lesson` 改错教训（scope=`global`） | 对话收尾提取 preference/profile；自纠捕捉器只写 lesson；注入 system prompt（lesson → preference → profile，按置信度/条数上限） |
 | 📝 **短期** | `conversation_summary` | 会话内 | 旧消息的 LLM 压缩摘要（**v2.5 多级**：compress_level 0/1/2） | **v2.5 两级**：Level 1 fold 工具消息（可逆）→ Level 2 LLM 摘要（threshold×1.5 触发，不可逆）；注入 system prompt 会话摘要 |
 | 💾 **工作** | `message` | 近期 N 条 | 完整消息（含 `tool_calls` JSONB）+ **v2.5 node_id/parent_id/is_active（DAG 分支）** | 每轮 `persist_turn` 持久化；**v2.5 加载前 `fold_tool_messages` 折叠旧工具结果**；以消息列表 history 形式喂给 LLM |
 
-> ★ 教训不再作为独立的第四层记忆，而是融入长期记忆层。自纠捕捉器 (`self_correction.py`) 写入 `user_memory` 表 (user_id='global', category='lesson')，`build_user_profile_text()` 合并到用户画像文本中一起注入 system prompt。
+> ★ 长期记忆 v2（2026-11-02）：`fact` 并入 `profile`，`entity`/`workflow`/`envfact` 不再作为独立类别；用户记忆 scope=`user`，教训 scope=`global`。`build_user_profile_text()` 只注入 active 且置信度达标的 preference/profile/lesson。
 
 ### 4.1.1 自纠学习（融入长期记忆，阶段 13 新增）
 
@@ -444,7 +444,7 @@ detect_self_corrections(messages) → List[{tool_name, error_msg, correction_thi
 # ★ LLM 提炼成五段结构化经验 (现象/根因/正确方法/验证信号/严重度)
 _distill_correction_to_structured(correction) → Optional[str]   # 失败返回 None
 
-# 沉淀为全局教训 (user_id='global', category='lesson', 1 小时去重)
+# 沉淀为全局教训 (scope='global', category='lesson', 1 小时去重)
 # ★ async: 内部调 LLM 提炼; 无降级: 提炼失败则跳过不入库
 async save_lesson_to_memory(correction) → bool
 
@@ -470,15 +470,17 @@ async scan_and_save_corrections(messages, user_id) → List[saved]
 **设计要点**：
 - 检测零 LLM（实时、零成本），沉淀调 LLM（后台异步，不阻塞用户，20s 超时）
 - ★ **无降级**：LLM 提炼失败/超时/返回缺字段 → **跳过不入库**，保证 `user_memory` 里只有结构化格式，宁缺毋滥
-- 全局共享（教训写 `user_id='global'`，所有用户复用）
+- 全局共享（教训写 `scope='global'`，所有用户复用）
 - 严重度过滤（只记 high/medium；low 跳过）
 - 去重（同类错误 1 小时内只记一次）
 - 单写 lesson（不再双写 workflow，旧的双写内容重复已废弃清理）
 - 闭环：自纠 → LLM 提炼成五段 → 写记忆 → 下轮 system_prompt 注入（多行缩进）→ Agent 直接照做规避
 
-### 4.1.2 记忆策略调整：只记错误+解决方案（阶段 17）
+### 4.1.2 历史决策：阶段 17 曾只记错误+解决方案
 
-**核心原则**：长期记忆**只保留错误案例与解决方案**，不再主动提取用户偏好/事实。
+> **已被 v2 取代（2026-11-02）**：当前长期记忆恢复 `preference` / `profile` / `lesson` 三类，`enable_preference_extraction` 默认开启。以下保留阶段 17 的历史背景，不再代表当前实现。
+
+**当时原则**：长期记忆**只保留错误案例与解决方案**，不再主动提取用户偏好/事实。
 
 **背景与决策依据**（数据驱动）：
 - 旧设计下 `extract_and_save_long_term_memory` 每轮收尾用 LLM 从对话中挖"用户偏好/事实"，存入 `user_memory`（category=`preference`/`fact`）。
@@ -494,7 +496,7 @@ async scan_and_save_corrections(messages, user_id) → List[saved]
 **改后记忆的唯一主动学习路径**：
 ```
 自纠捕捉器 (规则, 零 LLM 成本)
-  → user_memory (category=lesson/workflow, user_id=global)
+  → user_memory (category=lesson, scope=global)
   → build_user_profile_text 注入 system prompt
   → 下轮 Agent 规避同类错误
 ```
@@ -619,10 +621,10 @@ async def maybe_summarize(conversation_id, all_messages, new_start_idx) -> bool
 
 async def extract_and_save_long_term_memory(conversation_id, user_id,
                                             all_messages, new_start_idx) -> int
-# 提取用户偏好/事实写入 user_memory；★ 默认关闭 (enable_preference_extraction=False)，返回 0
+# 提取 preference/profile 写入 user_memory；受 enable_preference_extraction 控制（默认 true）
 
 def build_user_profile_text(user_id) -> str
-# 加载长期记忆注入 system prompt；★ 默认只注入 lesson/workflow/envfact，屏蔽 preference/entity/fact
+# 加载长期记忆注入 system prompt；★ 只注入 active + confidence 达标的 preference/profile/lesson
 ```
 
 ```python

@@ -1,0 +1,22 @@
+{
+  "model": "jzg",
+  "checkpoint": "H:\\exp_bcd\\文本编码器消融_表10\\Jiuzhaigou-CD\\LLaVA-1.5-7B\\best_model.pth",
+  "text_cache": "G:\\dataes\\text_cache\\Jiuzhaigou-CD_text_cache_generic_llava15_7b.pt",
+  "prompt": "Detecting landslide changes in mountainous scenes from bi-temporal images.",
+  "img_size": 336,
+  "opset": 17,
+  "onnx": "E:\\1代码\\系统\\Agent-RSCD\\backend\\model\\change_detection\\change_qwen_runtime\\weights\\change_qwen_jzg.onnx",
+  "text_tokens": "E:\\1代码\\系统\\Agent-RSCD\\backend\\model\\change_detection\\change_qwen_runtime\\weights\\change_qwen_jzg_text.pt",
+  "onnx_size_gb": 1.958,
+  "verification": {
+    "sample": "val_1",
+    "max_abs_diff": 1.1920928955078125e-05,
+    "mean_abs_diff": 7.256755907292245e-07,
+    "mask_iou": 1.0,
+    "changed_pixels_ref": 0,
+    "changed_pixels_onnx": 0,
+    "providers": [
+      "CPUExecutionProvider"
+    ]
+  }
+}

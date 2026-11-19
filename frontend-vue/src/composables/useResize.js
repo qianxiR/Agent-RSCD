@@ -28,6 +28,9 @@ export function useResize() {
     if (!active) return
     window.removeEventListener('pointermove', active.onMove)
     window.removeEventListener('pointerup', active.onUp)
+    if (active.raf) cancelAnimationFrame(active.raf)
+    // 松手即咬死目标值，不回弹
+    active.onUpdate(Math.round(active.target))
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
     active = null
@@ -38,16 +41,54 @@ export function useResize() {
     stopResize()
     const axis = opts.axis
     const origin = axis === 'x' ? ev.clientX : ev.clientY
+    let target = opts.start
+    let current = opts.start
+    let velocity = 0
+    let lastTime = 0
+    let raf = 0
+
+    // 过阻尼弹簧：1200 / 80，零回弹，松手咬死
+    const stiffness = 1200
+    const damping = 80
+    const tick = (time) => {
+      if (!active) return
+      if (!lastTime) lastTime = time
+      const dt = Math.min(0.032, Math.max(0.001, (time - lastTime) / 1000))
+      lastTime = time
+      const force = -stiffness * (current - target) - damping * velocity
+      velocity += force * dt
+      current += velocity * dt
+      if (Math.abs(current - target) < 0.35 && Math.abs(velocity) < 2) {
+        current = target
+        velocity = 0
+        active.onUpdate(Math.round(current))
+        active.raf = 0
+        return
+      }
+      active.onUpdate(Math.round(current))
+      active.raf = requestAnimationFrame(tick)
+    }
+    const kick = () => {
+      if (!active || active.raf) return
+      lastTime = 0
+      active.raf = requestAnimationFrame(tick)
+    }
+
     const onMove = (e) => {
       if (!active) return
       const cur = axis === 'x' ? e.clientX : e.clientY
       const delta = cur - origin
       // invert: 右栏(往左拖 clientX 减小要变宽) 与 垂直(往上拖 clientY 减小要变高)
       const next = opts.invert ? opts.start - delta : opts.start + delta
-      active.onUpdate(Math.max(opts.min, Math.min(opts.max, next)))
+      target = Math.max(opts.min, Math.min(opts.max, next))
+      active.target = target
+      kick()
     }
     const onUp = () => stopResize()
-    active = { axis, invert: opts.invert, min: opts.min, max: opts.max, origin, base: opts.start, onUpdate: opts.onUpdate, onMove, onUp }
+    active = {
+      axis, invert: opts.invert, min: opts.min, max: opts.max, origin,
+      base: opts.start, target, onUpdate: opts.onUpdate, onMove, onUp, raf,
+    }
     document.body.style.cursor = axis === 'x' ? 'col-resize' : 'ns-resize'
     document.body.style.userSelect = 'none'
     window.addEventListener('pointermove', onMove)

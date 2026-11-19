@@ -97,6 +97,9 @@ def samseg_available() -> bool:
     不仅检查 torch 和权重, 还会实际尝试 `import infer` 来捕获 pycocotools /
     scikit-image / scipy 等深层依赖缺失。
     惰性检测一次后缓存结果。
+
+    ★ 地物提取只走 SamSeg 本体 (backend/model/SamSeg), 权重检查只看 SamSeg;
+      原生 SAM3 (backend/model/sam3native) 归样本标注功能, 不参与本函数判定。
     """
     global _availability_checked, _torch
     if _availability_checked:
@@ -109,19 +112,6 @@ def samseg_available() -> bool:
     except ImportError:
         logger.warning("SamSeg 不可用: 未安装 torch")
         return False
-
-    if (settings.samseg_engine or "proc_sam3").lower() == "proc_sam3":
-        try:
-            from backend.model.ProC_SAM3 import proc_sam3_available
-            if not proc_sam3_available():
-                logger.warning("ProC-SAM3 不可用: 目录/权重缺失")
-                _torch = None
-                return False
-            return True
-        except Exception as e:
-            logger.warning(f"ProC-SAM3 不可用: {e}")
-            _torch = None
-            return False
 
     if not _DEFAULT_CKPT.is_file():
         logger.warning(f"SamSeg 不可用: 模型权重不存在 {_DEFAULT_CKPT}")
@@ -303,7 +293,6 @@ def run_segment(
     vector_output_path: Optional[str] = None,
     min_area_m2: float = 50.0,
     referring_expression: Optional[str] = None,
-    mode: Optional[str] = None,
     save_mask: bool = True,
 ) -> Optional[dict]:
     """
@@ -325,94 +314,77 @@ def run_segment(
     Image.MAX_IMAGE_PIXELS = None  # 大图不告警
 
     from backend.config import settings
-    run_mode = (mode or settings.samseg_inference_mode or "official").lower()
-    if run_mode != "official":
-        logger.warning(f"[SamSeg] 仅支持官方 official 流程, 忽略 mode={run_mode}")
-        run_mode = "official"
     if conf is None:
         conf = settings.samseg_confidence_threshold
 
-    engine = (settings.samseg_engine or "proc_sam3").lower()
     referring_metadata = None
-    if engine == "proc_sam3":
-        if referring_expression:
-            raise RuntimeError("ProC-SAM3 暂不支持指代表达（referring_expression）")
-        from backend.model.ProC_SAM3 import segment as _proc_segment
-
-        # ★ 先导入 ProC 自带的 sam3/mmseg，再加载旧 infer 做调色板/后处理；
-        #   反过来会让旧 infer 先占用 site-packages 的 sam3，ProC 前向会形状断言失败。
-        proc_result = _proc_segment(image_path, classes)
-        infer = _ensure_imports()
-        seg = proc_result["seg"]
-        class_lines = proc_result["class_lines"]
-        num_cls = len(class_lines)
-        model_ready_at = time.perf_counter()
-        image_ready_at = model_ready_at
-        inference_done_at = time.perf_counter()
-        need_postprocess = bool(settings.samseg_postprocess)
-        logger.info(
-            f"[SamSeg] ProC-SAM3 分割完成: {image_path}, {num_cls} 类, "
-            f"resolution={proc_result.get('resolution')}"
-        )
-    else:
+    if referring_expression:
+        # 指代表达：唯一保留的旧推理路径（官方单处理器口径）
         infer = _ensure_imports()
         processor, dev = _get_processor(
             ckpt or str(_DEFAULT_CKPT), bpe or str(_DEFAULT_BPE), conf, device or ""
         )
         model_ready_at = time.perf_counter()
-
-        # 类别定义先用于普通语义分割；指代模式会在选出目标后收敛成单一类别。
-        class_lines = _normalize_classes(classes)
-
-        # 读图
         img = Image.open(image_path).convert("RGB")
         image_ready_at = time.perf_counter()
-        if referring_expression:
-            from .referring import run_referring_inference
-
-            seg, referring_metadata = run_referring_inference(
-                processor,
-                img,
-                referring_expression,
-                classes or "",
-            )
-            class_lines = ["background", referring_metadata["target_prompt"]]
-            num_cls = len(class_lines)
-            logger.info(
-                f"[SamSeg] 指代分割: expression={referring_expression!r}, "
-                f"target={referring_metadata['target_prompt']}, "
-                f"candidates={referring_metadata['candidate_count']}, "
-                f"selected={referring_metadata['selected_index']}"
-            )
-        else:
-            query_words, query_idx_tensor, num_cls, num_queries = _build_query_tensors(class_lines)
-            query_idx_tensor = query_idx_tensor.to(dev)
-            logger.info(
-                f"[SamSeg] 分割开始: {image_path} ({img.size[0]}x{img.size[1]}), "
-                f"{num_cls} 类, mode={run_mode}"
-            )
-            if run_mode == "official":
-                logits = _official.infer_logits(
-                    processor, query_words, dev, img,
-                    slide_crop=settings.samseg_slide_crop,
-                    slide_stride=settings.samseg_slide_stride,
-                    autocast=settings.samseg_autocast,
-                )
-                seg = _official.discrete_pred(
-                    logits, query_idx_tensor, num_cls,
-                    prob_thd=settings.samseg_prob_thd,
-                )
-            else:
-                seg = infer.multipass_inference(
-                    processor, query_words, query_idx_tensor, num_cls, num_queries,
-                    dev, img, prob=prob, max_passes=max_passes, coverage_target=coverage_target,
-                )
+        from .referring import run_referring_inference
+        seg, referring_metadata = run_referring_inference(
+            processor, img, referring_expression, classes or "",
+        )
+        class_lines = ["background", referring_metadata["target_prompt"]]
+        num_cls = len(class_lines)
+        logger.info(
+            f"[SamSeg] 指代分割: expression={referring_expression!r}, "
+            f"target={referring_metadata['target_prompt']}, "
+            f"candidates={referring_metadata['candidate_count']}, "
+            f"selected={referring_metadata['selected_index']}"
+        )
         inference_done_at = time.perf_counter()
-        # 后处理: 官方流程默认不做形态学；multipass/指代模式保留原后处理
-        need_postprocess = bool(referring_expression) or run_mode != "official" \
-            or settings.samseg_postprocess
+        need_postprocess = True
+    else:
+        # ★ 地物提取唯一口径: SamSeg 本体（SegEarth-OV3 官方流程）
+        #   单图 / slide_crop 滑窗 → 每个 query 双头融合（instance×score, semantic×presence）
+        #   → 同义词 one-hot 聚合 → argmax → prob_thd 压回背景
+        #   原生 SAM3（点/框交互头 + 文本接地头）归样本制作功能, 不在此处兜底。
+        infer = _ensure_imports()
+        class_lines = _normalize_classes(classes)
+        query_words, query_idx_tensor, num_cls, num_queries = _build_query_tensors(class_lines)
+        processor, dev = _get_processor(
+            ckpt or str(_DEFAULT_CKPT), bpe or str(_DEFAULT_BPE), conf, device or ""
+        )
+        model_ready_at = time.perf_counter()
+        img = Image.open(image_path).convert("RGB")
+        image_ready_at = time.perf_counter()
+        seg_logits = _official.infer_logits(
+            processor, query_words, dev, img,
+            slide_crop=settings.samseg_slide_crop,
+            slide_stride=settings.samseg_slide_stride,
+            autocast=settings.samseg_autocast,
+        )
+        # 阈值口径：ratio 按本图峰值分位自适应（默认，参考图文数据集掩码提取），abs 固定值
+        seg = _official.discrete_pred(
+            seg_logits, query_idx_tensor.to(dev), num_cls,
+            prob_thd=settings.samseg_prob_thd,
+            prob_mode=settings.samseg_prob_mode,
+            fg_ratio=settings.samseg_fg_ratio,
+        )
+        inference_done_at = time.perf_counter()
+        # 形态学后处理：平滑 → 去小连通域 → 填小背景孔（默认开启，参数可配）
+        need_postprocess = bool(settings.samseg_postprocess)
+        logger.info(
+            f"[SamSeg] SamSeg 官方口径分割完成: {image_path}, {num_cls} 类 / "
+            f"{num_queries} 个提示词, prob_mode={settings.samseg_prob_mode}, "
+            f"fg_ratio={settings.samseg_fg_ratio}, "
+            f"crop={settings.samseg_slide_crop}, stride={settings.samseg_slide_stride}"
+        )
     if need_postprocess:
-        seg = infer.postprocess(seg, num_cls)
+        seg = infer.postprocess(
+            seg,
+            num_cls,
+            smooth_kernel=int(settings.samseg_smooth_kernel),
+            min_area=int(settings.samseg_postprocess_min_area),
+            max_hole=int(settings.samseg_postprocess_max_hole),
+        )
     postprocess_done_at = time.perf_counter()
 
     # 上色存 PNG (★ 可视化逻辑收敛到 visualize.save_color_mask_png)
@@ -531,121 +503,31 @@ def run_change_detection(
     _cd_started = _time.perf_counter()
 
     from backend.config import settings
-    run_mode = (mode or settings.samseg_inference_mode or "official").lower()
-    if run_mode != "official":
-        logger.warning(f"[SamSeg] 仅支持官方 official 流程, 忽略 mode={run_mode}")
-        run_mode = "official"
     if conf is None:
         conf = settings.samseg_confidence_threshold
 
-    engine = (settings.samseg_engine or "proc_sam3").lower()
+    # 读图取目标尺寸（两期对齐；native 引擎内部亦做同样对齐）
+    from PIL import Image as _PILImage
+    with _PILImage.open(t1_path) as probe1, _PILImage.open(t2_path) as probe2:
+        target_w = max(probe1.size[0], probe2.size[0])
+        target_h = max(probe1.size[1], probe2.size[1])
 
-    # 读图并尺寸对齐（ProC 也复用该尺寸做结果对齐）
-    img_t1 = Image.open(t1_path).convert("RGB")
-    img_t2 = Image.open(t2_path).convert("RGB")
-    w1, h1 = img_t1.size
-    w2, h2 = img_t2.size
-    target_w, target_h = max(w1, w2), max(h1, h2)
-    if (w1, h1) != (target_w, target_h):
-        img_t1 = img_t1.resize((target_w, target_h), Image.BILINEAR)
-    if (w2, h2) != (target_w, target_h):
-        img_t2 = img_t2.resize((target_w, target_h), Image.BILINEAR)
-
-    if engine == "proc_sam3":
-        from backend.model.ProC_SAM3 import segment as _proc_segment
-
-        proc_t1 = _proc_segment(t1_path, classes)
-        proc_t2 = _proc_segment(t2_path, classes)
-        infer = _ensure_imports()
-        class_lines = proc_t1["class_lines"]
-        num_cls = len(class_lines)
-        t1_mask = proc_t1["seg"]
-        t2_mask = proc_t2["seg"]
-        if t1_mask.shape != (target_h, target_w):
-            t1_mask = np.array(Image.fromarray(t1_mask.astype(np.uint8)).resize(
-                (target_w, target_h), Image.NEAREST))
-        if t2_mask.shape != (target_h, target_w):
-            t2_mask = np.array(Image.fromarray(t2_mask.astype(np.uint8)).resize(
-                (target_w, target_h), Image.NEAREST))
-        logger.info(
-            f"[SamSeg] ProC-SAM3 变化检测: T1={t1_path}, T2={t2_path} "
-            f"({target_w}x{target_h}), {num_cls} 类"
-        )
-        change_pred = infer.compute_instance_change_map(
-            t1_mask, t2_mask, num_cls,
-            iou_threshold=iou_threshold, min_area=max(min_area, 4),
-        )
-        change_mask = change_pred
-        if settings.samseg_postprocess:
-            t1_mask = infer.postprocess(t1_mask, num_cls, min_area=min_area)
-            t2_mask = infer.postprocess(t2_mask, num_cls, min_area=min_area)
-            change_mask = infer.postprocess(change_mask, num_cls, min_area=min_area)
-    else:
-        infer = _ensure_imports()
-        processor, dev = _get_processor(
-            ckpt or str(_DEFAULT_CKPT), bpe or str(_DEFAULT_BPE), conf, device or ""
-        )
-        # 类别 → query
-        class_lines = _normalize_classes(classes)
-        query_words, query_idx_tensor, num_cls, num_queries = _build_query_tensors(class_lines)
-        query_idx_tensor = query_idx_tensor.to(dev)
-        logger.info(
-            f"[SamSeg] 变化检测开始: T1={t1_path}, T2={t2_path} "
-            f"({target_w}x{target_h}), {num_cls} 类, mode={run_mode}"
-        )
-        if run_mode == "official":
-            # ★ 官方流程: 两期各自单次前向(必要时滑窗) → 实例级 ∩ 语义级
-            logits_t1 = _official.infer_logits(
-                processor, query_words, dev, img_t1,
-                slide_crop=settings.samseg_slide_crop,
-                slide_stride=settings.samseg_slide_stride,
-                autocast=settings.samseg_autocast,
-            )
-            logits_t2 = _official.infer_logits(
-                processor, query_words, dev, img_t2,
-                slide_crop=settings.samseg_slide_crop,
-                slide_stride=settings.samseg_slide_stride,
-                autocast=settings.samseg_autocast,
-            )
-            t1_mask = _official.discrete_pred(
-                logits_t1, query_idx_tensor, num_cls, prob_thd=settings.samseg_prob_thd)
-            t2_mask = _official.discrete_pred(
-                logits_t2, query_idx_tensor, num_cls, prob_thd=settings.samseg_prob_thd)
-
-            fpn_t1, _ = _official.extract_fpn(processor, img_t1)
-            fpn_t2, _ = _official.extract_fpn(processor, img_t2)
-            feature_change = _official.fpn_change_map(
-                fpn_t1, fpn_t2, (target_h, target_w))
-            change_mask = _official.combined_change_map(
-                t1_mask, t2_mask, logits_t1, logits_t2, query_idx_tensor, num_cls,
-                feature_change,
-                iou_threshold=settings.samseg_instance_iou_threshold,
-                min_area=settings.samseg_min_instance_area,
-                dilation_radius=settings.samseg_instance_dilation,
-            )
-            if settings.samseg_postprocess:
-                t1_mask = infer.postprocess(t1_mask, num_cls, min_area=min_area)
-                t2_mask = infer.postprocess(t2_mask, num_cls, min_area=min_area)
-                change_mask = infer.postprocess(change_mask, num_cls, min_area=min_area)
-        else:
-            # 旧 multipass 流程（回退用）
-            seg_t1 = infer.multipass_inference(
-                processor, query_words, query_idx_tensor, num_cls, num_queries,
-                dev, img_t1, prob=prob, max_passes=max_passes, coverage_target=coverage_target,
-            )
-            t1_mask = infer.postprocess(seg_t1, num_cls, min_area=min_area)
-
-            seg_t2 = infer.multipass_inference(
-                processor, query_words, query_idx_tensor, num_cls, num_queries,
-                dev, img_t2, prob=prob, max_passes=max_passes, coverage_target=coverage_target,
-            )
-            t2_mask = infer.postprocess(seg_t2, num_cls, min_area=min_area)
-
-            change_pred = infer.compute_instance_change_map(
-                t1_mask, t2_mask, num_cls, iou_threshold=iou_threshold, min_area=max(min_area, 4),
-            )
-            change_mask = infer.postprocess(change_pred, num_cls, min_area=min_area)
-    # ★ 工程化 A4: 推理耗时 (两期分割 + 变化对比, 不含后处理)
+    # 原生 SAM3 引擎：可选先把 T2 拉齐到 T1 色调 → 两期各自类别实例分割出语义图
+    # → 实例级对比出变化掩码（色调一致性口径参考图文数据集掩码提取流程）
+    from backend.model.sam3native import service as _native
+    native = _native.change(
+        t1_path, t2_path, classes,
+        iou_threshold=iou_threshold, min_area=min_area,
+        harmonize=settings.samseg_change_harmonize,
+    )
+    class_lines = native["class_lines"]
+    num_cls = len(class_lines)
+    t1_mask = native["t1_mask"]
+    t2_mask = native["t2_mask"]
+    change_mask = native["change_mask"]
+    infer = _ensure_imports()
+    if settings.samseg_postprocess:
+        change_mask = infer.postprocess(change_mask, num_cls, min_area=min_area)
     _cd_inference_done = _time.perf_counter()
 
     # 上色存 PNG（save_mask=True 时；解译链路只保留矢量结果）

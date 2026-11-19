@@ -70,7 +70,7 @@ System Prompt 中工具目录按以下分类展示（[`system_prompt.py::_TOOL_C
 | # | 工具名 | 分类 | 签名 | 返回类型 |
 |---|--------|------|------|---------|
 | 1 | `segment_image` | samseg | `(image_path, classes="", referring_expression="") -> Dict` | frontend_action(`render_image`) |
-| 2 | `detect_change` | samseg | `(t1_path, t2_path, classes="") -> Dict` | frontend_action(`render_image`) + 规则/转移矩阵业务归类 |
+| 2 | `detect_change` | samseg | `(t1_path, t2_path, classes="", model="jiuzhaigou_landslide") -> Dict` | frontend_action(`render_image`) + 二值变化统计（change_qwen 专用 ONNX，`model` 选滑坡/建筑权重） |
 | 3 | `understand_image` | vlm | `(image_path, question="") -> Dict` | direct（VLM 视觉理解文本） |
 | — | `prepare_cd_dataset_by_fishnet` | 内部 | `(t1_path, t2_path, output_dir, tile_size=512) -> Dict` | 不注册、不暴露给 LLM，仅供内部调用 |
 | 4 | `download_geoserver_layer` | geoserver | `(layer_name) -> Dict` | frontend_action(`download`) |

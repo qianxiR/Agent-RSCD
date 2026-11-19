@@ -41,8 +41,11 @@ onBeforeUnmount(() => {
 })
 
 // 左右栏宽度（px），中间栏 flex:1
-const leftWidth = ref(300)
-const rightWidth = ref(420)
+const leftWidth = ref(210)
+const rightWidth = ref(294)
+// 左右栏收起状态（收起后宽度归零，内容保持挂载）
+const leftCollapsed = ref(false)
+const rightCollapsed = ref(false)
 
 // 复用统一拖拽 composable（与 ChatPanel 输入框拖拽同一套逻辑）
 const { startResize: startResizeRaw } = useResize()
@@ -56,7 +59,7 @@ function startResize(which, ev) {
     axis: 'x',
     // 左栏往右拖增宽(正)；右栏往左拖(clientX 减小)才增宽(invert)
     invert: !isLeft,
-    min: isLeft ? 260 : 180,
+    min: isLeft ? 182 : 126,
     max: isLeft ? 560 : 720,
     start: isLeft ? leftWidth.value : rightWidth.value,
     onUpdate: (next) => { (isLeft ? leftWidth : rightWidth).value = next },
@@ -79,10 +82,26 @@ function startResize(which, ev) {
       </div>
 
       <div class="header-status">
-        <span class="status-item">
-          <span class="status-dot" :class="wsStatus"></span>
-          <span class="status-text">{{ wsLabel }}</span>
-        </span>
+        <div class="pane-toggles">
+          <button
+            type="button"
+            class="pane-toggle"
+            :class="{ active: !leftCollapsed }"
+            :title="leftCollapsed ? '展开左侧栏' : '收起左侧栏'"
+            @click="leftCollapsed = !leftCollapsed"
+          >
+            <Icon name="panelLeft" :size="14" />
+          </button>
+          <button
+            type="button"
+            class="pane-toggle"
+            :class="{ active: !rightCollapsed }"
+            :title="rightCollapsed ? '展开右侧栏' : '收起右侧栏'"
+            @click="rightCollapsed = !rightCollapsed"
+          >
+            <Icon name="panelRight" :size="14" />
+          </button>
+        </div>
         <span v-if="sessionId" class="status-item mono">会话 {{ sessionId.slice(0, 8) }}</span>
         <span class="status-item mono clock">{{ clock }}</span>
         <RouterLink class="admin-entry" to="/admin" title="进入管理控制台（需要管理员 MFA）">
@@ -95,19 +114,47 @@ function startResize(which, ev) {
 
     <!-- 三栏主体（对齐原生 .main） -->
     <div class="main">
-      <div class="pane pane-left" :style="{ width: leftWidth + 'px' }">
+      <div
+        class="pane pane-left"
+        :class="{ collapsed: leftCollapsed }"
+        :style="{ width: leftCollapsed ? '0px' : leftWidth + 'px' }"
+      >
         <LeftSidebar />
       </div>
-      <div class="resizer resizer-v" @pointerdown="startResize('left', $event)"></div>
+      <div v-if="!leftCollapsed" class="resizer resizer-v" @pointerdown="startResize('left', $event)"></div>
 
       <div class="pane pane-center">
         <MapPanel />
       </div>
 
-      <div class="resizer resizer-v" @pointerdown="startResize('right', $event)"></div>
-      <div class="pane pane-right" :style="{ width: rightWidth + 'px' }">
+      <div v-if="!rightCollapsed" class="resizer resizer-v" @pointerdown="startResize('right', $event)"></div>
+      <div
+        class="pane pane-right"
+        :class="{ collapsed: rightCollapsed }"
+        :style="{ width: rightCollapsed ? '0px' : rightWidth + 'px' }"
+      >
         <ChatPanel />
       </div>
+
+      <!-- 收起状态下的展开入口（贴在地图两侧边缘） -->
+      <button
+        v-if="leftCollapsed"
+        type="button"
+        class="pane-expand left"
+        title="展开左侧栏"
+        @click="leftCollapsed = false"
+      >
+        <Icon name="chevronRight" :size="13" />
+      </button>
+      <button
+        v-if="rightCollapsed"
+        type="button"
+        class="pane-expand right"
+        title="展开右侧栏"
+        @click="rightCollapsed = false"
+      >
+        <Icon name="chevronLeft" :size="13" />
+      </button>
     </div>
 
     <!-- 开源影像检索（Teleport 到 body，入口在左栏 / 地图左下角） -->
@@ -158,14 +205,14 @@ function startResize(which, ev) {
   align-items: center;
   gap: 8px;
   font-size: 15px;
-  font-weight: 400;
+  font-weight: var(--fw-body);
   letter-spacing: 0.2px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 .header-brand-name {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   color: var(--text-primary);
 }
 .header-status {
@@ -175,6 +222,13 @@ function startResize(which, ev) {
   flex-shrink: 0;
   font-size: var(--fs-md);
   color: var(--text-muted);
+  font-family: 'Times New Roman', SimSun, serif;
+}
+.header-status :deep(*),
+.header-status .mono,
+.header-status .clock,
+.header-status .admin-entry {
+  font-family: inherit;
 }
 .status-item {
   display: inline-flex;
@@ -199,8 +253,9 @@ function startResize(which, ev) {
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--bg-panel);
+  background: var(--bg-inset);
   color: var(--text-secondary);
+
   font-family: var(--sans);
   font-size: var(--fs-md);
   text-decoration: none;
@@ -212,18 +267,30 @@ function startResize(which, ev) {
   background: var(--bg-hover);
 }
 .app-header :deep(.auth-entry) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
   color: var(--text-secondary);
+  font-family: var(--sans);
+  font-size: var(--fs-md);
 }
 .app-header :deep(.auth-entry .auth-user) {
   color: var(--text-secondary);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
 }
 .app-header :deep(.auth-entry .el-button.is-link) {
-  color: var(--accent);
-  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  height: auto;
+  padding: 0;
 }
 .app-header :deep(.auth-entry .el-button.is-link:hover) {
-  color: var(--accent-hover);
+  color: var(--text-primary);
 }
 .status-dot {
   width: 6px;
@@ -251,11 +318,74 @@ function startResize(which, ev) {
 
 /* ===== 三栏主体（对齐原生 .main） ===== */
 .main {
+  position: relative;
   flex: 1;
   display: flex;
   overflow: hidden;
   min-height: 0;
   background: var(--bg-base);
+}
+.pane.collapsed {
+  border-color: transparent;
+}
+.pane-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pane-toggle {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out);
+}
+.pane-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.pane-toggle.active {
+  color: var(--text-primary);
+}
+.pane-expand {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 8;
+  width: 18px;
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.pane-expand:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.pane-expand.left {
+  left: 0;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.06);
+}
+.pane-expand.right {
+  right: 0;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.06);
 }
 .pane {
   min-width: 0;
@@ -280,17 +410,17 @@ function startResize(which, ev) {
 /* ===== 拖拽分隔条（对齐原生 .resizer） ===== */
 .resizer {
   flex-shrink: 0;
-  background: var(--border);
+  background: transparent;
   position: relative;
   z-index: 5;
   transition: background-color var(--t-base) var(--ease-out);
 }
 .resizer-v {
-  width: 4px;
+  width: 6px;
   cursor: col-resize;
   align-self: stretch;
 }
 .resizer:hover {
-  background: var(--accent);
+  background: var(--border-strong);
 }
 </style>

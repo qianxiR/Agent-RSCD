@@ -41,7 +41,7 @@ graph TD
     subgraph L2["L2 能力层"]
         TOOLS["工具注册表<br/>56 注册 / 14 类 / 44 暴露"]
         MCP["MCP 动态工具<br/>sse · stdio"]
-        MODEL["解译模型<br/>ProC-SAM3 · VLM"]
+        MODEL["解译模型<br/>SamSeg 本体 · change_qwen · 原生 SAM3 · VLM"]
     end
     subgraph L3["L3 状态层"]
         MEM["三层记忆<br/>工作 / 短期 / 长期"]

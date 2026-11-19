@@ -403,7 +403,7 @@ def resolve_layer_name(name: str) -> Optional[str]:
 | | `download_geojson(name, ...)` | WFS GetFeature (json) | 下载为 GeoJSON |
 | **属性查询** | `get_feature_info(name, bbox, w, h, i, j)` | WMS GetFeatureInfo | 点击像素查属性 |
 | **图层管理** | `delete_layer(name, ws, delete_store)` | REST DELETE | 删图层（栅格/矢量端点不同） |
-| **样式管理** | `_ensure_samseg_edge_style()` / `_ensure_samseg_polygon_style()` | REST | 确保 #2C6FBD 线/面样式 |
+| **样式管理** | `_ensure_samseg_edge_style()` / `_ensure_samseg_polygon_style()` | REST | 确保 #FF0000 线/面样式（分割掩码与边界统一红色） |
 
 ### 4.3 发布名回查机制（关键坑点）
 

@@ -1,11 +1,13 @@
 # 项目进度文档
 
-> 最后更新: 2026-10-28 · 架构与核心功能详见 [architecture.md](./architecture.md)
+> 最后更新: 2026-11-19 · 架构与核心功能详见 [architecture.md](./architecture.md)
 > 启动/演示：[dual-portal-quickstart.md](./platform/dual-portal-quickstart.md) · UI 参考：[ui-reference-notes.md](./platform/ui-reference-notes.md)
+
+> **全局引擎说明（2026-11，阶段 75/76）**：感知引擎三部分各司其职——**地物提取**走 SamSeg 本体（`backend/model/SamSeg/`，官方口径无开关）；**变化检测**走 change_qwen 专用 ONNX（`backend/model/change_detection/change_qwen_runtime/`）；**原生 SAM3**（`backend/model/sam3native/`）专职样本制作。正文中阶段 38、41、62、63 涉及 `backend/model/ProC_SAM3/`、`PROC_SAM3_ROOT`、`PROC_SAM3_WEIGHTS_ROOT` 的描述均为历史记录，相关代码已删除；阶段 72 的「原生 SAM3 统一感知」表述已被阶段 74/75 取代。
 
 ---
 
-## 〇、当前状态总览（截至阶段 37）
+## 〇、当前状态总览（截至阶段 79）
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
@@ -19,13 +21,15 @@
 | 地图 | ✅ | OpenLayers 4326；天地图影像/矢量/地形（t0–t7 并行）+ Esri 高分底图；默认成都 zoom 9 |
 | 影像检索 | ✅ | 4 个开放数据源（PC/ES/CDSE/GEE 兜底）；时间/区域/云量/分辨率筛选；瓦片预览 + AOI 裁剪下载 + 发布图层 |
 | 卷帘 | ✅ | Esri Wayback 2014–2026 年度版本；左右两张瓦片 canvas 裁剪 + 拖动分隔线；清单不可达时内置年度快照 |
-| 变化检测 | ✅ | 变化检测选区 + T1/T2 两个 Esri Wayback 版本 → 浏览器拼接两期高清影像 → 双期分割 + IoU 实例对比 → 变化图斑/转移矩阵 |
-| 地物提取 | ✅ | 左上角工具条第 3 项；Esri 高分底图 + 地图拖框 → GeoTIFF → 当前会话 Agent → SamSeg → 矢量叠加；Esri→天地图自动兜底 |
+| 变化检测 | ✅ | 选区 + T1/T2 两个 Esri Wayback 版本 → 浏览器拼接两期高清影像 → `detect_change` 走 change_qwen 专用 ONNX（九寨沟滑坡 / 成都建筑双权重，336 分块）→ 概率 GeoTIFF + 变化图斑 + 面积统计 |
+| 地物提取 | ✅ | 左上角工具条第 4 项；Esri 高分底图 + 地图拖框 → GeoTIFF → 当前会话 Agent → SamSeg 本体 → 矢量叠加；Esri→天地图自动兜底 |
+| 样本制作 | ✅ 标注 | 左上角工具条入口；选 Esri Wayback 单期/双期（双期卷帘）→ 影像上红框框选工作范围 → 框内绘制/顶点/框选批删 → 保存 `annotations.json` → 导出数据集（裁剪 GeoTIFF/PNG + 标注 + COCO + SHP） |
 | Agent | ✅ | ReAct + 42 工具 + 技能/MCP + 三层记忆 + 停止/回滚 |
-| 遥感解译 | ✅ | ProC-SAM3 开放词汇（英文类别+同义词，1008/504 可切换）+ 变化检测 + 矢量化；SegEarth legacy 回退 |
+| 遥感解译 | ✅ | 地物提取 = SamSeg 本体（官方口径，英文类别+同义词）；变化检测 = change_qwen ONNX；样本制作 = 人工标注已接入（AI 候选未做） |
 | 数据 | ✅ | `rsiis_business` / `cd`(PostGIS) / `Agent_study`；GeoServer 2.28 |
 | 视觉 | ✅ | DeepSeek 风格；中文微软雅黑 / 英文 Times New Roman |
-| 测试 | ✅ | Java 单测 25 项；UI 冒烟 9 张截图无 console/pageerror/4xx |
+| 前端组件库 | 🚧 | `shared/ui` 已有 `BaseButton`/`BaseDialog`/`PanelDialog`；样本制作新增 `SamplePanel`/`SamplePhaseDialog`；3 个 Teleport 自绘遮罩与 EP 主题层（`theme.css`/`overlays.css`/`design-v2.css`）未收口 |
+| 测试 | ✅ | Java 单测 25 项；Python `samples_test` / `backend_contracts` 通过；样本链路 UI 冒烟无样本相关报错 |
 
 > 历史会话已清空：`Agent_study` 与旧 `agent` 库均为 0 会话（旧库同步清空，不再作为迁移源）。
 
@@ -950,7 +954,7 @@ P0 已交付身份、RBAC、MFA、审计与管理 API，但前端仍是单入口
 
 ---
 
-## 二十七、阶段 38（2026-10）：ProC-SAM3 替换 SegEarth-OV3
+## 二十七、阶段 38（2026-10）：ProC-SAM3 替换 SegEarth-OV3（已废弃：阶段 72 换为原生 SAM3，ProC 代码已删除）
 
 ### 27.1 要求
 
@@ -1049,7 +1053,7 @@ P0 已交付身份、RBAC、MFA、审计与管理 API，但前端仍是单入口
 
 ---
 
-## 三十、阶段 41（2026-10）：ProC-SAM3 解译速度优化
+## 三十、阶段 41（2026-10）：ProC-SAM3 解译速度优化（已废弃：阶段 72 换为原生 SAM3）
 
 ### 30.1 耗时构成
 
@@ -1771,7 +1775,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ---
 
-## 五十一、阶段 62（2026-11-01）：ProC-SAM3 代码入库
+## 五十一、阶段 62（2026-11-01）：ProC-SAM3 代码入库（已废弃：阶段 72 删除 ProC 目录）
 
 ### 51.1 入库范围
 
@@ -1800,7 +1804,7 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ---
 
-## 五十二、阶段 63（2026-11-01）：SAM3 权重本地副本（不入库）
+## 五十二、阶段 63（2026-11-01）：SAM3 权重本地副本（不入库）（已废弃：权重现位于 sam3native/weights，见阶段 72）
 
 - 复制 `E:\1代码\模型\权重\sam3\` 到 `backend/model/ProC_SAM3/weights/sam3/`；
 - 包含 `sam3.pt`（3,450,062,241 bytes / 3.45GB）及 tokenizer/config/LICENSE；
@@ -1918,6 +1922,33 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 
 ---
 
+## 五十八、阶段 69（2026-11-02）：移除知识库文档与检索入口
+
+- 删除 `backend/integrations/vendor/knowledge/` 下 13 个知识 Markdown（知识条目 4、案例 4、工具说明 5）；
+- 移除 `external_knowledge_query` 工具实现、注册白名单与标准技能目录条目；
+- 工具发现不再返回知识库工具，初始绑定不会包含 `external_knowledge_query`；
+- 保留 `backend/data/knowledge/` 的 `search/ingest` 骨架，`knowledge_available()` 仍为 `False`，暂不接入检索；
+- 验证：`tests/external_tools_vendor_test.py` 断言工具不存在；`tests/tool_discovery_test.py` 通过；`python -m compileall -q backend` 通过。
+
+---
+
+## 五十九、阶段 70（2026-11-02）：长期记忆 v2 重构
+
+- `user_memory` 收敛为三类：
+  - `preference`：用户行为偏好（interaction / output / task / input）；
+  - `profile`：稳定用户画像（domain / context）；
+  - `lesson`：scope=global 的已验证改错教训；
+- 移除 `entity` / `workflow` / `envfact` 独立类别；`fact` 迁移为 `profile`；
+- 新增生命周期字段：`scope` / `kind` / `confidence` / `source` / `evidence` / `status` / `supersedes_id` / `last_used_at` / `use_count` / `updated_at`；
+- 唯一约束改为 active 部分唯一索引 `(user_id, scope, category, key)`；
+- 注入改为只取 active + 置信度达标，按 lesson → preference → profile 排序，默认最多 20 条；
+- 写入只允许 preference / profile（对话提取）与 lesson（自纠验证）；
+- 删除现有 21 条 preference；16 条 fact 迁移为 profile；现有 lesson 保留；
+- 清理 5 个测试用户（`change_e2e` / `planfirst_tester` / `probe` / `smoke` / `wayback_e2e`）的 9 条 profile，最终保留 7 条（UUID 用户 4 + `study_user` 3）；
+- 新增 `tests/long_term_memory_test.py`，覆盖类别归一化、元数据、UPSERT、注入标签与用户级清空。
+
+---
+
 ## 六十、阶段 71（2026-11-11）：Plan-and-Execute 执行模式
 
 ### 60.1 结构
@@ -1954,3 +1985,333 @@ T1/T2 → 分割模型两期掩膜（默认 ProC-SAM3，legacy 回退 SegEarth-O
 - 步骤按依赖串行调度，未启用 `dag_executor` 并行批次；
 - 断点恢复仍走自由 ReAct 快照路径，计划步骤不保证工具幂等；
 - 计划路径暂未接入 `retry_guard` 的同签名拦截。
+
+---
+
+## 六十一、阶段 72（2026-11-14）：感知引擎替换为原生 SAM3
+
+### 72.1 背景
+
+- ZCode 会话（sess_5ab68faa-f572-4ff3-）于 2026-11-14 23:58 因配额用尽中断，Qoder 会话 292b7167 接续完成；
+- 感知部分（地物提取/变化检测）从 ProC-SAM3 切换为**原生 SAM3**：工作站实例分割口径移植（文本接地逐实例 + 每提示语义图），推理代码不再依赖外部 Tools 路径与 ProC vendor。
+
+### 72.2 代码位置
+
+| 组件 | 位置 |
+|---|---|
+| 推理核心 | `backend/model/sam3native/`（`inst_service.py` / `interactive_segmentor.py` / `service.py` / `mask_postprocess.py` / `coco_export.py` / `palettes.py`） |
+| 分割适配器 | `backend/model/segmentation/sam3_native/adapter.py`（`Sam3NativeSegmentModel`，注册名 `sam3_native`） |
+| 变化检测适配器 | `backend/model/change_detection/sam3_native/adapter.py`（`Sam3NativeChangeModel`，注册名 `sam3_native_change`） |
+| 权重 | `backend/model/sam3native/weights/sam3/sam3.pt`（本地副本，`.gitignore` 排除；`SAM3_NATIVE_WEIGHTS_ROOT` 可覆盖） |
+| 复用组件 | 分割头 `SamSeg/engine.py`（`ensure_installed_sam3`）；实例变化图 `SamSeg/SamSeg/infer.py`（`compute_instance_change_map`）；指代分割保留 `SamSeg/referring.py`（`Sam3Processor` 路径） |
+
+### 72.3 配置（`backend/config.py`）
+
+- `SAM3_NATIVE_WEIGHTS_ROOT`（默认 `backend/model/sam3native/weights`）、`SAM3_NATIVE_CKPT`、`SAM3_NATIVE_BPE`；
+- `SAM3_NATIVE_RESOLUTION`（默认 1008）、`SAM3_NATIVE_DEVICE`（默认空，随 torch 自动）；
+- `SAM3_NATIVE_WARMUP`（默认 true，启动后台预热，加载后全局缓存）。
+
+### 72.4 关键适配
+
+- 本机 site-packages 官方 `sam3` 的 `Sam3Processor._forward_grounding` 只把 `masks_logits/masks/boxes/scores` 写入 state，不写工作站版本的 `semantic_mask_logits`，但分割头输出 `semantic_seg` 且权重在 checkpoint 内：在 `inst_service.py` 外包一层暂存 `forward_grounding` 输出，语义图按工作站同口径（插值 + sigmoid）取用；
+- 指代分割（`referring_expression`）不受替换影响，走保留的 `Sam3Processor` + `referring.py` 路径。
+
+### 72.5 验证
+
+- 合成影像冒烟：`service.segment` 语义图分出建筑/水体两类，`service.change` 变化掩码类别正确；
+- 真实遥感影像：26 个实例（含 score/area/bbox），语义图 5 类；
+- runner 级端到端：真实影像分割 + 矢量导出，合成双时相变化检测通过；
+- `python tests/backend_contracts_test.py` 通过；`python -m compileall -q backend` 通过；
+- 应用导入、`ensure_builtin_models()` 注册表解析、runner 可用性检测通过。
+
+### 72.6 清理与文档
+
+- 删除 ProC 三个目录（`backend/model/ProC_SAM3/` 等）；
+- `AGENTS.md`、`docs/architecture.md`、`docs/model/architecture-samseg.md`、`docs/model/impl-model.md`、`docs/model/architecture-tools.md`、`docs/data/impl-data.md`、`docs/systems/02-tool-design-mcp.md`、`docs/backend-architecture-review.md`、`docs/platform/core-architecture-design.md`、`docs/agent/method/sample-data-pipeline.md`、`docs/agent-interview-qa.md`、README 更新为原生 SAM3 表述；
+- `samseg_tools.py` 工具注释、`sam3native` 模块 docstring、`registry.py`/`segmentation/__init__.py` 域说明同步修正；
+- 本文档阶段 38/41/62/63 标注已废弃，见顶部全局说明。
+
+---
+
+## 六十二、阶段 73（2026-11-15）：用户端 UI 资产盘点与按钮组件化
+
+### 73.1 背景
+
+- 用户端 19 个 Vue（9588 行）里散落 21 个自建按钮类、5 种弹层写法、三层全局 EP 覆盖；要回答"是否有组件库"，先盘点再动手。
+
+### 73.2 产出
+
+| 类型 | 位置 | 说明 |
+|---|---|---|
+| 盘点文档 | `docs/platform/ui-component-inventory.md` | 组件清单、控件盘点、样式层行号与重复定义、P0–P2 规划、验收标准、未决事项 |
+| 基础组件 | `frontend-vue/src/shared/ui/BaseButton.vue` | `variant: primary/ghost/icon/quick`、`size: md/lg/sm`、`px`、`bold`、`muted`；`disabled`/`title` 透传 |
+| 替换 | `CaptureInterpretDialog.vue`、`ChangeDetectDialog.vue`、`ImagerySearchDialog.vue`、`MapPanel.vue` | cap / change / im / compare 四组按钮统一走 `BaseButton`，删除各自按钮样式；布局用 `.im-grow`、`.compare-grow` 保留在调用方 |
+| 弹层外壳 | `frontend-vue/src/shared/ui/BaseDialog.vue` | 统一 `el-dialog` 的 `width`/`title`/`showClose`/`closeOnClickModal`/`closeOnPressEscape`/`appendToBody`/`alignCenter` 与 header/footer 插槽 |
+| 面板弹层 | `frontend-vue/src/shared/ui/PanelDialog.vue` | 左分类 + 右列表固定外壳（头部计数、刷新/关闭、工具栏、结果区、底部提示插槽），样式取自原 `.pnl-*` |
+| 弹层替换 | `LoginDialog.vue`、`ExtensionsDialog.vue`、`LibraryDialog.vue`、三个地图弹窗 | 全部改用 `BaseDialog`；扩展/资料库改用 `PanelDialog`，删除各自重复的 `.pnl-head`/`.pnl-body`/`.pnl-side`/`.pnl-main`/`.pnl-toolbar`/`.pnl-results` 样式；资料库删除无效的刷新按钮与空 `reload()` |
+
+### 73.3 死代码清理
+
+- `MapPanel.vue`：删除 `.basemap-btn`、`.basemap-switcher`（模板/脚本均无引用）；
+- `MessageBubble.vue`：删除 `.msg-op-btn`；
+- `design-v2.css`：删除 `.basemap-switcher` / `.basemap-btn` 覆盖块。
+
+### 73.4 验证
+
+- 9 个改动 SFC 经 `@vue/compiler-sfc` 解析、脚本/模板/样式编译全部通过；
+- Vite dev 按需编译上述模块均返回 200；
+- 用户端 `<el-dialog>` 仅剩 `BaseDialog.vue` 内部一处，业务组件不再直接使用；
+- `vite build` 在本机 `vite:esbuild-transpile` 删除临时文件阶段报 `Access is denied`（更换 TEMP 目录、esnext target 均可复现），属环境/杀软锁定，非代码错误，待环境可用时复跑一次生产构建。
+
+### 73.5 边界
+
+- 组件暂落 `frontend-vue/src/shared/ui/`，未抽独立包（包形态未定）；
+- 弹层统一覆盖 5 组中的 4 组；`TaskMonitorDialog`、`LayerPanel` 搜索浮层、`ConvSidebar` 搜索浮层仍为 Teleport 自绘遮罩，未纳入 `BaseDialog`；
+- EP 主题层收口（`theme.css`/`overlays.css`/`design-v2.css` 的 `.el-*` 重叠）未做，列为后续批次。
+
+---
+
+## 六十三、阶段 74：地物提取回归 SamSeg 本体
+
+### 74.1 背景
+
+阶段 72（commit `af49374`）把「地物提取」的推理换成了原生 SAM3（`backend/model/sam3native/service.segment`，文本接地逐实例 + 语义图，`SAM3_NATIVE_RESOLUTION=1008`）。该口径与 SamSeg（SegEarth-OV3 官方流程）不一致：官方流程是**每个 query 的实例头 `sigmoid(masks) × (sigmoid(logits) × presence)` 与语义头 `sigmoid(semantic_seg) × presence` 逐像素取 max，再按同义词 one-hot 聚合 → argmax → `prob_thd` 压背景**，而原生口径走的是逐实例掩码聚合 + 独立语义图。两者在边界、置信度语义、同义词合并方式上都不同，导致地物提取产物与 SamSeg 论文口径对不上。
+
+本阶段把 `segment_image` 的默认推理改回 `backend/model/SamSeg/`（SamSeg 本体），原生 SAM3 降级为可选口径。
+
+### 74.2 改动
+
+- `backend/model/SamSeg/runner.py`
+  - 新增 `_inference_mode(mode: Optional[str] = None) -> str`：显式参数 > `SAMSEG_INFERENCE_MODE` > `official`；非法值回退 `official` 并 warning。
+  - `run_segment()` 非指代分支按口径分派：`official`（默认）走 `_normalize_classes` → `_build_query_tensors` → `_get_processor` → `official.infer_logits`（单图/512 滑窗）→ `official.discrete_pred`；`native` 保留原 `sam3native.service.segment` 调用。指代分割（`referring_expression`）分支不变。
+  - `samseg_available()` 默认只校验 SamSeg 权重与 `infer` 依赖，仅 `native` 口径才校验 `SAM3_NATIVE_CKPT`/`SAM3_NATIVE_BPE`。
+- `backend/main.py`：启动预热改为 `_warm_segmentation_engine()`（线程 `segmentation-warmup`），`official` 口径只预加载 processor（权重约 3.3GB），`native` 口径转调 `_warm_sam3_native()`。开关仍为 `SAM3_NATIVE_WARMUP`。
+- `backend/model/segmentation/sam3_native/adapter.py`：修复 `_run()` 在未注入 runner 时隐式返回 `None` 的缺陷（延迟导入 `SamSeg.runner`），统一走 `run_segment`。
+- `backend/agent/tools/samseg_tools.py`：`segment_image` docstring 的依赖说明改为 SamSeg 权重。
+- 文档：`docs/model/architecture-samseg.md` 重写 §10（默认口径、流程图、配置表），`docs/architecture.md`、`AGENTS.md` 同步改为「地物提取默认 SamSeg 本体，原生 SAM3 为可选口径」。
+
+配置无需新增：`SAMSEG_INFERENCE_MODE`、`SAMSEG_PROB_THD`、`SAMSEG_SLIDE_CROP/STRIDE`、`SAMSEG_AUTOCAST`、`SAMSEG_POSTPROCESS` 等阶段 24 已有。
+
+### 74.3 验证
+
+- `python -m compileall -q backend/model/SamSeg/runner.py backend/main.py backend/model/segmentation/sam3_native/adapter.py backend/agent/tools/samseg_tools.py` → 通过。
+- 真实推理冒烟（`agent-files/imagery/captures/change_t1_2021-12-21_20261030_165226.tif`，480×480 带 CRS，类别「建筑,水体」）：
+  - `samseg_available()=True`，口径 `official`，query 展开为 10 个英文提示词（building/house/roof/structure/water/lake/river/pond/pool/sea）；
+  - `run_segment` 全链路 24.2s（`model_ready` 13.7s、`inference` 8.5s、`artifact` 2.0s）；
+  - 产物齐备：PNG、GeoTIFF、GeoJSON、Shapefile(zip)，`has_crs=True`；
+  - 统计：20 个连通域（building 15 / water 5），前景占比 1.71%；矢量 20 个要素、总面积 1,437,649 m²。
+- `infer_logits` 输出 `(10, 480, 480)` 类别 logits，`discrete_pred` 聚合后类别分布 `[226463, 1782, 2155]`（背景/建筑/水体），与统计一致。
+- 工具层（`segment_image.invoke({"image_path": ..., "classes": "建筑,水体"})`，相当于 Agent 实际调用）：返回 `type=frontend_action` / `action=render_image`，params 含 `artifact_path`、`vector_url`、`polygon_layer`、`legend`、`has_crs=True`、`image_url`/`input_image_url`；产物为 `agent-files/samseg/vector/_default/_anonymous/anon_-_seg_34i8.geojson` + Shapefile 套件；全链路 56.3s（模型加载 32s、`infer_logits` 9.8s、`discrete_pred` 即时、矢量与图层发布 10.5s）。
+
+### 74.4 边界与遗留
+
+- `run_change_detection`（两期分割 + 实例 IoU 匹配 + 转移矩阵）仍走 `sam3native.service.change`；变化检测工具 `detect_change` 当前走 change_qwen 专用 ONNX 权重，二者未统一，属后续批次。
+- `engine.load_model` 的 `resolution=1008` 写死在 `backend/model/SamSeg/engine.py`，未暴露配置项；显存紧张时无法降分辨率。
+- RTX 4050 Laptop 6GB 上模型加载后显存占用约 5.7GB/6.1GB，接近上限；首次调用受磁盘/杀软影响可能到 40s+，已由启动预热缓解。
+- `SAMSEG_AUTOCAST` 默认 `true`（CUDA bf16）；`SamSeg/SamSeg/CLAUDE.md` 提到 Windows 独立脚本用 float32 规避 dtype 问题，若线上出现 dtype 报错可置 `SAMSEG_AUTOCAST=false` 复核。
+
+---
+
+## 六十四、阶段 75：三部分职责收敛 + 样本制作设计稿 v2
+
+### 75.1 背景
+
+用户明确产品分工：「样本标注（样本制作）/ 地物提取 / 变化检测」三个部分各司其职，**原生 SAM 属于样本制作**，不再作为地物提取的可选口径。阶段 74 留下的 `SAMSEG_INFERENCE_MODE` 双口径开关因此失去意义——地物提取只能是 SamSeg 本体。
+
+同时，样本制作原设计稿（`docs/agent/method/sample-data-pipeline.md` v1）是「手动 / AI 辅助 / AI 全自动」三模式并列，与产品实际不符：人工无需从零绘制，AI 出候选后人工后修正即够；AI 全自动链（证据 / RemoteCLIP / caption + VQA）也没有落地价值。设计稿按此重构为 v2。
+
+### 75.2 改动
+
+- `backend/model/SamSeg/runner.py`：删除 `_inference_mode()` 与 `run_segment(mode=...)` 参数；非指代分支只保留 SamSeg 官方口径（`infer_logits` → `discrete_pred`）；`samseg_available()` 只校验 SamSeg 权重与 `infer` 依赖。
+- `backend/main.py`：`_warm_segmentation_engine()` 固定预热 SamSeg processor，不再按口径分派；`_warm_sam3_native()` 保留但启动不再调用（样本制作首次调用时自行加载）。
+- `backend/config.py`：删除 `samseg_inference_mode`（`SAMSEG_INFERENCE_MODE` 环境变量退役）。
+- `backend/model/segmentation/sam3_native/adapter.py`：docstring 改为「地物提取只走 SamSeg 本体，原生 SAM3 归样本制作」。
+- `docs/agent/method/sample-data-pipeline.md`：**重构为 v2「AI 辅助单模式」**——取消手动模式与 AI 全自动链；人工编辑（删实例 / 改类别 / 手绘 / 顶点）降为流程内能力；主线 = 地图框选抓图 → 接地头 `run_classes` 批量候选 → 人工后修正 → `annotations.json` → COCO/SHP；补齐 REST 契约、存储布局（`agent-files/samples/{project}/{task}/`）、`annotations.json` schema、显存互斥方案与阶段 76/77 切分。
+- 文档同步：`docs/model/architecture-samseg.md`（头部、关键文件、配置表去掉 `SAMSEG_INFERENCE_MODE`）、`docs/model/impl-model.md`、`docs/architecture.md:72`、`AGENTS.md` 架构边界改为「三部分各司其职」。
+
+### 75.3 验证
+
+- `python -m compileall -q backend/model/SamSeg/runner.py backend/main.py backend/config.py backend/model/segmentation/sam3_native/adapter.py` → 通过。
+- 全仓 grep `samseg_inference_mode` / `_inference_mode` → 除 `backend/main.py` 保留的 `_warm_sam3_native` 定义外无引用。
+- 阶段 74 已用同一权重复测 SamSeg 全链路（24.2s / 20 连通域 / 20 要素），本次改动只删分支，不触碰推理核心。
+
+### 75.4 遗留
+
+- `backend/model/segmentation/sam3_native/adapter.py` 名称与实际职责（代理 SamSeg）不符，待改名（阶段 76 一并处理）。
+- 样本制作代码尚未开工：`backend/model/sample/`、`backend/api/samples.py`、前端「样本制作」弹窗按 v2 设计稿在阶段 76 落地。
+- 阶段 74 段落中保留的 `SAMSEG_INFERENCE_MODE` 表述属历史记录，不回改。
+
+---
+
+## 六十五、阶段 76（2026-11-18）：变化检测切换 change_qwen 专用 ONNX
+
+### 76.1 背景
+
+阶段 74 遗留「`run_change_detection` 走双期 SAM3 语义图实例对比，而 `detect_change` 工具走 change_qwen 专用 ONNX，二者未统一」。本阶段把**工具链的变化检测正式收口到 change_qwen 专用 ONNX**：两类场景（九寨沟滑坡、成都建筑）各有专用二值变化权重，替代通用分割 + 实例匹配的思路；SAM3 双时相实例对比保留为 registry 适配器（`sam3_native_change`），工具不再调用。
+
+### 76.2 改动
+
+- `backend/model/change_detection/change_qwen_runtime/`（新增）
+  - `runtime.py`：ONNX Runtime 运行时。336×336 分块、步长 168、重叠加权；`jzg`/`jiuzhaigou` → `change_qwen_jzg.onnx`（文本提示「Detecting landslide changes…」），`cdcd` → `change_qwen_cdcd.onnx`（「Detecting building changes…」）；文本提示使用预计算 `*_text.npz` tokens；ImageNet 归一化；rasterio 按 CRS 读图（`WarpedVRT` + `Window` 分块）；输出二值变化 mask、彩色图、概率 GeoTIFF、GeoJSON 图斑与面积统计（`min_area_px` / `min_area_m2` 过滤）。
+  - `adapter.py`：`ChangeQwenModel`（capability=`change_detection`），按 `classes` 关键字自动选 `cdcd`/`jzg`，也可 `params.model_key` 指定。
+  - `weights/`：两套 ONNX 与 text tokens（本地副本，`.gitignore` 排除）。
+- `backend/model/builtins.py`：注册 `change_qwen`（`engine=onnxruntime`）；`sam3_native` / `sam3_native_change` 注册保持不变。
+- `backend/agent/tools/samseg_tools.py`
+  - `detect_change` 改调 `change_qwen_runtime.predict_change`；新增 `model` 参数（`jiuzhaigou_landslide` 默认 / `chengdu_building`），`classes` 降为兼容参数；`_resolve_change_model()` 归一化权重键、中文场景名与图层标签；输出改为二值变化统计（区域数 / 变化像素 / 占比 / 面积）。
+  - `segment_image` 依赖说明改为 SamSeg 权重（地物提取只走 SamSeg 本体）。
+- `backend/data/imagery/providers.py`、`capture.py`：所有 httpx 客户端统一 `trust_env=False`，STAC 检索（PC / Earth Search / Copernicus）与 Esri / 天地图取图不再受系统代理环境变量干扰。
+- 前端
+  - `services/api.js`：`getGeoServerServices()` 过滤 `qh` 前缀的外部工作空间，并重算 `total_layers`。
+  - `layouts/MainLayout.vue`：左右栏支持收起 / 展开（顶栏按钮 + 贴边展开入口；收起时宽度归零、内容保持挂载）。
+  - `components/map/LayerPanel.vue`：精简（移除工作空间删除等操作入口）。
+
+### 76.3 验证
+
+- `python -m compileall -q` 覆盖本次改动文件（`samseg_tools.py`、`builtins.py`、`change_qwen_runtime/`、`imagery/{providers,capture,service}.py`、`SamSeg/runner.py`、`main.py`）→ 通过。
+- `python tests/backend_contracts_test.py` → `backend_contracts: PASS`（注册项含 `sam3_native` / `sam3_native_change` / `change_qwen`）。
+- 本轮未加载 ONNX 权重执行真实推理（按要求只做代码与文档更新）。
+
+### 76.4 遗留
+
+- 变化检测两套实现并存：工具只走 change_qwen；`sam3_native_change` 适配器仍可直接 `resolve()` 调用，未做入口收敛。
+- 样本制作仍未开工：`backend/model/sample/`、`backend/api/samples.py`、前端「样本制作」弹窗；`docs/agent/method/sample-data-pipeline.md` 的分阶段编号顺延为 77/78/79（阶段 76 已用于本次变化检测切换）。
+- `backend/model/segmentation/sam3_native/adapter.py` 名称与职责（代理 SamSeg）不符，改名仍待办。
+
+---
+
+## 六十六、阶段 77（2026-11-18）：SamSeg 掩码提取方法对齐图文数据集流程
+
+### 77.1 背景
+
+参考本机 `H:/图文描述数据集/SAM推理` 的掩码提取流程（`proc_engine.py` / `postprocess.py` / `harmonize.py`），其中三个方法点比本项目现有 SamSeg 口径更稳：
+
+1. **滑窗拼缝**：该流程对 tile 重叠区按高斯窗加权（中心权重 1、边缘低，`sigma_scale=0.125`），本项目此前是"按次数简单平均"，拼缝处类别跳变；
+2. **阈值口径**：该流程默认 `prob_mode=ratio`，取峰值图 `1-fg_ratio` 分位作阈值（`fg_ratio=0.90`，裁剪 [0.05,0.95]）；本项目此前固定 `prob_thd=0.1`。绝对概率随成像亮度整体漂移（实测同场景 T1 峰值中位 0.76、T2 0.41），固定阈值会让暗图整幅掉成背景、凭空造出变化；
+3. **形态学后处理**：该流程默认开启 `smooth(3) → min_area(64) → max_hole(128)`；本项目此前默认关闭。
+
+### 77.2 改动
+
+- `backend/model/SamSeg/official.py`
+  - 新增 `_gaussian_weight(h, w, device, sigma_scale=0.125)`；`slide_inference` 改为高斯加权累加（`preds*weight / Σweight`），拼缝消失；
+  - 新增 `resolve_threshold(class_logits, prob_mode, fg_ratio, prob_thd)`（`ratio` 自适应 / `abs` 固定，`ratio` 裁剪 [0.05,0.95]）；
+  - `discrete_pred(..., prob_mode="abs", fg_ratio=0.90)` 接入口径参数并打印实际阈值。
+- `backend/model/SamSeg/harmonize.py`（新增，从 `H:/图文描述数据集/SAM推理/harmonize.py` 移植，自包含 numpy + 惰性 cv2）：`lab`（CIELAB 均值/方差匹配，默认）/ `lum` / `hist` / `linear` 四种双时相色调一致性口径，支持 `blocks` 分块匹配。
+- `backend/model/SamSeg/runner.py`
+  - `run_segment`：`discrete_pred` 传 `prob_mode=samseg_prob_mode` / `fg_ratio=samseg_fg_ratio`；后处理传 `smooth_kernel` / `min_area` / `max_hole`。
+  - `run_change_detection`：调用原生引擎时传 `harmonize=samseg_change_harmonize`。
+- `backend/model/sam3native/service.py`：`change(..., harmonize=...)` 先按口径把 T2 色调拉齐到 T1（尺寸不一致先 bilinear 对齐），临时文件用完即删；返回值加 `harmonize` 字段。
+- `backend/config.py`：新增 `SAMSEG_PROB_MODE`（`ratio`）、`SAMSEG_FG_RATIO`（`0.90`）、`SAMSEG_SMOOTH_KERNEL`（`3`）、`SAMSEG_POSTPROCESS_MIN_AREA`（`64`）、`SAMSEG_POSTPROCESS_MAX_HOLE`（`128`）、`SAMSEG_CHANGE_HARMONIZE`（`lab`）；`SAMSEG_POSTPROCESS` 默认由 `false` 改为 `true`。
+- 文档：`docs/model/architecture-samseg.md` §10.1 口径与配置表、§10.3 适配器说明同步。
+
+### 77.3 验证
+
+- `python -m compileall -q` 覆盖 `SamSeg/official.py`、`SamSeg/runner.py`、`SamSeg/harmonize.py`、`sam3native/service.py`、`config.py` → 通过。
+- 无模型单元校验：`resolve_threshold`（峰值 90% 为 0.2、10% 为 0.7 的构造输入）`abs` 返回 0.1、`ratio` 返回 0.2；`harmonize('lab')` 把均值 64.7 的 T2 拉到 119.4（参考图 119.8）。
+- `python tests/backend_contracts_test.py` → `backend_contracts: PASS`。
+- 未加载 SAM3 权重执行真实推理（按要求不做推理）。
+
+### 77.4 遗留
+
+- 图文数据集的类别口径（OpenEarthMap 8 类、单单词提示、无同义词）未采纳：本项目仍用 7 类 + 同义词增强，是否切换属产品决策。
+- 变化检测工具链仍走 change_qwen；`harmonize` 只作用于 `sam3_native_change` 适配器路径。
+- 样本制作分阶段编号顺延为 78/79/80（本阶段占用 77）。
+
+---
+
+## 六十七、阶段 78（2026-11-18）：移除 sam3_native_change 适配器，变化检测只保留专用 ONNX
+
+### 78.1 背景
+
+阶段 76 把 `detect_change` 工具收口到 change_qwen 专用 ONNX，但保留了 `sam3_native_change`（双时相实例对比）作为 registry 适配器。用户要求变化检测只保留专用 ONNX 一条路径，移除该适配器。
+
+### 78.2 改动
+
+- 删除 `backend/model/change_detection/sam3_native/`（`adapter.py` + `__init__.py`，即 `Sam3NativeChangeModel` / 注册名 `sam3_native_change`）。
+- `backend/model/builtins.py`：移除该适配器的导入与注册；`change_detection` capability 下只剩 `change_qwen`（docstring 同步改为「SamSeg 分割适配器 + change_qwen 变化检测适配器」）。
+- `tests/backend_contracts_test.py`：移除适配器用例与 `Sam3NativeChangeModel` 导入；注册断言改为「`sam3_native` / `change_qwen` 在册，`sam3_native_change` 不在册」。
+- 文档同步：`AGENTS.md`（变化检测唯一口径）、`docs/architecture.md:72`、`docs/model/architecture-samseg.md` §10.3/§10.5、`docs/agent/method/sample-data-pipeline.md` §0/§7、`docs/agent-interview-qa.md` Q8 尾注。
+
+### 78.3 保留但已无入口（用户未指定是否删除）
+
+- `backend/model/SamSeg/runner.py::run_change_detection`（双时相实例对比 + 转移矩阵 + 规则/VLM 判读函数）——仅被测试引用；
+- `backend/model/sam3native/service.py::change`（含 `harmonize` 预处理）；
+- `backend/model/SamSeg/harmonize.py` 与配置 `SAMSEG_CHANGE_HARMONIZE`。
+
+### 78.4 验证
+
+- `python -m compileall -q backend/model/builtins.py backend/model/change_detection tests/backend_contracts_test.py` → 通过。
+- `python tests/backend_contracts_test.py` → `backend_contracts: PASS`。
+- 全仓 grep `sam3_native_change` / `Sam3NativeChangeModel` → 仅剩历史文档记录。
+
+---
+
+## 六十八、阶段 79（2026-11-19）：样本标注编辑器接入工作台
+
+### 79.1 范围
+
+把 `sandbox/sample-ui/` 的标注编辑能力接入工作台，形态为「工作台内标注模式」：点「样本制作」→ 选时相 → 复用主地图标注 → 保存 → 导出。本期只做人工标注，不做 AI 候选生成与交互头精修。
+
+### 79.2 入口与时相
+
+- 新增 `SamplePhaseDialog.vue`：任务名、项目、当前视图 bbox、时相 A（必选）、时相 B（可选）。
+- 单期：抓取该期 Esri Wayback 影像直接铺图。
+- 双期：A/B 以同一 bbox、同一缩放抓取（`captureWaybackImage` 新增 `exactBbox` / `zoom` 参数）→ 两张同尺寸 GeoTIFF → B 按分隔线右侧裁剪。
+- 抓图复用 `/api/v1/imagery/georeference`，影像以 `ImageStatic` 铺在 3857 地图上。
+
+### 79.3 工作范围与标注
+
+- 抓图后进入红框模式：在影像上拖动红色矩形，`Enter` 或双击确认，`Esc` 清除。
+- 确认后只显示框内影像（ImageStatic 按工作范围裁剪并 fit），红色边框常驻。
+- 新增 `useSampleEditor.js`：绘制、顶点编辑、框选多选，图层 zIndex 40/45/50。
+- 操作：左键落点；F2/Enter 闭合；Backspace 撤销；Esc 取消；拖动顶点；点边加点；Shift 点顶点或 F2 删点；框选后 Delete 批删；最少 3 点。
+- 几何以红框左上角为原点的影像像素存储，保存时同时写 EPSG:4326 经纬度；COCO 用像素，SHP 用经纬度。
+- 顶点拖动与落点限制在红框内；样本模式内关闭 WFS 属性查询与双击缩放，退出后恢复。
+- 新增 `SamplePanel.vue`：任务名、时相、工作范围、模式按钮、实例列表、类别下拉、面积、删除、重选范围、保存、COCO/SHP/数据集下载。
+
+### 79.4 后端
+
+新增 `backend/model/sample/`：
+
+| 文件 | 职责 |
+|---|---|
+| `annotations.py` | 契约校验、类别表、像素/经纬度换算、bbox/面积、`crop_px` 范围校验 |
+| `storage.py` | 任务目录、越界守卫、源影像复制、读写与列表 |
+| `export.py` | 多边形栅格化 → COCO；GeoJSON → SHP；按 `crop_px` 裁剪 GeoTIFF/PNG 并打包数据集 |
+
+新增 `backend/api/samples.py`：
+
+| 方法 | 路径 |
+|---|---|
+| POST | `/api/v1/samples/annotations` |
+| GET | `/api/v1/samples/annotations?project=&task_dir=` |
+| GET | `/api/v1/samples/tasks?project=` |
+| GET | `/api/v1/samples/export?project=&task_dir=&format=coco\|shp\|dataset` |
+
+数据集包：`image/phase_a.tif`、`phase_a.png`、`phase_b.tif`、`phase_b.png`（双期）、`annotations.json`、`coco.json`、`vector/annotations.shp` 全套、`meta.json`。
+
+存储：`agent-files/samples/{project}/{task}/`，含 `source_a.tif` / `source_b.tif` / `annotations.json` / `meta.json` / 导出产物。配置项 `SAMPLES_OUTPUT_ROOT`。
+
+### 79.5 规则抽取
+
+- 新增 `docs/rules/ui-style.md`：设计令牌、字体、层级、状态、按钮、地图工具条、十条规则与禁止项。
+- `frontend-design` 技能移除 Agent-RSCD 专属的 Step 2.5、中文字体块与十条规则，保留通用设计理念。
+
+### 79.6 验证
+
+- `python -m compileall -q backend` → 通过。
+- `python tests/samples_test.py` → `samples_test: PASS`（归一化、像素/经纬度往返、越界、COCO/SHP、按 `crop_px` 裁剪与数据集打包）。
+- `python tests/backend_contracts_test.py` → `backend_contracts: PASS`。
+- `npm --prefix frontend-vue run build` → 通过。
+- Playwright/msedge 实测：
+  - 单期抓图 452×416 → 红框 135×175 → 框内三点 F2 闭合 → 保存 1 个标注；
+  - 数据集 zip 含 `image/phase_a.tif`（135×175，保留 CRS）、`phase_a.png`、`annotations.json`、`coco.json`、`vector/` 全套、`meta.json`；
+  - 双期 `2026-11-18 ↔ 2025-12-18` → 双击确认红框 125×166 → 数据集含 `phase_a.tif` / `phase_b.tif`，两者同尺寸且带 CRS；
+  - 框选 2 个批删为 0；顶点插入/删除 5→4；退出后恢复工具条。
+- 未执行任何模型推理。
+
+### 79.7 遗留
+
+- AI 候选（接地头 `run_classes`）、交互头点/框精修、掩码 GeoTIFF 栅格化未做。
+- 任务列表接口已提供，面板尚未做历史任务加载入口。
+- 类别固定 6 类，不提供类别表编辑。
+- 大范围视域会被抓图上限拒绝，需先放大地图。

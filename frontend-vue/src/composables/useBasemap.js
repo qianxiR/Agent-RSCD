@@ -15,7 +15,6 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 // 底图候选项：value 与 useMap.setBasemap 的类型一一对应
 export const BASEMAP_OPTIONS = [
   { value: 'esri', label: 'Esri 影像', hint: '最新高分影像镶嵌，无单一日期' },
-  { value: 'img', label: '天地图影像', hint: '卫星影像 + 影像注记' },
   { value: 'vec', label: '天地图矢量', hint: '电子地图 + 矢量注记' },
   { value: 'ter', label: '天地图地形', hint: '地形晕渲 + 地形注记' },
   { value: 'none', label: '无底图', hint: '只显示业务图层' },

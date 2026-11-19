@@ -70,12 +70,17 @@ function onContentClick(e) {
     rows.push([...tr.querySelectorAll('th,td')].map((c) => c.textContent).join('\t'))
   })
   copyTextToClipboard(rows.join('\n')).then(() => {
+    const original = btn._copyOriginal || btn.innerHTML
+    btn._copyOriginal = original
     btn.classList.add('copied')
     btn.title = '已复制'
-    setTimeout(() => {
+    btn.innerHTML = '<svg class="copy-check" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+    clearTimeout(btn._copyTimer)
+    btn._copyTimer = setTimeout(() => {
       btn.classList.remove('copied')
       btn.title = '复制为 TSV'
-    }, 1500)
+      btn.innerHTML = original
+    }, 2500)
   })
 }
 
@@ -238,7 +243,11 @@ function formatToolArgs(args) {
           <span class="trace-summary">{{ thinkingSummary(step) }}</span>
           <span class="trace-chevron">›</span>
         </button>
-        <pre v-show="isExpanded(stepKey(step, index))" class="trace-body thinking-body">{{ compactDisplayText(step.text, { maxChars: streaming ? 900 : 520, maxLines: streaming ? 14 : 8 }) }}</pre>
+        <div class="trace-reveal" :class="{ 'is-open': isExpanded(stepKey(step, index)) }">
+          <div class="trace-reveal-inner">
+            <pre class="trace-body thinking-body">{{ compactDisplayText(step.text, { maxChars: streaming ? 900 : 520, maxLines: streaming ? 14 : 8 }) }}</pre>
+          </div>
+        </div>
       </div>
 
       <div v-else-if="step.type === 'tool' && step.call" class="trace-card tool-call-group">
@@ -252,26 +261,30 @@ function formatToolArgs(args) {
           <span class="trace-summary trace-tool-name">{{ toolSummary(step.call) }}</span>
           <span class="trace-chevron">›</span>
         </button>
-        <div v-show="isExpanded(stepKey(step, index))" class="tool-call-list">
-          <div class="tool-call-card">
-            <div class="tool-call-head">
-              <span class="tool-call-index">#{{ index + 1 }}</span>
-              <code>{{ step.call.name || 'unknown_tool' }}</code>
-            </div>
-            <pre v-if="step.call.args" class="tool-call-args">{{ formatToolArgs(step.call.args) }}</pre>
-            <div v-if="step.call.result" class="tool-inline-result">
-              <div class="tool-inline-result-head">
-                <span>工具结果</span>
-                <span class="tool-result-status" :class="getToolCallResult(step.call).status">{{ getToolCallResult(step.call).status }}</span>
+        <div class="trace-reveal" :class="{ 'is-open': isExpanded(stepKey(step, index)) }">
+          <div class="trace-reveal-inner">
+            <div class="tool-call-list">
+              <div class="tool-call-card">
+                <div class="tool-call-head">
+                  <span class="tool-call-index">#{{ index + 1 }}</span>
+                  <code>{{ step.call.name || 'unknown_tool' }}</code>
+                </div>
+                <pre v-if="step.call.args" class="tool-call-args">{{ formatToolArgs(step.call.args) }}</pre>
+                <div v-if="step.call.result" class="tool-inline-result">
+                  <div class="tool-inline-result-head">
+                    <span>工具结果</span>
+                    <span class="tool-result-status" :class="getToolCallResult(step.call).status">{{ getToolCallResult(step.call).status }}</span>
+                  </div>
+                  <div class="tool-result-summary">{{ getToolCallResult(step.call).summary }}</div>
+                </div>
               </div>
-              <div class="tool-result-summary">{{ getToolCallResult(step.call).summary }}</div>
             </div>
           </div>
         </div>
       </div>
 
       <div v-else-if="step.type === 'content' && step.text" class="message-bubble assistant-content-bubble">
-        <div class="content-text" v-html="renderMarkdown(step.text)" @click="onContentClick"></div>
+        <div class="content-text" :class="{ 'is-streaming': streaming }" v-html="renderMarkdown(step.text)" @click="onContentClick"></div>
         <span v-if="shouldShowCursor(index)" class="cursor">▋</span>
         <slot name="content-actions"></slot>
       </div>
@@ -308,12 +321,26 @@ function formatToolArgs(args) {
   min-width: 0;
 }
 
+/* 免 JS 算高：Grid 0fr → 1fr */
+.trace-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--t-slow) var(--ease-emph);
+}
+.trace-reveal.is-open {
+  grid-template-rows: 1fr;
+}
+.trace-reveal-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .message-bubble {
   max-width: 100%;
   padding: 10px 12px;
   border-radius: var(--r-shell);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-body);
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -330,7 +357,7 @@ function formatToolArgs(args) {
 .trace-card {
   width: 100%;
   box-sizing: border-box;
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid rgba(157, 188, 213, 0.78);
   border-left: 1px solid rgba(157, 188, 213, 0.78);
   border-radius: var(--r-shell);
@@ -340,7 +367,7 @@ function formatToolArgs(args) {
 
 .trace-card.tool-call-group {
   border-left-color: rgba(157, 188, 213, 0.78);
-  background: #fff;
+  background: var(--bg-panel);
 }
 
 .trace-head {
@@ -382,7 +409,7 @@ function formatToolArgs(args) {
   color: var(--text-muted);
   font-family: var(--mono);
   font-size: var(--fs-xs);
-  font-weight: 700;
+  font-weight: var(--fw-strong);
   flex-shrink: 0;
 }
 
@@ -394,7 +421,7 @@ function formatToolArgs(args) {
 .trace-summary {
   font-family: var(--sans);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   flex: 1;
   min-width: 0;
   color: var(--text-secondary);
@@ -433,7 +460,7 @@ function formatToolArgs(args) {
   margin-top: 7px;
   max-height: 260px;
   overflow: auto;
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   padding: 8px 12px;
   border-radius: var(--r-sm);
@@ -458,7 +485,7 @@ function formatToolArgs(args) {
 }
 
 .tool-call-card {
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   padding: 8px 10px;
   border-radius: var(--r-sm);
@@ -484,7 +511,7 @@ function formatToolArgs(args) {
   overflow: auto;
   padding: 7px 9px;
   border-radius: var(--r-sm);
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid rgba(157, 188, 213, 0.45);
   color: var(--text-secondary);
   font-family: var(--mono);
@@ -509,7 +536,7 @@ function formatToolArgs(args) {
   margin-bottom: 5px;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 .tool-result-status {
@@ -538,6 +565,7 @@ function formatToolArgs(args) {
 
 .cursor {
   color: var(--accent);
+
   animation: blink 1s step-end infinite;
 }
 

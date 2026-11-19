@@ -88,9 +88,9 @@
 6. 发送消息；Agent 做**意图识别和类别转换**（中文/自然语言 → 英文类别 + 英文同义词），调用 `segment_image`；
 7. 结果以矢量/掩膜回显在地图；可继续追问或重新框选。
 
-> 类别不再由弹窗选择。Agent 转换示例：`提取建筑和水体` → `building, house, roof, structure; water, river, lake, pond`；`找出温室大棚` → `greenhouse, plastic roof, glasshouse`。首类自动补 `background`，由 ProC-SAM3 做开放词汇分割。
+> 类别不再由弹窗选择。Agent 转换示例：`提取建筑和水体` → `building, house, roof, structure; water, river, lake, pond`；`找出温室大棚` → `greenhouse, plastic roof, glasshouse`。首类自动补 `background`，由 SamSeg 本体做开放词汇分割。
 >
-> 地图左上角为工具条：「图层」「卷帘」「地物提取」「变化检测」从左到右排列；右上角只有放大/缩小；地图左下 `清除影像 N` 可关闭全部影像预览图层。
+> 地图左上角为工具条：「图层」「卷帘」「样本制作」「地物提取」「变化检测」从左到右排列；右上角只有放大/缩小；地图左下 `清除影像 N` 可关闭全部影像预览图层。
 
 ![地物提取确认](screens/14-bbox-capture.png)
 
@@ -175,15 +175,13 @@
 | 配准 | `POST /api/v1/imagery/georeference`，PNG + bbox → EPSG:3857 GeoTIFF |
 | 范围 | ≤0.02°²（与地物提取一致） |
 
-算法链路（参考 SegEarth-OV3 思路）：
+算法链路：
 
 ```text
 T1/T2 两期影像
-  → 分割模型分别得到两期类别掩膜（默认 ProC-SAM3；legacy 回退 SegEarth-OV3）
-  → 连通域提取实例
-  → T1×T2 实例 IoU 匹配
-  → 未匹配 T1=消失、未匹配 T2=新增、匹配但类别不同=类别变化
-  → 变化掩膜 → 统计 / 类别转移矩阵 / 变化图斑矢量
+  → change_qwen 专用 ONNX 分块推理（336×336 / 步长 168，滑坡或建筑权重）
+  → 概率图 → 阈值二值化 → 小图斑过滤
+  → 变化掩膜 → 统计（区域/像素/面积）/ 概率 GeoTIFF / 变化图斑矢量
 ```
 
 > 变化检测使用 **Esri Wayback 高清影像**，不再使用 Sentinel-2。Wayback 日期是**版本发布日期**，不是单景成像日期；不同地区/年份可能无覆盖或分辨率不一致。两期影像必须使用同一 AOI 与同一瓦片计划，否则变化对比会错位。

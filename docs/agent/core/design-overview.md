@@ -54,7 +54,7 @@
 
 | 层级 | 表 | 范围 | 触发/注入 |
 |---|---|---|---|
-| 🔒 **长期** | `user_memory` | 跨会话 | 每轮收尾提取偏好；自纠学习沉淀教训；注入 system prompt |
+| 🔒 **长期** | `user_memory` | 跨会话 | preference/profile 提取 + 自纠 lesson；按置信度/条数上限注入 system prompt |
 | 📝 **短期** | `conversation_summary` | 会话内 | **v2.5 两级**：Level 1 fold（可逆）→ Level 2 LLM 摘要（threshold×1.5，不可逆）；注入 system prompt |
 | 💾 **工作** | `message` | 近期 N 条 | 每轮 persist_turn；**v2.5 加 fold + DAG 分支**；以消息列表喂 LLM |
 

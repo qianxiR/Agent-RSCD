@@ -84,6 +84,7 @@
 .rich-table-copy-btn:hover {
   background: var(--bg-hover);
   color: var(--accent);
+
 }
 .rich-table-copy-btn.copied {
   color: var(--accent-green);
@@ -115,15 +116,16 @@
 .content-text li { margin: 2px 0; }
 .content-text a {
   color: var(--accent);
+
   text-decoration: none;
 }
 .content-text a:hover {
   text-decoration: underline;
 }
 .content-text blockquote {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--border-strong);
   padding: 6px 12px;
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--text-secondary);
   border-radius: 0 var(--r-sm) var(--r-sm) 0;
   margin: 6px 0;
@@ -194,6 +196,7 @@
   min-width: 0;
   font-weight: 600;
   color: var(--accent);
+
   font-size: var(--fs-lg);
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -212,6 +215,7 @@
 }
 .wms-popup .popup-close:hover {
   color: var(--accent);
+
   border-color: var(--accent);
 }
 .wms-popup .popup-table {

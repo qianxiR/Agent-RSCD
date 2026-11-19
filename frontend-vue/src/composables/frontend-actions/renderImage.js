@@ -27,6 +27,7 @@ export async function handleRenderImage(data, ctx) {
         workspace: polygon_layer.workspace,
         bbox: polygon_layer.bbox,
         forceFit: false,
+        resultLayer: true,
       })
     }
     const hasVector = !!polygon_layer?.layer_name
@@ -51,6 +52,7 @@ export async function handleRenderImage(data, ctx) {
       workspace: polygon_layer.workspace,
       bbox: polygon_layer.bbox,
       forceFit: false,
+      resultLayer: true,
     })
   }
   return {

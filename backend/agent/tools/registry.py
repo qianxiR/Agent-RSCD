@@ -80,7 +80,6 @@ _LLM_EXPOSED_TOOL_NAMES = {
     "external_spectral_index",
     "external_raster_to_vector",
     "external_spatial_operation",
-    "external_knowledge_query",
     # 按需工具发现
     "search_tools",
     "load_tool",

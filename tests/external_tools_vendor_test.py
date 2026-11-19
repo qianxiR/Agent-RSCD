@@ -17,10 +17,11 @@ from backend.agent.tools.registry import get_all_tools, get_tool_by_name  # noqa
 
 def test_vendor_loaded_without_external_tools() -> None:
     assert "external_raster_info" in get_all_tools()
+    assert "external_knowledge_query" not in get_all_tools()
     assert not any(name == "Tools" or name.startswith("Tools.") for name in sys.modules)
 
 
-def test_vendored_spatial_and_knowledge() -> None:
+def test_vendored_spatial() -> None:
     geojson = json.dumps({
         "type": "FeatureCollection",
         "features": [{
@@ -39,13 +40,6 @@ def test_vendored_spatial_and_knowledge() -> None:
     })
     assert spatial["type"] == "success"
 
-    knowledge = get_tool_by_name("external_knowledge_query").invoke({
-        "question": "植被恢复 监测",
-        "top_k": 2,
-    })
-    assert knowledge["type"] == "success"
-    assert knowledge["data"]["matches"]
-
 
 def test_vendored_raster_when_gdal_available() -> None:
     if importlib.util.find_spec("osgeo") is None:
@@ -59,6 +53,6 @@ def test_vendored_raster_when_gdal_available() -> None:
 
 if __name__ == "__main__":
     test_vendor_loaded_without_external_tools()
-    test_vendored_spatial_and_knowledge()
+    test_vendored_spatial()
     test_vendored_raster_when_gdal_available()
     print("external_tools_vendor: PASS")

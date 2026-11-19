@@ -716,9 +716,9 @@ async def _async_memory_finale(
     """
     fired_items = []
     try:
-        # 1. 长期记忆 (偏好/事实提取): 与自纠捕捉器并行, 同一 done 触发点两路同时启动.
-        #    enable_preference_extraction 默认 true (config.py), 与下方 _async_self_correction_scan
-        #    各自沉淀: 本路偏好/事实 (preference/fact), 自纠路错误案例 (lesson/workflow).
+        # 1. 长期记忆 (preference/profile 提取): 与自纠捕捉器并行, 同一 done 触发点两路同时启动.
+        #    enable_preference_extraction 默认 true; 本路只写用户记忆,
+        #    下方 _async_self_correction_scan 只写 scope=global 的 lesson.
         #    若需只保留错误案例学习, 设 ENABLE_PREFERENCE_EXTRACTION=false 单关本路.
         try:
             saved = await memory_mod.extract_and_save_long_term_memory(
@@ -726,8 +726,8 @@ async def _async_memory_finale(
             )
             if saved:
                 fired_items.append({
-                    "key": "用户画像",
-                    "value": f"已学习 {saved} 条偏好",
+                    "key": "长期记忆",
+                    "value": f"已学习 {saved} 条用户记忆",
                     "category": "preference",
                     "source": "long_term",
                 })
@@ -1686,7 +1686,18 @@ class AgentChatService:
                             if pref:
                                 # 即时落库 (不等收尾), 用户能更快感知
                                 get_memory_stores().long_term.save(
-                                    req.user_id, pref["key"], pref["value"], pref["category"]
+                                    req.user_id,
+                                    pref["key"],
+                                    pref["value"],
+                                    pref["category"],
+                                    scope="user",
+                                    kind=pref.get("kind"),
+                                    confidence=pref.get("confidence", 0.7),
+                                    source=pref.get("source", "pattern"),
+                                    evidence={
+                                        "conversation_id": conversation_id,
+                                        "tool": tool_name,
+                                    },
                                 )
                                 # 通知前端弹轻提示
                                 asyncio.create_task(_emit_memory_updated(

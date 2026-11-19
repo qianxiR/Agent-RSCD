@@ -113,11 +113,33 @@ function scheduleCoverageCheck() {
   }, 2000)
 }
 
-// 入参: 无 | 方法: 一侧完全没加载到瓦片才提示；局部无覆盖交给灰色垫层表达 | 出参: 无
+// 入参: 无 | 方法: 需要灰色垫层时补挂（zIndex 5.5，位于两张对比图层之下） | 出参: 无
+function ensureBackdrop() {
+  if (backdropLayer) return
+  const map = getMap()
+  if (!map) return
+  backdropLayer = createBackdrop()
+  map.addLayer(backdropLayer)
+}
+
+// 入参: 无 | 方法: 两侧都有影像时移除灰色垫层，避免正常加载期间闪灰 | 出参: 无
+function removeBackdrop() {
+  if (!backdropLayer) return
+  const map = getMap()
+  map?.removeLayer(backdropLayer)
+  backdropLayer = null
+}
+
+// 入参: 无 | 方法: 一侧完全没加载到瓦片才提示，并按需补挂灰色垫层 | 出参: 无
 function evaluateCoverage() {
   if (!active.value) return
   const leftNone = leftStats.ok === 0 && leftStats.fail > 0
   const rightNone = rightStats.ok === 0 && rightStats.fail > 0
+  if (leftNone || rightNone) {
+    ensureBackdrop()
+  } else {
+    removeBackdrop()
+  }
   if (leftNone && rightNone) {
     error.value = '两侧历史影像都没有加载到瓦片：Wayback 不可达或该区域无影像'
   } else if (leftNone) {
@@ -140,7 +162,7 @@ function createLayer(url, zIndex, label, side) {
     crossOrigin: 'anonymous',
     maxZoom: 19,
     cacheSize: 1024,
-    transition: 0,
+    transition: 200,
     // Wayback 经代理容易抖动：失败退避重试 1 次
     tileLoadFunction: createRetryingTileLoad({ retries: 1 }),
   })
@@ -161,9 +183,10 @@ function createLayer(url, zIndex, label, side) {
 }
 
 // 入参: { leftUrl, rightUrl, leftDate, rightDate }
-// 方法: 移除旧对比层 → 灰色垫层 → 两张瓦片 → 挂裁剪 → 入图 → 重置分隔线
+// 方法: 移除旧对比层 → 两张瓦片 → 挂裁剪 → 入图；已开启时保留分隔线位置
 // 出参: boolean 是否成功
 function startSwipe({ leftUrl, rightUrl, leftDate: ld, rightDate: rd }) {
+  const keepRatio = active.value ? ratio.value : 0.5
   stopSwipe()
   const map = getMap()
   if (!map || !leftUrl || !rightUrl) return false
@@ -172,17 +195,15 @@ function startSwipe({ leftUrl, rightUrl, leftDate: ld, rightDate: rd }) {
   leftStats.fail = 0
   rightStats.ok = 0
   rightStats.fail = 0
-  backdropLayer = createBackdrop()
   leftLayer = createLayer(leftUrl, 7, 'wayback:left', 'left')
   rightLayer = createLayer(rightUrl, 6, 'wayback:right', 'right')
   clipLayer(leftLayer, 'left')
   clipLayer(rightLayer, 'right')
-  map.addLayer(backdropLayer)
   map.addLayer(rightLayer)
   map.addLayer(leftLayer)
   leftDate.value = ld || ''
   rightDate.value = rd || ''
-  ratio.value = 0.5
+  ratio.value = keepRatio
   active.value = true
   map.render()
   return true

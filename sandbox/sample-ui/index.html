@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>标注编辑沙盒</title>
+<link rel="stylesheet" href="/vendor/ol/ol.css" />
+<style>
+  :root {
+    --bg:#f5f5f3; --panel:#fcfcfb; --inset:#f0f0ed;
+    --border:rgba(24,24,20,.07); --border-strong:rgba(24,24,20,.12);
+    --text:#1a1a18; --text2:#5f5f59; --muted:#8d8d86;
+    --accent:#4b5fd6; --accent-soft:rgba(75,95,214,.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; height:100vh; display:flex; flex-direction:column;
+    font-family:"Times New Roman", SimSun, serif; color:var(--text);
+    background:var(--bg); font-size:13px;
+  }
+  header {
+    height:44px; flex:0 0 auto; display:flex; align-items:center;
+    justify-content:space-between; padding:0 14px;
+    background:var(--panel); border-bottom:1px solid var(--border);
+  }
+  header h1 { margin:0; font-size:15px; font-weight:600; }
+  header .meta { color:var(--muted); font-size:12px; }
+  main { flex:1; display:flex; min-height:0; }
+  #side {
+    width:340px; flex:0 0 340px; display:flex; flex-direction:column;
+    gap:10px; padding:12px; overflow-y:auto;
+    background:var(--panel); border-right:1px solid var(--border);
+  }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field > label { font-weight:600; }
+  input, textarea, select, button { font-family:inherit; font-size:13px; }
+  input, select {
+    width:100%; padding:6px 8px; border:1px solid var(--border);
+    border-radius:6px; background:var(--inset); color:var(--text); outline:none;
+  }
+  button {
+    padding:7px 10px; border:1px solid var(--border); border-radius:6px;
+    background:var(--panel); color:var(--text2); cursor:pointer;
+  }
+  button:hover { border-color:var(--border-strong); color:var(--text); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.55; cursor:default; }
+  a.link-btn {
+    display:block; padding:7px 10px; border:1px solid var(--border);
+    border-radius:6px; background:var(--panel); color:var(--text2);
+    text-align:center; text-decoration:none;
+  }
+  a.link-btn:hover { border-color:var(--border-strong); color:var(--text); }
+  a.link-btn.disabled { opacity:.45; pointer-events:none; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .hint { color:var(--muted); font-size:12px; line-height:1.55; }
+  #map { flex:1; min-width:0; background:#e9e9e6; position:relative; }
+
+  /* 复刻主系统地图工具条：左上角横排小按钮 */
+  .map-tools {
+    position:absolute; top:10px; left:10px; z-index:20;
+    display:flex; align-items:center; flex-wrap:wrap; gap:6px; max-width:calc(100% - 70px);
+  }
+  .map-tools button {
+    display:inline-flex; align-items:center; gap:5px; height:28px;
+    padding:0 9px; font-size:12px; color:var(--text2);
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; cursor:pointer;
+  }
+  .map-tools button:hover { color:var(--text); background:var(--accent-soft); border-color:var(--border-strong); }
+  .map-tools button.active { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+
+  /* 工具条弹出的小面板（时相等） */
+  .map-popover {
+    position:absolute; top:46px; left:10px; z-index:21; display:none;
+    width:250px; padding:10px; background:var(--panel);
+    border:1px solid var(--border-strong); border-radius:8px;
+    box-shadow:0 8px 24px rgba(24,24,20,.16);
+  }
+  .map-popover.open { display:block; }
+  .map-popover .field { gap:5px; }
+  .swipe-divider {
+    position:absolute; top:0; bottom:0; width:2px; background:#fff;
+    box-shadow:0 0 0 1px rgba(0,0,0,.35); cursor:col-resize; display:none; z-index:5;
+  }
+  .swipe-divider::after {
+    content:'⇔'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:22px; height:22px; line-height:22px; text-align:center; border-radius:50%;
+    background:#fff; color:#1a1a18; box-shadow:0 1px 4px rgba(0,0,0,.3); font-size:12px;
+  }
+  #instList { display:flex; flex-direction:column; gap:6px; }
+  .inst {
+    border:1px solid var(--border); border-radius:8px; padding:7px 9px;
+    background:var(--bg); cursor:pointer;
+  }
+  .inst.sel { border-color:var(--accent); background:var(--accent-soft); }
+  .inst .top { display:flex; align-items:center; gap:6px; }
+  .inst .score { margin-left:auto; color:var(--muted); font-size:12px; }
+  .inst .sub { color:var(--muted); font-size:12px; margin-top:3px; }
+  .inst .ops { display:flex; gap:8px; margin-top:6px; }
+  .inst .ops button { padding:3px 8px; font-size:12px; }
+  .swatch { width:10px; height:10px; border-radius:2px; flex:0 0 auto; }
+  #log {
+    margin-top:auto; padding:8px; border-radius:6px; background:var(--inset);
+    color:var(--muted); font-size:12px; line-height:1.55;
+    max-height:150px; overflow-y:auto; white-space:pre-wrap;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>标注编辑沙盒</h1>
+  <span class="meta" id="headMeta">未载入影像</span>
+</header>
+<main>
+  <aside id="side">
+    <div class="field">
+      <label>1. 影像（服务端默认影像）</label>
+      <div class="hint" id="imageInfo">加载中…</div>
+    </div>
+
+    <div class="field">
+      <div class="hint">
+        顶部工具条：图层 / 卷帘 / 时相 / 绘制 / 顶点 / 框选。<br />
+        绘制：左键落点，F2 或 Enter 闭合，Backspace 撤销，Esc 取消；<br />
+        顶点：拖动、点边加点、Shift 点顶点删点；框选后 Delete 批量删除。
+      </div>
+    </div>
+
+    <div class="field">
+      <label>3. 标注（<span id="instCount">0</span>）</label>
+      <div id="instList"></div>
+    </div>
+
+    <div class="field">
+      <label>4. 保存与导出</label>
+      <input id="taskDir" value="task_demo" />
+      <button id="btnSave" disabled>保存 annotations.json</button>
+      <a id="linkCoco" class="link-btn disabled" href="#" download>下载 COCO JSON</a>
+      <a id="linkShp" class="link-btn disabled" href="#" download>下载 SHP（zip）</a>
+    </div>
+
+    <div id="log">日志：</div>
+  </aside>
+  <div id="map">
+    <div class="map-tools">
+      <button id="btnLayers" title="显示/隐藏标注面板">图层</button>
+      <button id="btnSwipe" title="卷帘对比">卷帘</button>
+      <button id="btnPhase" title="多时相与透明度">时相</button>
+      <button id="btnDraw" title="画多边形">绘制</button>
+      <button id="btnEdit" title="编辑顶点">顶点</button>
+      <button id="btnSelect" title="框选标注">框选</button>
+    </div>
+
+    <div class="map-popover" id="phasePanel">
+      <div class="field">
+        <label>时相 A / B</label>
+        <div class="row">
+          <select id="phaseA"></select>
+          <select id="phaseB"></select>
+        </div>
+        <div class="hint">时相透明度 <span id="opacityText">100%</span></div>
+        <input id="opacity" type="range" min="0" max="100" value="100" />
+        <div class="hint">影像透明度 <span id="imageOpacityText">100%</span></div>
+        <input id="imageOpacity" type="range" min="0" max="100" value="100" />
+        <label class="hint"><input id="imageOn" type="checkbox" checked /> 显示抓图影像</label>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="/vendor/ol/dist/ol.js"></script>
+<script>
+(function () {
+'use strict';
+
+const logEl = document.getElementById('log');
+function log(msg) {
+  logEl.textContent += '\n[' + new Date().toLocaleTimeString() + '] ' + msg;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setHead(text) { document.getElementById('headMeta').textContent = text; }
+function round1(value) { return Math.round(value * 10) / 10; }
+
+// 固定类别（与 SamSeg 默认 7 类一致）
+const LABELS = [
+  { id: 0, name: 'background', color: [0, 0, 0] },
+  { id: 1, name: 'building', color: [230, 25, 75] },
+  { id: 2, name: 'road', color: [245, 130, 48] },
+  { id: 3, name: 'water', color: [0, 130, 200] },
+  { id: 4, name: 'bareland', color: [170, 110, 40] },
+  { id: 5, name: 'vegetation', color: [60, 180, 75] },
+  { id: 6, name: 'farmland', color: [0, 128, 0] },
+];
+
+// shapes 与 X-AnyLabeling 同构：points 为图像像素坐标，不重复闭合首点
+const state = {
+  imagePath: '',
+  width: 0,
+  height: 0,
+  bounds: null,       // 影像真实地理范围；无 CRS 时为 null
+  shapes: [],
+  selectedId: '',
+  selectedVertex: null,
+  selectedIds: [],     // 框选多选
+  mode: 'browse',      // browse | draw | edit | select
+  draft: null,
+  phases: [],          // Wayback 版本
+  phaseA: '',
+  phaseB: '',
+  swipe: false,
+  opacity: 1,
+};
+
+function findShape(id) { return state.shapes.find((s) => s.id === id); }
+function labelOf(id) { return LABELS.find((l) => l.id === id) || LABELS[1]; }
+function labelColor(id) { return labelOf(id).color; }
+function newId() { return 's' + Date.now().toString(36) + Math.floor(Math.random() * 90 + 10); }
+
+function polygonArea(points) {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(sum) / 2;
+}
+
+function polygonBBox(points) {
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function distToSegment(px, py, ax, ay, bx, by) {
+  const abx = bx - ax, aby = by - ay;
+  const len2 = abx * abx + aby * aby || 1;
+  let t = ((px - ax) * abx + (py - ay) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { dist: Math.hypot(px - (ax + abx * t), py - (ay + aby * t)), x: ax + abx * t, y: ay + aby * t };
+}
+
+function pointInPolygon(px, py, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (((yi > py) !== (yj > py))
+      && (px < ((xj - xi) * (py - yi)) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// ==================== 地图与图层 ====================
+const { Map, View, Feature } = ol;
+const { Tile: TileLayer, Vector: VectorLayer, Image: ImageLayer } = ol.layer;
+const { Vector: VectorSource, ImageStatic } = ol.source;
+const { fromLonLat, toLonLat } = ol.proj;
+const { Style, Fill, Stroke, Circle: CircleStyle } = ol.style;
+const { Modify } = ol.interaction;
+
+const shapeSource = new VectorSource();
+const vertexSource = new VectorSource();
+const draftSource = new VectorSource();
+
+const shapeLayer = new VectorLayer({
+  source: shapeSource,
+  style: (feature) => {
+    const rgb = labelColor(feature.get('labelId'));
+    const shapeId = feature.get('shapeId');
+    const selected = shapeId === state.selectedId || state.selectedIds.includes(shapeId);
+    return new Style({
+      fill: new Fill({ color: 'rgba(' + rgb.join(',') + ',' + (selected ? 0.3 : 0.18) + ')' }),
+      stroke: new Stroke({
+        color: 'rgb(' + rgb.join(',') + ')',
+        width: selected ? 2.5 : 1.5,
+      }),
+    });
+  },
+});
+
+const vertexLayer = new VectorLayer({
+  source: vertexSource,
+  zIndex: 30,
+  style: new Style({
+    image: new CircleStyle({
+      radius: 5,
+      fill: new Fill({ color: 'rgba(255,255,255,0.95)' }),
+      stroke: new Stroke({ color: '#4b5fd6', width: 2 }),
+    }),
+  }),
+});
+
+const draftLayer = new VectorLayer({
+  source: draftSource,
+  zIndex: 35,
+  style: new Style({
+    fill: new Fill({ color: 'rgba(75,95,214,0.10)' }),
+    stroke: new Stroke({ color: '#4b5fd6', width: 1.5 }),
+    image: new CircleStyle({ radius: 4, fill: new Fill({ color: '#4b5fd6' }) }),
+  }),
+});
+
+let imageLayer = null;
+
+const map = new Map({
+  target: 'map',
+  layers: [
+    new TileLayer({
+      source: new ol.source.XYZ({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attributions: 'Esri World Imagery',
+      }),
+    }),
+    shapeLayer,
+    vertexLayer,
+    draftLayer,
+  ],
+  view: new View({ center: fromLonLat([104.066, 30.66]), zoom: 12 }),
+});
+
+// 标注时双击用于闭合/删点，移除默认双击缩放
+map.getInteractions().getArray().slice().forEach((interaction) => {
+  if (interaction instanceof ol.interaction.DoubleClickZoom) map.removeInteraction(interaction);
+});
+
+// ==================== 多时相（Esri Wayback）与卷帘 ====================
+const WAYBACK_HOSTS = [
+  'https://wayback-a.maptiles.arcgis.com',
+  'https://wayback-b.maptiles.arcgis.com',
+  'https://wayback.maptiles.arcgis.com',
+];
+const WAYBACK_TILE = '/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile';
+const WAYBACK_FALLBACK = [
+  { date: '2026-10-29', m: '43291' }, { date: '2025-12-18', m: '13192' },
+  { date: '2024-12-12', m: '16453' }, { date: '2023-12-07', m: '56102' },
+  { date: '2022-12-14', m: '45134' }, { date: '2021-12-21', m: '26120' },
+  { date: '2020-12-16', m: '29260' }, { date: '2019-12-12', m: '4756' },
+  { date: '2018-12-14', m: '23448' }, { date: '2017-11-16', m: '25521' },
+  { date: '2016-12-20', m: '18966' }, { date: '2015-12-16', m: '28163' },
+  { date: '2014-12-30', m: '5844' },
+];
+let waybackHost = WAYBACK_HOSTS[0];
+
+function waybackLayer(release) {
+  if (!release) return null;
+  const layer = new TileLayer({
+    source: new ol.source.XYZ({
+      url: waybackHost + WAYBACK_TILE + '/' + release.m + '/{z}/{y}/{x}',
+      maxZoom: 19,
+      attributions: 'Esri World Imagery Wayback',
+    }),
+    opacity: state.opacity,
+  });
+  layer.set('wayback', true);
+  return layer;
+}
+
+let phaseLayerA = null;
+let phaseLayerB = null;
+
+async function loadWayback() {
+  const cacheKey = 'sample-ui:wayback';
+  let releases = null;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && Date.now() - cached.at < 6 * 3600 * 1000) releases = cached.data;
+  } catch (error) { releases = null; }
+
+  if (!releases) {
+    for (const host of WAYBACK_HOSTS) {
+      try {
+        const response = await fetch(host + '/arcgis/rest/services/World_Imagery/MapServer?f=json',
+          { cache: 'no-store' });
+        if (!response.ok) continue;
+        const payload = await response.json();
+        const items = (payload.Selection || []).map((item) => {
+          const date = (/(\d{4}-\d{2}-\d{2})/.exec(item.Name || '') || [])[1];
+          return date && item.M ? { date, m: String(item.M) } : null;
+        }).filter(Boolean).sort((a, b) => b.date.localeCompare(a.date));
+        if (items.length) {
+          releases = items;
+          waybackHost = host;
+          localStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), data: items }));
+          break;
+        }
+      } catch (error) { /* 试下一个域名 */ }
+    }
+  }
+  if (!releases || !releases.length) releases = WAYBACK_FALLBACK;
+
+  // 每年取最新一版
+  const seen = new Set();
+  state.phases = releases.filter((item) => {
+    const year = item.date.slice(0, 4);
+    if (seen.has(year)) return false;
+    seen.add(year);
+    return true;
+  });
+  fillPhaseSelects();
+}
+
+function fillPhaseSelects() {
+  const options = state.phases.map((item) => '<option value="' + item.m + '">' + item.date + '</option>').join('');
+  document.getElementById('phaseA').innerHTML = options;
+  document.getElementById('phaseB').innerHTML = options;
+  const list = state.phases;
+  state.phaseA = list[Math.min(1, list.length - 1)].m;
+  state.phaseB = list[0].m;
+  document.getElementById('phaseA').value = state.phaseA;
+  document.getElementById('phaseB').value = state.phaseB;
+  applyPhases();
+}
+
+function applyPhases() {
+  const a = state.phases.find((item) => item.m === state.phaseA);
+  const b = state.phases.find((item) => item.m === state.phaseB);
+  if (phaseLayerA) map.removeLayer(phaseLayerA);
+  if (phaseLayerB) map.removeLayer(phaseLayerB);
+  phaseLayerA = waybackLayer(a);
+  phaseLayerB = waybackLayer(b);
+  // 时相图层压在抓图影像之下、底图之上
+  const index = 1;
+  if (phaseLayerA) map.getLayers().insertAt(index, phaseLayerA);
+  if (phaseLayerB) map.getLayers().insertAt(index + 1, phaseLayerB);
+  attachSwipeClip(phaseLayerB);
+  applyOpacity();
+  map.render();
+}
+
+function applyOpacity() {
+  state.opacity = Number(document.getElementById('opacity').value) / 100;
+  document.getElementById('opacityText').textContent = Math.round(state.opacity * 100) + '%';
+  [phaseLayerA, phaseLayerB].forEach((layer) => { if (layer) layer.setOpacity(state.opacity); });
+}
+
+// 卷帘：只在 B 时相图层上做裁剪
+let swipePixel = null;
+function attachSwipeClip(layer) {
+  if (!layer) return;
+  layer.on('prerender', (event) => {
+    if (!state.swipe) return;
+    const size = map.getSize() || [1000, 800];
+    const x = swipePixel == null ? size[0] / 2 : swipePixel;
+    event.context.save();
+    event.context.beginPath();
+    event.context.rect(x, 0, size[0] - x, size[1]);
+    event.context.clip();
+  });
+  layer.on('postrender', (event) => {
+    if (state.swipe) event.context.restore();
+  });
+}
+
+const vertexModify = new Modify({ source: vertexSource, pixelTolerance: 8, insertVertexCondition: () => false });
+map.addInteraction(vertexModify);
+vertexModify.setActive(false);
+vertexModify.on('modifyend', (event) => {
+  event.features.forEach((feature) => {
+    const shape = findShape(feature.get('shapeId'));
+    const index = feature.get('vertexIndex');
+    if (!shape || index == null) return;
+    const [lon, lat] = toLonLat(feature.getGeometry().getCoordinates());
+    const [px, py] = lonLatToPixel(lon, lat);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+    shape.points[index] = [round1(px), round1(py)];
+    shape.edited = true;
+    rebuildShapes();
+    log('移动顶点：' + shape.label + ' #' + index);
+  });
+});
+
+// ==================== 坐标换算（影像 pixel ↔ 经纬度） ====================
+function pixelToLonLat(x, y) {
+  const [minx, miny, maxx, maxy] = state.bounds;
+  return [
+    minx + (x / state.width) * (maxx - minx),
+    maxy - (y / state.height) * (maxy - miny),
+  ];
+}
+
+function lonLatToPixel(lon, lat) {
+  const [minx, miny, maxx, maxy] = state.bounds;
+  return [
+    ((lon - minx) / (maxx - minx)) * state.width,
+    ((maxy - lat) / (maxy - miny)) * state.height,
+  ];
+}
+
+function pixelToMap(x, y) {
+  const [lon, lat] = pixelToLonLat(x, y);
+  return fromLonLat([lon, lat]);
+}
+
+function mapToPixel(coordinate) {
+  const [lon, lat] = toLonLat(coordinate);
+  return lonLatToPixel(lon, lat);
+}
+
+// ==================== 渲染 ====================
+function ringOf(points) {
+  const ring = points.map(([x, y]) => pixelToMap(x, y));
+  if (ring.length) ring.push(ring[0]);
+  return ring;
+}
+
+function rebuildShapes() {
+  shapeSource.clear();
+  state.shapes.forEach((shape) => {
+    if (shape.points.length < 3) return;
+    shapeSource.addFeature(new Feature({
+      geometry: new ol.geom.Polygon([ringOf(shape.points)]),
+      shapeId: shape.id,
+      labelId: shape.labelId,
+    }));
+  });
+}
+
+function rebuildVertices() {
+  vertexSource.clear();
+  // 编辑模式的单选形状 + 框选出的多选形状都显示顶点
+  const targets = [];
+  const single = findShape(state.selectedId);
+  if (state.mode === 'edit' && single) targets.push(single);
+  state.selectedIds.forEach((id) => {
+    const shape = findShape(id);
+    if (shape && !targets.includes(shape)) targets.push(shape);
+  });
+  targets.forEach((shape) => {
+    shape.points.forEach(([x, y], index) => {
+      vertexSource.addFeature(new Feature({
+        geometry: new ol.geom.Point(pixelToMap(x, y)),
+        shapeId: shape.id,
+        vertexIndex: index,
+      }));
+    });
+  });
+}
+
+function rebuildDraft() {
+  draftSource.clear();
+  if (!state.draft || !state.draft.points.length) return;
+  const points = state.draft.points.slice();
+  const preview = state.draft.cursor ? points.concat([state.draft.cursor]) : points;
+  const ring = preview.map(([x, y]) => pixelToMap(x, y));
+  if (ring.length >= 3) {
+    draftSource.addFeature(new Feature({ geometry: new ol.geom.Polygon([ring.concat([ring[0]])]) }));
+  } else if (ring.length === 2) {
+    draftSource.addFeature(new Feature({ geometry: new ol.geom.LineString(ring) }));
+  }
+  points.forEach(([x, y]) => {
+    draftSource.addFeature(new Feature({ geometry: new ol.geom.Point(pixelToMap(x, y)) }));
+  });
+}
+
+function renderList() {
+  const list = document.getElementById('instList');
+  document.getElementById('instCount').textContent = state.shapes.length;
+  list.innerHTML = '';
+  state.shapes.forEach((shape) => {
+    const item = document.createElement('div');
+    const selected = shape.id === state.selectedId || state.selectedIds.includes(shape.id);
+    item.className = 'inst' + (selected ? ' sel' : '');
+    item.onclick = () => selectShape(shape.id);
+
+    const top = document.createElement('div');
+    top.className = 'top';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = 'rgb(' + labelColor(shape.labelId).join(',') + ')';
+    const name = document.createElement('span');
+    name.textContent = shape.label;
+    const area = document.createElement('span');
+    area.className = 'score';
+    area.textContent = Math.round(polygonArea(shape.points)) + ' px';
+    top.append(swatch, name, area);
+
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = shape.id + ' · 顶点 ' + shape.points.length;
+
+    const ops = document.createElement('div');
+    ops.className = 'ops';
+    const select = document.createElement('select');
+    LABELS.slice(1).forEach((label) => {
+      const option = document.createElement('option');
+      option.value = String(label.id);
+      option.textContent = label.name;
+      if (label.id === shape.labelId) option.selected = true;
+      select.appendChild(option);
+    });
+    select.onclick = (event) => event.stopPropagation();
+    select.onchange = (event) => {
+      shape.labelId = Number(event.target.value);
+      shape.label = labelOf(shape.labelId).name;
+      rebuildShapes();
+      renderList();
+      log('改类别：' + shape.id + ' → ' + shape.label);
+    };
+    const del = document.createElement('button');
+    del.textContent = '删除';
+    del.onclick = (event) => { event.stopPropagation(); deleteShape(shape.id); };
+    ops.append(select, del);
+
+    item.append(top, sub, ops);
+    list.appendChild(item);
+  });
+  updateButtons();
+}
+
+function selectShape(id) {
+  state.selectedId = id || '';
+  state.selectedIds = [];
+  state.selectedVertex = null;
+  rebuildShapes();
+  rebuildVertices();
+  renderList();
+}
+
+function deleteShape(id) {
+  state.shapes = state.shapes.filter((shape) => shape.id !== id);
+  if (state.selectedId === id) { state.selectedId = ''; state.selectedVertex = null; }
+  rebuildShapes();
+  rebuildVertices();
+  renderList();
+  log('删除形状：' + id);
+}
+
+function updateButtons() {
+  const ready = Boolean(state.imagePath && state.bounds);
+  document.getElementById('btnDraw').disabled = !ready;
+  document.getElementById('btnEdit').disabled = !ready;
+  document.getElementById('btnSelect').disabled = !ready;
+  document.getElementById('btnSave').disabled = !ready;
+  const saved = Boolean(state.savedAt);
+  document.getElementById('linkCoco').classList.toggle('disabled', !saved);
+  document.getElementById('linkShp').classList.toggle('disabled', !saved);
+}
+
+// ==================== 模式与交互 ====================
+const VERTEX_TOL = 8;
+const EDGE_TOL = 8;
+
+function setMode(mode) {
+  state.mode = mode;
+  state.draft = null;
+  state.selectedVertex = null;
+  rebuildDraft();
+  vertexModify.setActive(mode === 'edit');
+  selectBox.setActive(mode === 'select');
+  rebuildVertices();
+  if (mode === 'draw') log('画多边形：左键落点；F2/Enter 闭合；Backspace 撤销；Esc 取消');
+  else if (mode === 'edit') log('编辑顶点：拖动；点边加点；Shift 点顶点或 F2 删点；Delete 删形状');
+  else if (mode === 'select') log('框选标注：拖框选择范围内的标注，Delete 批量删除');
+  else log('浏览模式');
+  syncToolbar();
+}
+
+function hitVertex(pixel) {
+  const shape = findShape(state.selectedId);
+  if (!shape) return null;
+  let best = null;
+  shape.points.forEach(([x, y], index) => {
+    const screen = map.getPixelFromCoordinate(pixelToMap(x, y));
+    const dist = Math.hypot(screen[0] - pixel[0], screen[1] - pixel[1]);
+    if (dist <= VERTEX_TOL && (!best || dist < best.dist)) best = { index, dist };
+  });
+  return best;
+}
+
+function hitEdge(pixel, shape) {
+  if (!shape) return null;
+  const [cx, cy] = mapToPixel(map.getCoordinateFromPixel(pixel));
+  const scale = state.width / (map.getSize()[0] || state.width);
+  let best = null;
+  for (let i = 0; i < shape.points.length; i += 1) {
+    const [ax, ay] = shape.points[i];
+    const [bx, by] = shape.points[(i + 1) % shape.points.length];
+    const info = distToSegment(cx, cy, ax, ay, bx, by);
+    if (info.dist <= EDGE_TOL * scale && (!best || info.dist < best.dist)) {
+      best = { index: i, dist: info.dist, x: info.x, y: info.y };
+    }
+  }
+  return best;
+}
+
+function hitShape(pixel) {
+  const [cx, cy] = mapToPixel(map.getCoordinateFromPixel(pixel));
+  for (let i = state.shapes.length - 1; i >= 0; i -= 1) {
+    if (pointInPolygon(cx, cy, state.shapes[i].points)) return state.shapes[i];
+  }
+  return null;
+}
+
+map.on('pointermove', (event) => {
+  if (state.mode !== 'draw' || !state.draft) return;
+  state.draft.cursor = mapToPixel(event.coordinate);
+  rebuildDraft();
+});
+
+let lastClick = null;
+
+map.on('click', (event) => {
+  lastClick = { pixel: event.pixel.slice(), time: Date.now() };
+  if (!state.imagePath) return;
+  if (state.mode === 'draw') { drawClick(event); return; }
+  if (state.mode === 'edit') { editClick(event); return; }
+  const shape = hitShape(event.pixel);
+  selectShape(shape ? shape.id : '');
+});
+
+// 框选标注：拖框选中范围内形状
+const selectBox = new ol.interaction.DragBox({
+  condition: ol.events.condition.always,
+  style: new Style({
+    stroke: new Stroke({ color: '#1a1a18', width: 1.5, lineDash: [4, 3] }),
+    fill: new Fill({ color: 'rgba(26,26,24,0.06)' }),
+  }),
+});
+map.addInteraction(selectBox);
+selectBox.setActive(false);
+selectBox.on('boxend', () => {
+  const extent = selectBox.getGeometry().getExtent();
+  const [x0, y0] = mapToPixel([extent[0], extent[3]]);
+  const [x1, y1] = mapToPixel([extent[2], extent[1]]);
+  const rect = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
+  const picked = state.shapes.filter((shape) => shapeInRect(shape, rect));
+  state.selectedIds = picked.map((shape) => shape.id);
+  state.selectedId = picked.length === 1 ? picked[0].id : '';
+  state.selectedVertex = null;
+  rebuildShapes();
+  rebuildVertices();
+  renderList();
+  log('框选到 ' + picked.length + ' 个标注（Delete 批量删除）');
+});
+
+// 形状与像素矩形相交：任一顶点在框内，或框角在多边形内
+function shapeInRect(shape, rect) {
+  const [rx0, ry0, rx1, ry1] = rect;
+  if (shape.points.some(([x, y]) => x >= rx0 && x <= rx1 && y >= ry0 && y <= ry1)) return true;
+  return [[rx0, ry0], [rx1, ry0], [rx1, ry1], [rx0, ry1]]
+    .some(([x, y]) => pointInPolygon(x, y, shape.points));
+}
+
+function drawClick(event) {
+  const [x, y] = mapToPixel(event.coordinate);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) { log('坐标无效'); return; }
+  if (!state.draft) {
+    state.draft = { points: [[round1(x), round1(y)]], cursor: null };
+    rebuildDraft();
+    return;
+  }
+  const first = state.draft.points[0];
+  const firstScreen = map.getPixelFromCoordinate(pixelToMap(first[0], first[1]));
+  if (state.draft.points.length >= 3
+      && Math.hypot(firstScreen[0] - event.pixel[0], firstScreen[1] - event.pixel[1]) <= VERTEX_TOL) {
+    finishDraft();
+    return;
+  }
+  state.draft.points.push([round1(x), round1(y)]);
+  rebuildDraft();
+}
+
+function finishDraft() {
+  const draft = state.draft;
+  state.draft = null;
+  rebuildDraft();
+  if (!draft || draft.points.length < 3) { log('至少 3 个点才能闭合'); return; }
+  const shape = {
+    id: newId(),
+    labelId: 1,
+    label: labelOf(1).name,
+    points: draft.points.slice(),
+    score: null,
+    source: 'manual',
+    edited: true,
+  };
+  state.shapes.push(shape);
+  selectShape(shape.id);
+  log('已闭合：' + shape.id + '（' + shape.points.length + ' 点）');
+}
+
+function editClick(event) {
+  const vertex = hitVertex(event.pixel);
+  if (vertex) {
+    const shape = findShape(state.selectedId);
+    if (event.originalEvent.shiftKey) {
+      if (shape.points.length > 3) {
+        shape.points.splice(vertex.index, 1);
+        shape.edited = true;
+        state.selectedVertex = null;
+        rebuildShapes(); rebuildVertices(); renderList();
+        log('删除顶点 #' + vertex.index);
+      } else {
+        log('多边形至少保留 3 个顶点');
+      }
+      return;
+    }
+    state.selectedVertex = { shapeId: shape.id, index: vertex.index };
+    log('选中顶点 #' + vertex.index + '（拖动移动；Shift 点或双击删除）');
+    return;
+  }
+  const shape = findShape(state.selectedId);
+  const edge = shape ? hitEdge(event.pixel, shape) : null;
+  if (edge) {
+    shape.points.splice(edge.index + 1, 0, [round1(edge.x), round1(edge.y)]);
+    shape.edited = true;
+    state.selectedVertex = { shapeId: shape.id, index: edge.index + 1 };
+    rebuildShapes(); rebuildVertices(); renderList();
+    log('插入顶点 → 共 ' + shape.points.length + ' 个');
+    return;
+  }
+  const hit = hitShape(event.pixel);
+  selectShape(hit ? hit.id : '');
+}
+
+window.addEventListener('keydown', (event) => {
+  const key = event.key;
+  if (key === 'F2') {
+    event.preventDefault();
+    if (state.mode === 'draw' && state.draft) { finishDraft(); return; }
+    if (state.mode === 'edit' && state.selectedVertex) {
+      const shape = findShape(state.selectedVertex.shapeId);
+      if (shape && shape.points.length > 3) {
+        shape.points.splice(state.selectedVertex.index, 1);
+        shape.edited = true;
+        state.selectedVertex = null;
+        rebuildShapes(); rebuildVertices(); renderList();
+        log('F2 删除顶点');
+      } else if (shape) {
+        log('多边形至少保留 3 个顶点');
+      }
+      return;
+    }
+    if (state.mode === 'draw') finishDraft();
+    return;
+  }
+  if (state.mode === 'draw' && state.draft) {
+    if (key === 'Backspace') {
+      event.preventDefault();
+      state.draft.points.pop();
+      if (!state.draft.points.length) state.draft = null;
+      rebuildDraft();
+      return;
+    }
+    if (key === 'Enter') { event.preventDefault(); finishDraft(); return; }
+    if (key === 'Escape') { event.preventDefault(); state.draft = null; rebuildDraft(); log('已取消绘制'); return; }
+  }
+  if (key === 'Escape') { setMode('browse'); return; }
+  if (key === 'Delete' || key === 'Backspace') {
+    if (state.mode === 'edit' && state.selectedVertex) {
+      event.preventDefault();
+      const shape = findShape(state.selectedVertex.shapeId);
+      if (shape && shape.points.length > 3) {
+        shape.points.splice(state.selectedVertex.index, 1);
+        shape.edited = true;
+        state.selectedVertex = null;
+        rebuildShapes(); rebuildVertices(); renderList();
+        log('删除选中顶点');
+      } else if (shape) {
+        log('多边形至少保留 3 个顶点');
+      }
+      return;
+    }
+    if (state.selectedIds.length) {
+      event.preventDefault();
+      const ids = state.selectedIds.slice();
+      ids.forEach((id) => { state.shapes = state.shapes.filter((shape) => shape.id !== id); });
+      state.selectedIds = [];
+      state.selectedId = '';
+      state.selectedVertex = null;
+      rebuildShapes(); rebuildVertices(); renderList();
+      log('批量删除 ' + ids.length + ' 个标注');
+      return;
+    }
+    if (state.selectedId) { event.preventDefault(); deleteShape(state.selectedId); }
+  }
+});
+
+document.getElementById('btnDraw').onclick = () => setMode(state.mode === 'draw' ? 'browse' : 'draw');
+document.getElementById('btnEdit').onclick = () => setMode(state.mode === 'edit' ? 'browse' : 'edit');
+document.getElementById('btnSelect').onclick = () => setMode(state.mode === 'select' ? 'browse' : 'select');
+
+// 工具条按钮状态
+function syncToolbar() {
+  document.getElementById('btnDraw').classList.toggle('active', state.mode === 'draw');
+  document.getElementById('btnEdit').classList.toggle('active', state.mode === 'edit');
+  document.getElementById('btnSelect').classList.toggle('active', state.mode === 'select');
+  document.getElementById('btnSwipe').classList.toggle('active', state.swipe);
+}
+
+document.getElementById('btnLayers').onclick = () => {
+  const side = document.getElementById('side');
+  const hidden = side.style.display === 'none';
+  side.style.display = hidden ? 'flex' : 'none';
+  document.getElementById('btnLayers').classList.toggle('active', !hidden);
+  setTimeout(() => map.updateSize(), 60);
+};
+
+document.getElementById('btnSwipe').onclick = () => {
+  state.swipe = !state.swipe;
+  placeDivider();
+  map.render();
+  syncToolbar();
+  log(state.swipe ? '卷帘已开启：拖动分隔线对比两个时相' : '卷帘已关闭');
+};
+
+document.getElementById('btnPhase').onclick = () => {
+  const panel = document.getElementById('phasePanel');
+  const open = panel.classList.toggle('open');
+  document.getElementById('btnPhase').classList.toggle('active', open);
+};
+
+// ==================== 保存 / 下载 ====================
+function buildAnnotations() {
+  const hasGeo = Boolean(state.bounds);
+  return {
+    version: 1,
+    image: {
+      path: state.imagePath,
+      width: state.width,
+      height: state.height,
+      bounds: state.bounds,
+      crs: hasGeo ? 'EPSG:4326' : null,
+    },
+    classes: LABELS.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+    instances: state.shapes.map((shape) => {
+      const bbox = polygonBBox(shape.points).map(round1);
+      return {
+        id: shape.id,
+        label: shape.label,
+        class_id: shape.labelId,
+        class_name: shape.label,
+        score: shape.score,
+        source: shape.source,
+        shape_type: 'polygon',
+        // 像素坐标（编辑用）
+        points: shape.points.map(([x, y]) => [round1(x), round1(y)]),
+        // 经纬度坐标（标注与 SHP 用）
+        coordinates: hasGeo
+          ? shape.points.map(([x, y]) => pixelToLonLat(x, y).map((v) => Math.round(v * 1e8) / 1e8))
+          : null,
+        bbox_px: bbox,
+        area_px: Math.round(polygonArea(shape.points)),
+        edited: Boolean(shape.edited),
+      };
+    }),
+  };
+}
+
+document.getElementById('btnSave').onclick = async () => {
+  if (!state.imagePath) { log('影像未就绪'); return; }
+  const taskDir = document.getElementById('taskDir').value.trim() || 'task_demo';
+  const response = await fetch('/api/annotations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_dir: taskDir, annotations: buildAnnotations() }),
+  });
+  const data = await response.json();
+  if (data.status !== 'success') { log('保存失败：' + (data.msg || '未知错误')); return; }
+  state.savedAt = Date.now();
+  const stamp = '?task_dir=' + encodeURIComponent(taskDir) + '&t=' + state.savedAt;
+  document.getElementById('linkCoco').href = '/api/download/coco' + stamp;
+  document.getElementById('linkShp').href = '/api/download/shp' + stamp;
+  updateButtons();
+  log('已保存 ' + data.instance_count + ' 个形状 → ' + data.path);
+};
+
+// ==================== 卷帘分隔线与控件 ====================
+const divider = document.createElement('div');
+divider.className = 'swipe-divider';
+document.getElementById('map').appendChild(divider);
+
+function placeDivider() {
+  const size = map.getSize() || [1000, 800];
+  if (swipePixel == null) swipePixel = size[0] / 2;
+  divider.style.left = swipePixel + 'px';
+  divider.style.display = state.swipe ? 'block' : 'none';
+}
+
+let dividerDragging = false;
+divider.addEventListener('pointerdown', (event) => {
+  dividerDragging = true;
+  divider.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+divider.addEventListener('pointermove', (event) => {
+  if (!dividerDragging) return;
+  const rect = document.getElementById('map').getBoundingClientRect();
+  const size = map.getSize() || [1000, 800];
+  swipePixel = Math.max(0, Math.min(size[0], event.clientX - rect.left));
+  placeDivider();
+  map.render();
+});
+divider.addEventListener('pointerup', (event) => {
+  dividerDragging = false;
+  try { divider.releasePointerCapture(event.pointerId); } catch (error) { /* ignore */ }
+});
+
+function applyImageOpacity() {
+  const value = Number(document.getElementById('imageOpacity').value) / 100;
+  document.getElementById('imageOpacityText').textContent = Math.round(value * 100) + '%';
+  if (imageLayer) imageLayer.setOpacity(value);
+}
+
+document.getElementById('opacity').addEventListener('input', () => {
+  applyOpacity();
+  map.render();
+});
+document.getElementById('imageOpacity').addEventListener('input', applyImageOpacity);
+
+document.getElementById('imageOn').addEventListener('change', (event) => {
+  if (imageLayer) imageLayer.setVisible(event.target.checked);
+  map.render();
+});
+
+document.getElementById('phaseA').addEventListener('change', (event) => {
+  state.phaseA = event.target.value;
+  applyPhases();
+});
+document.getElementById('phaseB').addEventListener('change', (event) => {
+  state.phaseB = event.target.value;
+  applyPhases();
+});
+
+// ==================== 初始化：载入默认影像 ====================
+(async function initScene() {
+  try {
+    const response = await fetch('/api/scene');
+    const data = await response.json();
+    if (data.status !== 'success') {
+      document.getElementById('imageInfo').textContent = data.msg || '影像加载失败';
+      log('影像加载失败：' + (data.msg || ''));
+      return;
+    }
+    state.imagePath = data.image_path;
+    state.width = data.width;
+    state.height = data.height;
+    state.bounds = data.image_bounds;
+    document.getElementById('imageInfo').textContent =
+      data.file_name + ' · ' + data.width + '×' + data.height
+      + (state.bounds ? ' · ' + state.bounds.map((v) => v.toFixed(4)).join(', ') : ' · 无坐标系');
+    setHead(data.file_name + ' · ' + data.width + '×' + data.height);
+    if (state.bounds) {
+      const extent = ol.proj.transformExtent(state.bounds, 'EPSG:4326', 'EPSG:3857');
+      imageLayer = new ImageLayer({
+        source: new ImageStatic({ url: data.preview_url, imageExtent: extent, projection: 'EPSG:3857' }),
+        opacity: 1,
+      });
+      // 影像压在时相图层之上、矢量之下（时相图层后续插入到索引 1/2）
+      map.getLayers().insertAt(1, imageLayer);
+      applyImageOpacity();
+      map.getView().fit(extent, { padding: [20, 20, 20, 20] });
+    }
+    await loadWayback();
+    placeDivider();
+    updateButtons();
+    log('影像就绪：' + data.file_name);
+  } catch (error) {
+    log('影像加载异常：' + error.message);
+  }
+})();
+
+updateButtons();
+renderList();
+log('就绪：画多边形 → 编辑顶点 → 保存 → 下载 COCO / SHP');
+})();
+</script>
+</body>
+</html>

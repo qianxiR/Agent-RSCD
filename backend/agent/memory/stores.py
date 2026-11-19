@@ -55,16 +55,55 @@ class SummaryMemoryStore:
 
 
 class LongTermMemoryStore:
-    """长期记忆：用户画像 / 教训。"""
+    """长期记忆：用户偏好 / 稳定画像 / 全局教训。"""
 
-    def load(self, user_id: str, category: str = None) -> List[Dict[str, Any]]:
-        return agent_db.load_user_memory(user_id, category=category)
+    def load(
+        self,
+        user_id: str,
+        category: str = None,
+        *,
+        scope: str = None,
+        active_only: bool = True,
+        limit: int = None,
+    ) -> List[Dict[str, Any]]:
+        return agent_db.load_user_memory(
+            user_id,
+            category=category,
+            scope=scope,
+            active_only=active_only,
+            limit=limit,
+        )
 
-    def save(self, user_id: str, key: str, value: str, category: str = "preference") -> bool:
-        return agent_db.save_user_memory(user_id, key, value, category=category)
+    def save(
+        self,
+        user_id: str,
+        key: str,
+        value: str,
+        category: str = "preference",
+        *,
+        scope: str = "user",
+        kind: str = None,
+        confidence: float = 0.7,
+        source: str = "manual",
+        evidence: Dict[str, Any] = None,
+    ) -> bool:
+        return agent_db.save_user_memory(
+            user_id,
+            key,
+            value,
+            category=category,
+            scope=scope,
+            kind=kind,
+            confidence=confidence,
+            source=source,
+            evidence=evidence,
+        )
 
-    def delete(self, user_id: str, key: str) -> bool:
-        return agent_db.delete_user_memory(user_id, key)
+    def delete(self, user_id: str, key: str, *, scope: str = None) -> bool:
+        return agent_db.delete_user_memory(user_id, key, scope=scope)
+
+    def clear(self, user_id: str, *, scope: str = "user") -> int:
+        return agent_db.clear_user_memory(user_id, scope=scope)
 
 
 @dataclass

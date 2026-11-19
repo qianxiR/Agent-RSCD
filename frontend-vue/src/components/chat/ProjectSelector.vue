@@ -104,7 +104,7 @@ async function onChange(pid) {
   box-shadow: 0 0 0 1px var(--border) inset;
 }
 .project-select :deep(.el-select__wrapper.is-focused) {
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  box-shadow: 0 0 0 1px var(--border) inset;
 }
 .project-select-icon {
   color: var(--text-secondary);

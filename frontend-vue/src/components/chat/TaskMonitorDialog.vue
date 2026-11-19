@@ -216,6 +216,7 @@ watch(() => props.visible, (v) => {
 .task-monitor-modal :deep(.el-button:hover) {
   border-color: var(--glass-accent-border);
   color: var(--accent);
+
 }
 .task-monitor-modal :deep(.el-button--danger.is-plain) {
   background: var(--glass-danger-surface);
@@ -265,7 +266,7 @@ watch(() => props.visible, (v) => {
 .log-level-warning { background: color-mix(in srgb, var(--accent-amber) 12%, transparent); }
 .log-level-error { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
 .log-time { color: var(--text-muted); margin-right: 6px; }
-.log-level { font-weight: 600; margin-right: 4px; }
+.log-level { font-weight: var(--fw-strong); margin-right: 4px; }
 .log-level-error .log-level { color: var(--accent-red); }
 .log-level-warning .log-level { color: var(--accent-amber); }
 .log-elapsed { color: var(--text-muted); margin-left: 4px; }

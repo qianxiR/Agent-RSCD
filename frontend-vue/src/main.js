@@ -6,6 +6,7 @@ import './styles/theme.css'
 import './styles/content.css'
 import './styles/overlays.css'
 import '@/shared/styles/shell.css'
+import './styles/design-v2.css'
 import App from './App.vue'
 import router from './router'
 

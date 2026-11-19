@@ -8,7 +8,7 @@
   下次遇到同类问题主动规避 (通过 system_prompt 的长期记忆/用户画像段注入).
 
 ★ 与记忆分层的关系:
-  - 教训写入 user_memory 表 (user_id='global', category='lesson')
+  - 教训写入 user_memory 表 (scope='global', category='lesson')
   - 被 memory_context.build_user_profile_text() 合并到长期记忆文本中
   - 在 system prompt 的「用户画像」段显示, 属于三层记忆中"长期记忆"的组成部分
   - ★ 不是独立的第四层记忆, 而是长期记忆的自动补充机制
@@ -56,7 +56,7 @@ _CORRECTION_KEYWORDS = [
     "我来", "重新生成", "重新执行", "重新调用",
 ]
 
-# 教训记忆的 user_id (全局共享, 所有用户都能读到)
+# 教训记忆的 owner（scope=global，所有用户都能读到）
 GLOBAL_LESSON_USER_ID = "global"
 
 # 教训去重窗口: 同一工具 + 同一错误关键词 1 小时内只记一次 (避免刷库)
@@ -353,7 +353,7 @@ def _summarize_args(args: dict, max_len: int = 150) -> str:
 async def save_lesson_to_memory(correction: Dict[str, Any]) -> bool:
     """
     把一次自纠事件沉淀为全局教训记忆.
-    - 写入 user_memory 表, user_id='global', category='lesson'
+    - 写入 user_memory 表, scope='global', category='lesson'
     - key 用工具名 + 错误特征做哈希, 同类错误去重
     - value: ★ 由 LLM 提炼成五段结构化经验 (现象/根因/正确方法/验证信号/严重度)
     - ★ 无降级: LLM 提炼失败则跳过本次写入, 保证库里只有结构化格式
@@ -388,7 +388,9 @@ async def save_lesson_to_memory(correction: Dict[str, Any]) -> bool:
     if dedup_key in _recent_lessons and now - _recent_lessons[dedup_key] < _DEDUP_TTL_SECONDS:
         logger.debug(f"[SelfCorrection] 教训去重跳过: {dedup_key}")
         return False
-    existing = agent_db.load_user_memory(GLOBAL_LESSON_USER_ID, category="lesson")
+    existing = agent_db.load_user_memory(
+        GLOBAL_LESSON_USER_ID, category="lesson", scope="global"
+    )
     if not choose_strongest_lesson(lesson, [item.get("value") for item in existing]):
         logger.debug(f"[SelfCorrection] 已有证据强度不低于候选: {dedup_key}")
         return False
@@ -399,6 +401,15 @@ async def save_lesson_to_memory(correction: Dict[str, Any]) -> bool:
         key=dedup_key,
         value=value,
         category="lesson",
+        scope="global",
+        kind="repair",
+        confidence=0.9,
+        source="self_correction",
+        evidence={
+            "lesson_id": dedup_key,
+            "evidence_refs": lesson.get("evidence_refs") or [],
+            "verification_signal": lesson.get("verification_signal") or "",
+        },
     )
     if ok:
         logger.info(

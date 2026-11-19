@@ -579,7 +579,7 @@ onBeforeUnmount(() => {
 }
 .welcome-title {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   letter-spacing: 0.2px;
   color: var(--text-primary);
 }
@@ -606,8 +606,8 @@ onBeforeUnmount(() => {
   transition: border-color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out);
 }
 .input-wrapper:focus-within {
-  border-color: #c9d2ff;
-  box-shadow: 0 0 0 3px rgba(77, 107, 254, 0.08);
+  border-color: var(--border);
+  box-shadow: none;
 }
 
 /* Ensure internal focusable elements do not show global focus shadow */
@@ -649,13 +649,13 @@ onBeforeUnmount(() => {
 }
 .input-upload-btn:hover {
   background: var(--bg-hover);
-  color: var(--primary);
+  color: var(--text-primary);
 }
 .send-btn {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--primary);
+  background: #1a1a1a;
   color: #fff;
   border: none;
   display: flex;
@@ -667,7 +667,7 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 .send-btn:hover {
-  background: var(--primary-dark);
+  background: #111110;
 }
 .send-btn:disabled {
   opacity: 0.45;
@@ -738,7 +738,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-elevated);
-  color: var(--text-secondary);
+  color: var(--accent);
+
   font-size: var(--fs-sm);
 }
 .pending-thumb {
@@ -755,8 +756,9 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-secondary);
+
+  background: var(--bg-inset);
   border-radius: var(--r-xs);
   flex-shrink: 0;
 }

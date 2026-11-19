@@ -5,6 +5,8 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import Icon from '@/shared/ui/Icon.vue'
+import BaseButton from '@/shared/ui/BaseButton.vue'
+import BaseDialog from '@/shared/ui/BaseDialog.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -68,15 +70,15 @@ function confirm() {
 </script>
 
 <template>
-  <el-dialog
+  <BaseDialog
     :model-value="modelValue"
     width="440px"
-    top="12vh"
+    align-center
     class="change-dialog"
     :show-close="false"
     :close-on-click-modal="false"
     :close-on-press-escape="false"
-    append-to-body
+    @update:model-value="emit('update:modelValue', $event)"
   >
     <template #header>
       <div class="change-head">
@@ -145,13 +147,13 @@ function confirm() {
 
     <template #footer>
       <div class="change-actions">
-        <button type="button" class="change-ghost" :disabled="loading" @click="cancel">取消</button>
-        <button type="button" class="change-primary" :disabled="loading" @click="confirm">
+        <BaseButton variant="ghost" :px="16" :disabled="loading" @click="cancel">取消</BaseButton>
+        <BaseButton variant="primary" :px="16" :disabled="loading" @click="confirm">
           {{ loading ? '取图中…' : '获取两期影像' }}
-        </button>
+        </BaseButton>
       </div>
     </template>
-  </el-dialog>
+  </BaseDialog>
 </template>
 
 <style scoped>
@@ -159,7 +161,7 @@ function confirm() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
+  height: 34px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
@@ -230,11 +232,12 @@ function confirm() {
   gap: 8px;
   font-size: var(--fs-sm);
   color: var(--accent);
+
 }
 .change-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--accent-soft);
+  border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: change-spin 0.8s linear infinite;
@@ -248,36 +251,6 @@ function confirm() {
   gap: 8px;
   padding: 0 16px 16px;
   background: var(--bg-panel);
-}
-.change-ghost,
-.change-primary {
-  height: 32px;
-  padding: 0 16px;
-  font-size: var(--fs-md);
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-.change-ghost {
-  color: var(--text-secondary);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-}
-.change-ghost:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-.change-primary {
-  color: #fff;
-  background: var(--accent);
-  border: none;
-}
-.change-primary:hover {
-  background: var(--accent-hover);
-}
-.change-ghost:disabled,
-.change-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 .change-dialog :deep(.el-dialog__header) {
   padding: 0;

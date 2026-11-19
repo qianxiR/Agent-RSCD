@@ -34,28 +34,25 @@ logger = logging.getLogger(__name__)
 @tool
 def view_user_memory() -> Dict[str, Any]:
     """
-    查看长期记忆 (跨会话保留, 当前用户私有 + 全局共享的教训/流程/环境事实)。
-    这些记忆主要来自工具失败→自纠成功的自动沉淀 (lesson/workflow/envfact),
-    会注入后续对话的 system prompt, 让 Agent 规避同类错误。
+    查看长期记忆：当前用户 scope=user 的偏好/画像 + scope=global 的已学教训。
 
     入参: 无
-    出参: 记忆条目列表 (key/value/category), 用于向用户展示 AI 学到了什么
-    触发场景: 用户说"你学到了什么"、"查看长期记忆"、"我的教训记忆"
+    出参: 记忆条目列表 (category/key/value/kind/confidence/source)
+    触发场景: 用户说"你学到了什么"、"查看长期记忆"、"我的偏好/教训记忆"
 
-    ★ 记忆策略 (v17): 默认只存"错误案例+解决方案" (lesson/workflow) +
-      环境事实 (envfact); preference/entity/fact 提取已默认关闭。
-    ★ 全局共享: user_id='global' 的记忆 (教训/流程) 所有用户可见,
-      这里一并返回, 不需要单独查询。
+    ★ 长期记忆 v2 只保留三类: preference / profile / lesson。
+    ★ global lesson 所有用户可见；用户清空记忆不会删除全局教训。
     """
     try:
         from backend.agent.memory import agent_db
         from backend.agent.memory.lesson_policy import format_accepted_lesson_for_prompt
         user_id = get_current_user_id()
-        # 合并: 当前用户私有 + 全局共享 (与 build_user_profile_text 注入逻辑一致)
-        own = agent_db.load_user_memory(user_id) or []
-        shared = agent_db.load_user_memory("global") or []
+        own = agent_db.load_user_memory(user_id, scope="user") or []
+        shared = agent_db.load_user_memory("global", scope="global") or []
         memories = []
         for item in own + shared:
+            if item.get("category") not in {"preference", "profile", "lesson"}:
+                continue
             if item.get("category") != "lesson":
                 memories.append(item)
                 continue
@@ -68,42 +65,29 @@ def view_user_memory() -> Dict[str, Any]:
                 "type": "success",
                 "summary": (
                     f"当前用户 ({user_id}) 暂无长期记忆。\n"
-                    f"记忆只在工具失败→自纠成功时自动沉淀 (lesson/workflow), "
-                    f"正常对话不会产生记忆。"
+                    "长期记忆只保留用户偏好、稳定画像和已通过验证的改错教训。"
                 ),
                 "data": {"user_id": user_id, "memories": [], "count": 0},
             }
 
-        # 分类标签 (与 memory.build_user_profile_text 保持一致)
         cat_labels = {
             "lesson": "已学教训",
-            "workflow": "已学流程",
-            "envfact": "环境事实",
             "preference": "偏好",
-            "entity": "常用实体",
-            "fact": "已知事实",
+            "profile": "用户画像",
         }
-        # 显示顺序: 教训/流程/环境事实优先 (高价值)
-        cat_order = ["workflow", "lesson", "envfact", "preference", "entity", "fact"]
+        cat_order = ["lesson", "preference", "profile"]
         lines = [f"📋 长期记忆 (共 {len(memories)} 条, 含全局共享)\n"]
         by_cat: dict = {}
         for m in memories:
-            by_cat.setdefault(m["category"], []).append(m)
+            by_cat.setdefault(m.get("category"), []).append(m)
         for cat in cat_order:
             items = by_cat.pop(cat, None)
             if not items:
                 continue
-            label = cat_labels.get(cat, cat)
-            lines.append(f"【{label}】")
+            lines.append(f"【{cat_labels[cat]}】")
             for it in items:
-                lines.append(f"  • {it['key']}: {it['value']}")
-            lines.append("")
-        # 兜底: 未归类的 category
-        for cat, items in by_cat.items():
-            label = cat_labels.get(cat, cat)
-            lines.append(f"【{label}】")
-            for it in items:
-                lines.append(f"  • {it['key']}: {it['value']}")
+                meta = f"kind={it.get('kind') or '-'}, confidence={float(it.get('confidence') or 0.0):.2f}"
+                lines.append(f"  • {it['key']}: {it['value']}  ({meta})")
             lines.append("")
 
         return {
@@ -163,8 +147,8 @@ def view_conversation_summary() -> Dict[str, Any]:
 @tool
 def clear_user_memory(confirm: bool = False) -> Dict[str, Any]:
     """
-    清空当前用户的全部长期记忆 (跨会话的偏好/实体/事实)。
-    ⚠️ 不可恢复操作。清空后, AI 将忘记所有从历史对话中积累的用户画像。
+    清空当前用户的长期记忆 (scope=user 的偏好/画像)。
+    ⚠️ 不可恢复操作。全局已学教训 (scope=global) 不会被用户清空。
 
     入参:
         - confirm (bool): 必须为 True 才会真正执行, 防止误触发
@@ -181,28 +165,19 @@ def clear_user_memory(confirm: bool = False) -> Dict[str, Any]:
 
         from backend.agent.memory import agent_db
         user_id = get_current_user_id()
-
-        # 先查条数 (用于反馈), 再批量删除
-        memories = agent_db.load_user_memory(user_id)
-        count = len(memories)
-        if count == 0:
+        deleted = agent_db.clear_user_memory(user_id, scope="user")
+        if deleted == 0:
             return {
                 "type": "success",
-                "summary": f"用户 ({user_id}) 本来就没有长期记忆, 无需清空。",
+                "summary": f"用户 ({user_id}) 本来就没有用户级长期记忆, 无需清空。",
                 "data": {"user_id": user_id, "deleted_count": 0},
             }
 
-        # 逐条删除 (复用现有 delete_user_memory, 避免新增 SQL)
-        deleted = 0
-        for m in memories:
-            if agent_db.delete_user_memory(user_id, m["key"]):
-                deleted += 1
-
-        logger.info(f"[Memory] 清空长期记忆: user={user_id}, deleted={deleted}/{count}")
+        logger.info(f"[Memory] 清空长期记忆: user={user_id}, deleted={deleted}")
         return {
             "type": "success",
-            "summary": f"✅ 已清空 {deleted} 条长期记忆。\n"
-                       f"从现在起, 我将以「无记忆」状态与您对话, 重新积累您的偏好。",
+            "summary": f"✅ 已清空 {deleted} 条用户长期记忆。\n"
+                       f"全局已学教训不受影响；后续会重新积累用户偏好与画像。",
             "data": {"user_id": user_id, "deleted_count": deleted},
         }
     except Exception as e:

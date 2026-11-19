@@ -1,12 +1,12 @@
 """
-双路记忆并行验证 (偏好提取 + 错误案例学习)
+双路记忆并行验证 (用户记忆提取 + 错误案例学习)
 ================================================
 目的: 验证 enable_preference_extraction 开关打开后, 对话收尾时
-      "偏好/事实提取" 与 "自纠捕捉器 (错误案例学习)" 两路后台任务并行触发.
+      "preference/profile 提取" 与 "自纠捕捉器 (lesson)" 两路后台任务并行触发.
 
 做法: 连 WebSocket 发一条会触发工具调用的 prompt, 收集全程消息,
       done 后多等 45s 捕获后台回推的 memory_updated 事件:
-        - kind="long_term"  → 偏好/事实提取路 (含 category=preference/fact/summary)
+        - kind="long_term"  → 用户记忆提取路 (category=preference/profile)
         - kind="lesson"     → 错误案例学习路 (category=lesson, source=self_correction)
 
 前置: 后端已在 localhost:8020 运行, DASHSCOPE_API_KEY 已配置.
@@ -141,14 +141,14 @@ def analyze(messages):
             if cat == "lesson" or it.get("source") == "self_correction":
                 lesson_items.append(it)
             else:
-                pref_items.append(it)  # preference / fact / summary / workflow 等
+                pref_items.append(it)  # preference / profile / summary 等
 
     print(f"  对话消息总数      : {len(messages)}")
     print(f"  工具调用          : {len(tool_calls)} 次 {tool_calls if tool_calls else ''}")
     print(f"  done              : {'✓' if has_done else '✗'}")
     print(f"  memory_updated 事件: {len(mem_events)} 个")
     print()
-    print(f"  ① 偏好/事实提取路 (kind=long_term): {len(pref_items)} 项")
+    print(f"  ① 用户记忆提取路 (kind=long_term): {len(pref_items)} 项")
     for it in pref_items:
         print(f"      - [{it.get('category')}] {it.get('key', '')}")
     print()
@@ -215,10 +215,10 @@ async def main():
         m.get("kind") == "lesson" for m in messages if m.get("type") == "memory_updated"
     )
     if ran_pref and ran_lesson:
-        print("\n🎉 两路记忆均触发 (偏好/事实 + 错误案例学习 并行).")
+        print("\n🎉 两路记忆均触发 (preference/profile + lesson 并行).")
         return 0
     elif ran_pref or ran_lesson:
-        print("\n🟡 仅一路触发 (可能本轮对话无自纠素材, 或偏好无可提取内容).")
+        print("\n🟡 仅一路触发 (可能本轮对话无自纠素材, 或无稳定用户记忆可提取).")
         return 0
     else:
         print("\n⚪ 本轮未收到 memory_updated (见上方说明). 不代表失败 — "

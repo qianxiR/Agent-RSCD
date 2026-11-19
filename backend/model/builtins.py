@@ -16,27 +16,27 @@ _REGISTERED = False
 def register_builtin_models(registry: ModelRegistry | None = None) -> None:
     """
     入参: registry 目标注册表，None 用进程默认。
-    方法: 注册 ProC-SAM3 分割/变化检测适配器；重复调用幂等。
+    方法: 注册 SamSeg 分割适配器与 change_qwen 变化检测适配器；重复调用幂等。
     出参: 无。
     """
     global _REGISTERED
     target = registry or get_model_registry()
     if _REGISTERED and registry is None:
         return
-    from backend.model.change_detection.proc_sam3 import ProCSam3ChangeModel
-    from backend.model.segmentation.proc_sam3 import ProCSam3SegmentModel
+    from backend.model.change_detection.change_qwen_runtime import ChangeQwenModel
+    from backend.model.segmentation.sam3_native import Sam3NativeSegmentModel
 
     target.register(
-        ProCSam3SegmentModel,
-        name="proc_sam3",
+        Sam3NativeSegmentModel,
+        name="sam3_native",
         capabilities=["segmentation"],
-        metadata={"engine": "proc_sam3", "domain": "segmentation"},
+        metadata={"engine": "sam3_native", "domain": "segmentation"},
     )
     target.register(
-        ProCSam3ChangeModel,
-        name="proc_sam3_change",
+        ChangeQwenModel,
+        name="change_qwen",
         capabilities=["change_detection"],
-        metadata={"engine": "proc_sam3", "domain": "change_detection"},
+        metadata={"engine": "onnxruntime", "domain": "change_detection"},
     )
     if registry is None:
         _REGISTERED = True

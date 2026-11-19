@@ -211,10 +211,30 @@ export function deleteMcpServer(serverId) {
 
 // ==================== GeoServer 图层管理 ====================
 
+// 列出 GeoServer 全部工作空间名（上传时"选择/新建工作空间"弹窗用，不过滤白名单）
+// 出参: { status, workspaces:[名字...] }
+export function getGeoServerWorkspaces() {
+  return request('/api/v1/geoserver/workspaces')
+}
+
 // 拉取工作空间树（含图层 + 类型）
 // 出参: { status, workspaces: [{workspace, layers_typed:[{name, full_name, type}]}] }
-export function getGeoServerServices() {
-  return request('/api/v1/geoserver/services')
+// qh 系列为外部数据，工作台不展示
+const HIDDEN_WORKSPACE_PREFIXES = ['qh']
+function isHiddenWorkspace(name) {
+  const lower = (name || '').toLowerCase()
+  return HIDDEN_WORKSPACE_PREFIXES.some((prefix) => lower.startsWith(prefix))
+}
+
+export async function getGeoServerServices() {
+  const data = await request('/api/v1/geoserver/services')
+  if (!data?.workspaces) return data
+  const workspaces = data.workspaces.filter((ws) => !isHiddenWorkspace(ws.workspace))
+  const total_layers = workspaces.reduce(
+    (sum, ws) => sum + (ws.layer_count ?? (ws.layers_typed || ws.layers || []).length),
+    0,
+  )
+  return { ...data, workspaces, total_layers }
 }
 
 // 拉取指定图层范围
@@ -257,6 +277,21 @@ export async function uploadSamsegImages(files, conversationId = null) {
   files.forEach((f) => form.append('images', f))
   if (conversationId) form.append('conversation_id', conversationId)
   const res = await fetch('/api/v1/samseg/upload', { method: 'POST', body: form })
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '')
+    throw new Error(`上传失败 (HTTP ${res.status}): ${txt}`)
+  }
+  return res.json()
+}
+
+// 上传 Shapefile 全套组件到服务器（同 stem 同目录落盘，返回 .shp 绝对路径）
+// 入参: files File 数组（.shp 主文件 + .shx/.dbf/.prj 等组件）
+// 方法: FormData multipart 上传到专用端点（samseg/upload 按影像处理，shp 组件集需走此端点）
+// 出参: { status, shp_path, stem, components:[{name, path, size}], warnings:[] }
+export async function uploadShapefile(files) {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  const res = await fetch('/api/v1/files/upload-shapefile', { method: 'POST', body: form })
   if (!res.ok) {
     const txt = await res.text().catch(() => '')
     throw new Error(`上传失败 (HTTP ${res.status}): ${txt}`)

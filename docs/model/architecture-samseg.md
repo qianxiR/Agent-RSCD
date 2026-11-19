@@ -1,107 +1,97 @@
-# SamSeg 遥感分析（ProC-SAM3 / SegEarth-OV3）
+# SamSeg 遥感分析
 
 > 本文是 [architecture.md](../architecture.md) 的子文档。系统总览见总纲。
-> **阶段 38 起**，语义分割默认切换为 **ProC-SAM3**（Prompt-Calibrated SAM3，英文类别 + 英文同义词，`backend/model/ProC_SAM3/`）；旧 SegEarth-OV3 保留 `SAMSEG_ENGINE=legacy` 回退。
-> 阶段 24 的对齐说明仅适用于 legacy 引擎：官方 SegEarth-OV-3（`demo.py` / `segearthov3_segmentor.py` / `segearthov3_change_detector.py`）。
+> **2026-11（阶段 74/75）起**，地物提取（`segment_image`）只走 **SamSeg 本体**（`backend/model/SamSeg/`，SegEarth-OV3 官方流程：单图/512 滑窗 + 双头融合 + `prob_thd`）。阶段 72 引入的原生 SAM3（`backend/model/sam3native/`）已**移交样本制作功能**（`docs/agent/method/sample-data-pipeline.md`），不再参与地物提取，`SAMSEG_INFERENCE_MODE` 开关随之废弃。
 
 ---
 
 ## 10. SamSeg 遥感分析
 
-> **一句话**：ProC-SAM3 以**离线提示池/英文同义词 + SAM3 多提示前向 + PGRF 融合 + 峰值保持聚合**做开放词汇分割；变化检测用两期 ProC 掩膜的实例级对比；结果输出彩色 PNG + 带 CRS 的 GeoTIFF + GeoJSON/Shapefile 图斑 + 类别图注 + 连通域/转移矩阵统计。
+> **一句话**：SamSeg（SegEarth-OV3 官方流程）以**文本 query 双头融合（instance 掩码 × score、semantic 语义头 × presence）**做开放词汇分割，滑窗拼接后按类别 one-hot 聚合、`prob_thd` 压背景；结果输出彩色 PNG + 带 CRS 的 GeoTIFF（默认关）+ GeoJSON/Shapefile 图斑 + 类别图注 + 连通域统计。
 
 **关键文件**：
-- [`backend/model/SamSeg/engine.py`](../../backend/model/SamSeg/engine.py) — **官方引擎**：加载 site-packages `sam3` 的官方模型 + `Sam3Processor(resolution=1008)`，避免被子项目旧版 `sam3/` 遮蔽
-- [`backend/model/SamSeg/official.py`](../../backend/model/SamSeg/official.py) — **官方推理流程**：单图/滑窗、双头融合、presence、类别聚合、`prob_thd`、实例级/语义级变化与交集
-- [`backend/model/SamSeg/runner.py`](../../backend/model/SamSeg/runner.py) — **编排层**：模型缓存、类别映射、上色/统计/图注、GeoTIFF/矢量落盘、业务类型规则判读
+- [`backend/model/SamSeg/runner.py`](../../backend/model/SamSeg/runner.py) — **编排层 + 推理入口**：`run_segment`（SamSeg 唯一口径）/ `run_change_detection`、类别映射、上色/统计/图注、GeoTIFF/矢量落盘、业务类型规则判读
+- [`backend/model/SamSeg/official.py`](../../backend/model/SamSeg/official.py) — SamSeg 官方推理核心：`infer_logits`（单图/滑窗）→ `discrete_pred`（聚合 + `prob_thd`），另有实例级/语义级变化融合
+- [`backend/model/SamSeg/engine.py`](../../backend/model/SamSeg/engine.py) — 解析 site-packages 官方 `sam3` 包并 `build_sam3_image_model` + `Sam3Processor(resolution=1008)`
 - [`backend/model/SamSeg/visualize.py`](../../backend/model/SamSeg/visualize.py) — PNG 上色 + 图注（轻量依赖）
 - [`backend/model/SamSeg/geoio.py`](../../backend/model/SamSeg/geoio.py) — GeoTIFF 掩膜 + GeoJSON/Shapefile 矢量
-- [`backend/model/SamSeg/referring.py`](../../backend/model/SamSeg/referring.py) — 指代表达解析与单实例选择
-- [`backend/model/tools/samseg_tools.py`](../../backend/model/tools/samseg_tools.py) — `segment_image` / `detect_change` / `understand_image`
+- [`backend/model/SamSeg/referring.py`](../../backend/model/SamSeg/referring.py) — 指代表达解析与单实例选择（`Sam3Processor` 路径）
+- [`backend/model/sam3native/`](../../backend/model/sam3native/) — 原生 SAM3 引擎，**已移交样本制作功能**（接地头批量候选 + 交互头点/框精修），地物提取不再引用
+- [`backend/model/sample/`](../../backend/model/sample/) — 样本制作编排（候选生成 / 标注落盘 / 导出），见 [sample-data-pipeline.md](../agent/method/sample-data-pipeline.md)
+- [`backend/agent/tools/samseg_tools.py`](../../backend/agent/tools/samseg_tools.py) — `segment_image` / `detect_change` / `understand_image`
 - [`backend/data/vector_registry.py`](../../backend/data/vector_registry.py) — 矢量产物自动登记 `vector_layer`
 
-> ★ **旧版 `SamSeg/SamSeg/sam3/` 不再参与运行时**：它被改成 336 输入/简化 neck，与官方 `sam3.pt`（1008 输入、`convs.*` 权重）键名和形状不匹配，会导致检测头全空。`engine.py` 会清理本地路径并强制使用 `sam3` conda 环境里已安装的官方包。
+> ★ **旧版 `SamSeg/SamSeg/sam3/` 不参与运行时**：它被改成 336 输入/简化 neck，与官方 `sam3.pt`（1008 输入、`convs.*` 权重）键名和形状不匹配，会导致检测头全空。`engine.py` 会清理本地路径并强制使用 `sam3` conda 环境里已安装的官方包。
+> ★ `SamSeg/SamSeg/infer.py` 只提供调色板（`build_palette`）、形态学后处理（`postprocess`）、实例变化图（`compute_instance_change_map`）等工具函数；推理主链路在 `official.py`。
 
-### 10.1 官方推理流程
-
-> ⚠️ 10.1–10.4 描述的是 **legacy SegEarth-OV3** 引擎（`SAMSEG_ENGINE=legacy`）。默认 `proc_sam3` 见 10.5。
+### 10.1 分割推理流程（默认 official）
 
 ```mermaid
 flowchart LR
-    UPLOAD["前端上传影像"] --> SAVE["agent-files/samseg/send/{conv}/"]
-    SAVE --> AGENT["Agent 调用 segment_image / detect_change"]
-    AGENT --> RUNNER["runner.py<br/>类别映射 + 官方参数"]
-    RUNNER --> ENGINE["engine.py<br/>官方 sam3 + sam3.pt"]
-    ENGINE --> SINGLE["单图推理<br/>image <= 512"]
-    ENGINE --> SLIDE["滑窗推理<br/>crop=512 / stride=512"]
-    SINGLE --> FUSE["逐 query 双头融合<br/>instance × object_score<br/>⊕ semantic<br/>× presence"]
-    SLIDE --> FUSE
-    FUSE --> AGG["one-hot 同类取 max<br/>argmax + prob_thd 回背景"]
-    AGG --> PROD["PNG / GeoTIFF / GeoJSON / SHP<br/>统计 / 图注"]
+    UPLOAD["前端上传/拖框取图"] --> AGENT["Agent 调用 segment_image"]
+    AGENT --> RUNNER["runner.run_segment<br/>类别映射 + 产物落盘"]
+    RUNNER --> OFF["official.infer_logits<br/>单图 / 512 滑窗"]
+    OFF --> DUAL["双头融合<br/>instance×score + semantic×presence"]
+    DUAL --> AGG["official.discrete_pred<br/>同义词 one-hot 聚合 → argmax → 阈值（ratio/abs）"]
+    AGG --> SEG["类别图 seg (H,W) int64"]
+    SEG --> PROD["PNG / GeoTIFF / GeoJSON / SHP<br/>统计 / 图注"]
 ```
 
-**官方默认参数**（[`config.py`](../../backend/config.py)）：
+- 模型：官方 `build_sam3_image_model` + `Sam3Processor(resolution=1008)`，权重 `backend/model/SamSeg/SamSeg/sam3/sam3.pt`；
+- 滑窗：图像任一边大于 `SAMSEG_SLIDE_CROP`（512）时按 `SAMSEG_SLIDE_STRIDE`（512）切片，重叠区按**高斯窗加权**平均（中心权重大、边缘低，消除拼缝；口径参考 `H:/图文描述数据集/SAM推理/proc_engine.py`）；
+- 融合：每个 query 取 `sigmoid(pred_masks) × (sigmoid(pred_logits) × presence)` 与 `sigmoid(semantic_seg) × presence` 的逐像素 max；
+- 聚合：同义词 query 按类别 one-hot 取 max → argmax → 阈值以下压回 `background`；阈值默认 `ratio` 自适应（取峰值图的 `1-FG_RATIO` 分位，默认前景占比 0.90，裁剪到 [0.05, 0.95]），可选 `abs` 固定 `SAMSEG_PROB_THD`；
+- 后处理：默认开启（`SAMSEG_POSTPROCESS=true`），链路 平滑 → 去小连通域 → 填小背景孔，参数 `SAMSEG_SMOOTH_KERNEL=3` / `SAMSEG_POSTPROCESS_MIN_AREA=64` / `SAMSEG_POSTPROCESS_MAX_HOLE=128`。
+
+**配置项**（[`config.py`](../../backend/config.py)）：
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
-| `SAMSEG_CONFIDENCE_THRESHOLD` | `0.1` | `Sam3Processor` 实例置信度（官方 demo 值） |
-| `SAMSEG_PROB_THD` | `0.1` | argmax 后低于该置信度的像素压回背景 |
-| `SAMSEG_SLIDE_CROP` | `512` | 大图滑窗裁剪尺寸；0 关闭滑窗 |
-| `SAMSEG_SLIDE_STRIDE` | `512` | 滑窗步长；重叠区域简单平均 |
-| `SAMSEG_AUTOCAST` | `true` | CUDA bfloat16 autocast；CPU/旧卡自动退回 float32 |
-| `SAMSEG_POSTPROCESS` | `false` | 官方不做形态学后处理；需要降噪时再开 |
-| `SAMSEG_INSTANCE_IOU_THRESHOLD` | `0.3` | 变化检测实例覆盖率阈值 |
-| `SAMSEG_MIN_INSTANCE_AREA` | `20` | 实例级变化最小面积 |
-| `SAMSEG_INSTANCE_DILATION` | `2` | 配准容差膨胀半径（像素） |
+| `SAMSEG_MODEL_PATH` / `SAMSEG_BPE_PATH` | SamSeg 内置 `sam3/sam3.pt` + bpe | 权重与词表 |
+| `SAMSEG_CONFIDENCE_THRESHOLD` | `0.1` | 实例置信度阈值（双头融合过滤） |
+| `SAMSEG_PROB_MODE` | `ratio` | 阈值口径：`ratio` 自适应 / `abs` 固定 |
+| `SAMSEG_FG_RATIO` | `0.90` | `ratio` 口径目标前景占比 |
+| `SAMSEG_PROB_THD` | `0.1` | `abs` 口径下的固定阈值 |
+| `SAMSEG_SLIDE_CROP` / `SAMSEG_SLIDE_STRIDE` | `512` / `512` | 滑窗裁剪与步长（高斯加权拼接） |
+| `SAMSEG_AUTOCAST` | `true` | CUDA 上 bf16 autocast |
+| `SAMSEG_POSTPROCESS` | `true` | 形态学后处理开关 |
+| `SAMSEG_SMOOTH_KERNEL` / `SAMSEG_POSTPROCESS_MIN_AREA` / `SAMSEG_POSTPROCESS_MAX_HOLE` | `3` / `64` / `128` | 后处理参数 |
+| `SAMSEG_CHANGE_HARMONIZE` | `lab` | 双时相色调一致性口径（`none/lab/lum/hist/linear`） |
+| `SAM3_NATIVE_*` | — | 原生 SAM3 权重/设备/分辨率，仅供样本制作使用（见阶段 72 与样本制作设计稿） |
 
-> 输入分辨率固定 **1008**（`1008/14=72`，RoPE 表 5184）；`Sam3Processor` 的 `resolution` 必须显式传 1008，否则会与权重形状不匹配。
+> `SAMSEG_INFERENCE_MODE` 已于阶段 75 删除：地物提取不再有 `native` 口径。
 
-### 10.2 与旧 multipass 流程的区别
-
-| 维度 | 旧 multipass（已弃用） | 官方流程（当前） |
-|---|---|---|
-| 前向次数 | 最多 10 轮，每轮涂黑已分割区域 | **单次前向**（大图按 512 滑窗） |
-| 阈值 | `prob` 逐轮 ×0.7 衰减 | 固定 `confidence_threshold=0.1` + 后置 `prob_thd=0.1` |
-| 大图 | 整图推理，易 OOM/漏检 | 512×512 滑窗 + 重叠平均 |
-| 后处理 | 形态学平滑/去碎片/填洞 | 默认不做，保留 `SAMSEG_POSTPROCESS` 开关 |
-| 结果来源 | 仅自研 logits 融合 | 官方 instance/semantic 双头 + presence |
-
-### 10.3 类别系统
+### 10.2 类别系统
 
 - 默认 7 类：`background / building / road / water / bareland / vegetation / farmland`
 - 中文类别名（建筑/道路/水/植被/农田/裸地）→ 英文标准名 + 同义词增强
-- 支持**任意开放词汇**（如“大棚/光伏板”），未知类直接作为 query 透传
-- 类别行格式与官方一致：每行一类，逗号分隔同义词；第 0 行固定 `background`，不发文本提示
+- 支持**任意开放词汇**（如“大棚/光伏板”），未知类直接作为文本提示透传
+- 类别行格式：每行一类，逗号分隔同义词；第 0 行固定 `background`，不发文本提示
+- 提示词总数 = 各类同义词展开后的 query 数，每个 query 都要走一次 `forward_grounding`
 
-### 10.4 变化检测：官方实例 ∩ 语义
+### 10.3 变化检测：change_qwen 专用 ONNX（唯一口径）
 
-[`run_change_detection`](../../backend/model/SamSeg/runner.py) 对 T1/T2 各跑一次官方分割，然后：
+[`change_detection/change_qwen_runtime/runtime.py`](../../backend/model/change_detection/change_qwen_runtime/runtime.py) 用 ONNX Runtime 跑专用二值变化权重：
 
-1. **实例级**：两期前景 mask 各连通域在另一期的覆盖率 < `0.3` 且面积 ≥ 20 → 判变化；先对目标 mask 做半径 2 膨胀吸收配准漂移；双向取并集。
-2. **语义级**：取 SAM3 backbone FPN 最后一层，上采样后算余弦相似度，`1-sim` 为结构变化强度；对每类计算
-   `energy = max(conf_t1, conf_t2) × |logit_t1 - logit_t2| × feature_change`，逐类 Otsu（下限 0.01）得到该类变化区域。
-3. **融合**：官方交集策略 —— 实例级与语义级都判变化的像素才保留；类别取语义级结果（官方原实现取二值实例图会丢类别，此处修正）。
+1. 两期影像按 CRS 读入（`rasterio` + `WarpedVRT`），336×336 分块、步长 168、重叠区加权融合；
+2. 两类场景各一套权重：`jzg`（九寨沟滑坡）/ `cdcd`（成都 2016–2023 建筑变化），文本提示用预计算 `*_text.npz` tokens；
+3. 概率图按阈值二值化，`min_area_px` / `min_area_m2` 过滤小图斑。
 
-**输出**：变化彩色 PNG、变化掩膜 GeoTIFF、变化图斑 GeoJSON/Shapefile、`stats.per_class`、**类别转移矩阵**（`transition`，供“耕地→建筑”等业务事件判读）。
+**输出**：二值变化 mask、彩色图、概率 GeoTIFF、变化图斑 GeoJSON（带源 CRS）、`stats`（区域数 / 变化像素 / 占比 / 面积）。
 
-### 10.4.1 ProC-SAM3（当前默认）
+> registry 中 `change_detection` 只注册 `change_qwen` 一项；原 `sam3_native_change`（双时相实例对比）适配器已删除。
+> `runner.run_change_detection`（T1/T2 各分割一次 → 实例 IoU 匹配 → 转移矩阵）函数与 `SAMSEG_CHANGE_HARMONIZE` 仍保留，但不再注册、工具链不调用。
 
-- 适配层：[`backend/model/ProC_SAM3/engine.py`](../../backend/model/ProC_SAM3/engine.py)，运行时代码已 vendored 到 `backend/model/ProC_SAM3/vendor/`；权重已复制到 `backend/model/ProC_SAM3/weights/sam3/sam3.pt`（本地副本，`.gitignore` 排除，不进入 Git 历史），可用 `PROC_SAM3_WEIGHTS_ROOT` 覆盖；
-- 模型：`CachedSAM3OpenSegmentor` + `configs/cfg_vaihingen.py`，默认 `processor_resolution=504`（交互快）；`PROC_SAM3_RESOLUTION=1008` 精度优先；
-- 类别：**英文 + 英文同义词**，格式 `building, house, roof; water, river, lake`（分号分隔类别、逗号分隔同义词）；首行自动补 `background, other` 并固定索引 0；
-- 分割：ProC `predict` → 类别索引掩膜，沿用 runner 的上色/统计/GeoTIFF/GeoJSON/SHP 后处理；
-- 变化检测：两期 ProC 掩膜 → `compute_instance_change_map` 实例级对比（连通域 + IoU 匹配：消失/新增/类别变化），并输出类别转移矩阵；与 SegEarth-OV3 的双期分割 + 实例对比思路一致；
-- 取图：前端「变化检测」区域选择 + T1/T2 两个 **Esri Wayback** 时相 → 浏览器拼接两期高清 PNG → `/api/v1/imagery/georeference` 写 GeoTIFF → 聊天附件 → Agent 调 `detect_change`；
-- 旧 SegEarth：`SAMSEG_ENGINE=legacy` 回退；指代表达（`referring_expression`）在 ProC 下暂不支持。
+> 取图：前端「变化检测」区域选择 + T1/T2 两个 **Esri Wayback** 时相 → 浏览器拼接两期高清 PNG → `/api/v1/imagery/georeference` 写 GeoTIFF → 聊天附件 → Agent 调 `detect_change`（`model` 参数选 `jiuzhaigou_landslide` / `chengdu_building`）。
+
+### 10.4 指代表达（保留路径）
+
+`referring_expression` 走保留的旧推理路径：`Sam3Processor`（官方 sam3）+ [`referring.py`](../../backend/model/SamSeg/referring.py) 解析表达 → 目标/锚点文本提示 → 按大小/方位/参照关系选单个实例。普通分割不走此路径。
 
 ### 10.5 业务变化类型判读
 
-`detect_change` 当前使用**确定性规则 + 转移矩阵**（[`samseg_tools.py`](../../backend/model/tools/samseg_tools.py)）：
-
-- 优先看转移矩阵主导项（`farmland→building` = 耕地占用、`water→bareland` = 水体萎缩等）
-- 无矩阵时按变化主导类别映射（建筑主导=新增建筑、裸地主导=推土、水体=水体变化…）
-
-> `runner.classify_change_type_by_vlm` 仍保留，但 `detect_change` **不调用**它：一方面 VLM 网络请求会阻塞检测任务终态，另一方面入口要求 `RESPONSES_API_KEY`，当前 GLM 主线未配置该凭据。业务类型统一由规则给出，`change_type.source='rule'`。
+- `detect_change`（change_qwen 口径）输出二值变化：区域数 / 变化像素 / 占比 / 面积，不做类别转移判读。
+- `runner.classify_change_type_by_rule` / `classify_change_type_by_vlm` 与转移矩阵函数保留在 SamSeg 内，但无注册入口、工具链不调用（VLM 路径需 `RESPONSES_API_KEY`，GLM 主线未配置）。
 
 ### 10.6 视觉理解（`understand_image`）
 
