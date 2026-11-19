@@ -145,6 +145,7 @@ Agent-Flow-Study 以 **「数据—模型—智能体—服务平台」** 为主
 | [frontend-component-library.md](platform/frontend-component-library.md) | **前端组件库清单**：48 个 Vue 文件、基础组件 API、业务组件、composables/services/stores、缺口与分层建议 | 新增 |
 | [workbench-ui-map.md](platform/workbench-ui-map.md) | **工作台 UI 结构与色彩链路**：顶栏/左栏/地图/右栏组件清单、表面层级、状态变化、消息区配色、当前不一致 | 新增 |
 | [rules/ui-style.md](rules/ui-style.md) | **用户端 UI 规则**：设计令牌、字体、层级、状态、按钮、地图工具条、十条规则与禁止项 | 新增 |
+| [rules/frontend-component-spec.md](rules/frontend-component-spec.md) | **前端组件规范与要求**：分层/命名/API 约定、色彩状态、基础组件清单、弹窗/地图/会话模式、迁移阶段与验收 | 新增 |
 | [open-imagery-sources.md](platform/open-imagery-sources.md) | **开源影像检索**：PC/ES/CDSE/GEE 数据源、REST 契约、AOI 裁剪下载、限制与许可 | 5.5 |
 | [upgrade/README.md](upgrade/README.md) | **改造升级文档集**：记忆、多 Agent、提示词、上下文、Skills、MCP、Harness、工作流、Loop | 9 篇 |
 | [upgrade/ROADMAP.md](upgrade/ROADMAP.md) | **改造计划**：9 个阶段、依赖、交付、验收 | 计划 |

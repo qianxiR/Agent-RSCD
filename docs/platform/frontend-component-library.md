@@ -1,6 +1,6 @@
 # 前端组件库清单
 
-> 扫描日期：2026-11-19。范围：`frontend-vue/src`，共 48 个 `.vue` 文件。
+> 扫描日期：2026-11-19。范围：`frontend-vue/src`，共 59 个 `.vue` 文件（新增 11 个基础组件，尚未接入业务）。
 > 工作台左→右的结构与配色链路见 [workbench-ui-map.md](workbench-ui-map.md)；设计约束见 [docs/rules/ui-style.md](../rules/ui-style.md)；令牌来源 `frontend-vue/src/styles/theme.css`。
 
 ## 一、分层
@@ -8,11 +8,11 @@
 | 层 | 位置 | 内容 |
 |---|---|---|
 | L0 令牌与全局样式 | `styles/`、`shared/styles/` | `theme.css` 设计令牌；`design-v2.css` 工作台壳层；`content.css` Markdown；`overlays.css` EP 浮层覆盖；`shared/styles/shell.css` 管理端壳层 |
-| L1 基础组件 | `shared/ui/` | 按钮、弹窗、输入弹窗、面板弹窗、图标、空态、统计卡、页头、权限门、危险确认、通用模态 |
+| L1 基础组件 | `shared/ui/` | 按钮、弹窗、输入弹窗、确认弹窗、面板弹窗、表单字段、搜索、颜色、类别输入、工具条按钮、浮层面板、列表行、分组标题、加载态、图标、空态、统计卡、页头、权限门 |
 | L2 业务组件 | `components/`、`layouts/`、`views/`、`admin/` | 会话、地图、侧栏、认证、管理端页面 |
 | L3 功能层 | `composables/`、`services/`、`stores/` | 地图、影像、样本、会话、认证、WS、持久状态 |
 
-## 二、基础组件（`shared/ui/`，11 个）
+## 二、基础组件（`shared/ui/`，22 个）
 
 | 组件 | 行 | 用途 | Props | Emits / Model | 直接引用 |
 |---|---:|---|---|---|---:|
@@ -27,6 +27,17 @@
 | `StatCard.vue` | 27 | 指标卡 | `label, value, unit, foot, tone` | — | 3 |
 | `PageHeader.vue` | 23 | 页面标题 + 副标题 | `title, subtitle` | — | 6 |
 | `PermissionGate.vue` | 21 | 按权限显隐插槽 | `permission` | — | 0 |
+| `ConfirmDialog.vue` | 176 | 普通/危险确认，可要求填写原因 | `title, description, confirmText, cancelText, danger, requireReason, reasonLabel, reasonPlaceholder, busy` | `confirm(payload), cancel`；`v-model` | 0 |
+| `FormField.vue` | 44 | label + 控件 + hint/error | `label, hint, error, required` | — | 0 |
+| `SearchInput.vue` | 85 | 搜索输入 + 清除 | `placeholder, disabled` | `clear`；`v-model` | 0 |
+| `ColorField.vue` | 26 | 颜色选择色块 | `title, disabled` | `v-model` | 0 |
+| `ClassCombo.vue` | 76 | 类别自由输入 + 已有类别建议 | `options, placeholder, disabled` | `update:modelValue, create` | 0 |
+| `ToolbarButton.vue` | 52 | 工具条/模式按钮 | `active, disabled, title, compact` | — | 0 |
+| `FloatingPanel.vue` | 82 | 地图浮层外壳 | `title, width, top, left, closable, closeTitle` | `close` | 0 |
+| `ListRow.vue` | 70 | 项目/会话/实例行 | `active, title, subtitle, meta, titleAttr` | `select` | 0 |
+| `SectionHeader.vue` | 34 | 分组标题 + 计数 | `title, count` | — | 0 |
+| `LoadingState.vue` | 45 | 加载态 | `text, inline` | — | 0 |
+| `DialogActions.vue` | 17 | 弹窗底部按钮排布 | — | — | 0 |
 
 ## 三、布局与页面
 
