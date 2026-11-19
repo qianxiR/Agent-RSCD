@@ -58,6 +58,9 @@ logs/
 # 文档截图例外：双门户演示截图允许入库（覆盖上面的 *.png）
 !docs/platform/screens/*.png
 
+# 前端构建产物
+frontend-vue/dist/
+
 # 参考资料 (非本项目源码)
 GeoCD-Agent/
 

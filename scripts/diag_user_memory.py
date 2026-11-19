@@ -1,7 +1,7 @@
 """
-一次性诊断脚本: 量化 user_memory 表的噪声规模。
+一次性诊断脚本: 量化 user_memory v2 的类别与规模。
 
-只读查询, 不改任何数据。运行后可直接删除。
+只读查询, 不改任何数据。
 用法: python scripts/diag_user_memory.py
 """
 import sys
@@ -52,7 +52,7 @@ def main():
                 "SELECT user_id, COUNT(*) FROM user_memory GROUP BY user_id ORDER BY COUNT(*) DESC"):
             print(f"  {uid:<20} {cnt:>5}")
 
-        # 3. category × user_id 交叉 (看清 global 的 lesson/workflow 有多少)
+        # 3. category × user_id 交叉 (看清 global lesson 有多少)
         print("\n[3] category × user_id 交叉")
         print("-" * 70)
         cross = q(cur, """
@@ -61,7 +61,7 @@ def main():
         for cat, uid, cnt in cross:
             print(f"  {cat:<14} | {uid:<18} | {cnt:>5}")
 
-        # 4. value 长度统计 (长 value 多半是 lesson/workflow, 短的是废话偏好)
+        # 4. value 长度统计 (长 value 多半是 lesson，短的是偏好/画像)
         print("\n[4] value 文本长度分布 (按 category)")
         print("-" * 70)
         for cat, avg_len, max_len in q(cur, """
@@ -71,8 +71,8 @@ def main():
             FROM user_memory GROUP BY category ORDER BY category"""):
             print(f"  {cat:<14}  avg={avg_len:>5}  max={max_len:>5}")
 
-        # 5. 抽样: preference/fact 各看最多 8 条
-        for cat in ("preference", "fact", "entity"):
+        # 5. 抽样: 三类各看最多 8 条
+        for cat in ("preference", "profile", "lesson"):
             rows = q(cur, """
                 SELECT key, value FROM user_memory
                 WHERE category=%s ORDER BY id LIMIT 8""", (cat,))
@@ -85,8 +85,8 @@ def main():
                 print(f"  key={k!r}")
                 print(f"    -> {v_short}")
 
-        # 6. 抽样: lesson / workflow (对照: 你想保留的那类)
-        for cat in ("lesson", "workflow"):
+        # 6. 对照抽样: lesson 详情
+        for cat in ("lesson",):
             rows = q(cur, """
                 SELECT key, value FROM user_memory
                 WHERE category=%s ORDER BY id LIMIT 3""", (cat,))
