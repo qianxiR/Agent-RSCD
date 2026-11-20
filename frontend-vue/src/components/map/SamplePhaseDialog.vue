@@ -115,14 +115,18 @@ function historyMeta(item) {
   return parts.join(' · ')
 }
 
-// 入参: 无 | 方法: 打开时补齐默认时相与任务名 | 出参: 无
+// 入参: 无 | 方法: 打开时补齐默认时相与任务名；A 取最早一期、B 取最新一期 | 出参: 无
 function reset() {
   error.value = ''
   loadHistory()
   if (!props.releases.length) return
   const exists = (id) => props.releases.some((item) => item.id === id)
-  if (!exists(phaseAId.value)) phaseAId.value = props.releases[0].id
-  if (!exists(phaseBId.value)) phaseBId.value = ''
+  // releases 按日期倒序（最新在前）：B 用最新一期，A 用最早一期，默认跨度最大
+  const latest = props.releases[0]
+  const oldest = props.releases[props.releases.length - 1]
+  // 只有一期时退回单期，避免 A/B 撞成同一期
+  if (!exists(phaseBId.value)) phaseBId.value = oldest === latest ? '' : latest.id
+  if (!exists(phaseAId.value)) phaseAId.value = oldest.id
   if (mode.value === 'new' && !taskName.value) taskName.value = defaultTaskName()
 }
 
