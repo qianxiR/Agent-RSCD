@@ -73,13 +73,16 @@ function placeDivider() {
 
 function onDividerPointerDown(event) {
   if (!swipeActive.value) return
+  // 拦下事件：否则冒泡到地图容器会同时开始拖拽底图
   event.preventDefault()
+  event.stopPropagation()
   dragging = true
   divider.setPointerCapture?.(event.pointerId)
 }
 
 function onDividerPointerMove(event) {
   if (!dragging) return
+  event.stopPropagation()
   const map = getMap()
   const size = map?.getSize() || [1000, 800]
   const viewport = map?.getViewport()
@@ -92,6 +95,7 @@ function onDividerPointerMove(event) {
 
 function onDividerPointerUp(event) {
   dragging = false
+  event.stopPropagation()
   try {
     divider?.releasePointerCapture?.(event.pointerId)
   } catch (e) {
@@ -136,8 +140,20 @@ function buildDivider() {
     'border:1px solid rgba(24,24,20,0.12)',
     'border-radius:50%',
     'box-shadow:0 18px 48px rgba(24,24,20,0.12)',
-    'pointer-events:none',
+    'cursor:ew-resize',
   ].join(';')
+  // 2px 的线太细，加一条 14px 宽的透明命中带，方便直接按住拖动
+  const hit = document.createElement('span')
+  hit.style.cssText = [
+    'position:absolute',
+    'top:0',
+    'bottom:0',
+    'left:-6px',
+    'width:14px',
+    'cursor:ew-resize',
+    'background:transparent',
+  ].join(';')
+  divider.appendChild(hit)
   divider.appendChild(handle)
   divider.addEventListener('pointerdown', onDividerPointerDown)
   divider.addEventListener('pointermove', onDividerPointerMove)
