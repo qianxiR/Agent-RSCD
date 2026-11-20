@@ -6,8 +6,10 @@
 const DEFAULT_TILE_BASE = 'https://wayback-a.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile'
 const FALLBACK_TILE_BASE = 'https://wayback-b.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile'
 const TILE_SIZE = 256
-const MAX_SIZE = 1200
-const MAX_TILES = 100
+// 上限决定实际取到的层级：Wayback 该矩阵集最高 z19（z20 返回 404），
+// 4096px / 1200 瓦片可在 2 km 范围仍取到 z17（约 1 m/px）。
+const MAX_SIZE = 4096
+const MAX_TILES = 1200
 
 // 入参: release { tileUrl, m }
 // 方法: 统一占位符（官方 {level}/{row}/{col} → {z}/{y}/{x}），缺失时用默认 host 拼
@@ -153,6 +155,14 @@ async function buildMosaic(release, plan) {
     }))
   }
   return canvas
+}
+
+// 入参: 无 | 方法: 按当前上限预测给定范围会取到的层级与地面分辨率 | 出参: { zoom, gsd }
+export function planWaybackResolution(bbox) {
+  const plan = planTiles(bbox)
+  const lat = (bbox[1] + bbox[3]) / 2
+  const gsd = (156543.03392 / 2 ** plan.zoom) * Math.cos((lat * Math.PI) / 180)
+  return { zoom: plan.zoom, gsd }
 }
 
 // 入参: { release, bbox, maxSize?, zoom?, exactBbox? }

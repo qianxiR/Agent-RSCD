@@ -7,6 +7,7 @@ import BaseButton from '@/shared/ui/BaseButton.vue'
 import BaseDialog from '@/shared/ui/BaseDialog.vue'
 import { useProjectStore } from '@/stores/project'
 import { useSampleStudio } from '@/composables/useSampleStudio'
+import { planWaybackResolution } from '@/composables/useWaybackCapture'
 
 const props = defineProps({
   releases: { type: Array, default: () => [] },
@@ -41,6 +42,23 @@ const areaKm2 = computed(() => {
 })
 const releaseA = computed(() => props.releases.find((item) => item.id === phaseAId.value) || null)
 const releaseB = computed(() => props.releases.find((item) => item.id === phaseBId.value) || null)
+
+// 按当前范围预测抓图会落到哪一级瓦片：Wayback 最高 z19，范围越大层级越低
+const resolution = computed(() => {
+  if (!props.bbox?.length) return null
+  try {
+    return planWaybackResolution(props.bbox)
+  } catch (e) {
+    return null
+  }
+})
+const resolutionText = computed(() => {
+  if (!resolution.value) return ''
+  const { zoom, gsd } = resolution.value
+  const value = `z${zoom} · ${gsd < 1 ? gsd.toFixed(2) : gsd.toFixed(1)} m/px`
+  return gsd > 1 ? `${value} · 影像偏粗，建议缩小范围` : value
+})
+const resolutionCoarse = computed(() => Number(resolution.value?.gsd || 0) > 1)
 
 function defaultTaskName() {
   const now = new Date()
@@ -124,6 +142,9 @@ function submit() {
       <div class="sp-meta">
         <span>项目：{{ projectLabel }}</span>
         <span>范围约 {{ areaKm2 < 0.01 ? areaKm2.toFixed(4) : areaKm2.toFixed(2) }} km²</span>
+      </div>
+      <div v-if="resolutionText" class="sp-resolution" :class="{ coarse: resolutionCoarse }">
+        {{ resolutionText }}
       </div>
       <div class="sp-region">
         <span class="sp-region-label">样本区域</span>
@@ -229,6 +250,13 @@ function submit() {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
+.sp-resolution {
+  margin-bottom: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.sp-resolution.coarse { color: var(--accent-amber); }
 .sp-region {
   display: flex;
   align-items: center;

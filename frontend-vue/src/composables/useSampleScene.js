@@ -250,6 +250,11 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
       clipLayerB()
     }
 
+    // gsd 由后端按 3857 米算；这里换算成地面米，与时相弹窗的预测口径一致
+    const centerLat = (imageA.bbox[1] + imageA.bbox[3]) / 2
+    const groundGsd = imageA.gsd
+      ? Number(imageA.gsd) * Math.cos((centerLat * Math.PI) / 180)
+      : null
     const frame = {
       width: imageA.width,
       height: imageA.height,
@@ -257,6 +262,8 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
       extent,
       crs: 'EPSG:4326',
       path: imageA.file_path,
+      zoom: capturedA.zoom,
+      gsd: groundGsd,
     }
     const phases = [
       { date: releaseA.date, path: imageA.file_path, preview_url: imageA.preview_url },

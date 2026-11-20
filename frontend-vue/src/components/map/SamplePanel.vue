@@ -45,6 +45,15 @@ const phaseText = computed(() => (
     ? phases.value.map((item) => item.date).join(' ↔ ')
     : '未载入'
 ))
+// 分辨率：框选范围决定实际取到的瓦片层级，粗于 1 m/px 时提示
+const coarse = computed(() => Number(frame.value?.gsd || 0) > 1)
+const resolutionText = computed(() => {
+  const current = frame.value
+  if (!current?.gsd) return ''
+  const gsd = Number(current.gsd)
+  const text = `z${current.zoom} · ${gsd < 1 ? gsd.toFixed(2) : gsd.toFixed(1)} m/px`
+  return coarse.value ? `${text} · 影像偏粗` : text
+})
 const canExport = computed(() => Boolean(savedAt.value) && !dirty.value)
 
 function isSelected(id) {
@@ -151,12 +160,15 @@ function onDeleteSelected() {
           <span>任务名</span>
           <input v-model="taskDir" class="sp-input" :disabled="saving || Boolean(savedAt)" />
         </label>
-        <div class="sp-meta">
-          <span>项目 {{ project }}</span>
-          <span v-if="frame">{{ frame.width }} × {{ frame.height }} px</span>
-          <span v-else-if="sourceFrame">{{ sourceFrame.width }} × {{ sourceFrame.height }} px</span>
-        </div>
-        <div class="sp-phase">{{ phaseText }}</div>
+      <div class="sp-meta">
+        <span>项目 {{ project }}</span>
+        <span v-if="frame">{{ frame.width }} × {{ frame.height }} px</span>
+        <span v-else-if="sourceFrame">{{ sourceFrame.width }} × {{ sourceFrame.height }} px</span>
+      </div>
+      <div v-if="resolutionText" class="sp-resolution" :class="{ coarse: coarse }">
+        {{ resolutionText }}
+      </div>
+      <div class="sp-phase">{{ phaseText }}</div>
       </div>
 
       <div v-if="frame" class="sp-modes">
@@ -324,6 +336,12 @@ function onDeleteSelected() {
   color: var(--text-muted);
 }
 .sp-phase { font-size: var(--fs-sm); color: var(--text-secondary); }
+.sp-resolution {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.sp-resolution.coarse { color: var(--accent-amber); }
 
 .sp-modes { display: flex; gap: 4px; }
 .sp-modes button {
