@@ -10,6 +10,9 @@ const TILE_SIZE = 256
 // 4096px / 1200 瓦片可在 2 km 范围仍取到 z17（约 1 m/px）。
 const MAX_SIZE = 4096
 const MAX_TILES = 1200
+// 已加载瓦片缓存：同一 release 重复抓图（同区域再抓、切回原视图）直接复用
+const TILE_CACHE_LIMIT = 1600
+const _tileCache = new Map()
 
 // 入参: release { tileUrl, m }
 // 方法: 统一占位符（官方 {level}/{row}/{col} → {z}/{y}/{x}），缺失时用默认 host 拼
@@ -92,8 +95,26 @@ function planTiles(bbox, maxSize = MAX_SIZE, forcedZoom = null) {
   throw new Error('区域过大，无法在限制内拼接 Esri 影像，请缩小范围')
 }
 
-// 入参: url, 重试次数 | 方法: 用 Image 加载瓦片（避免 fetch 被 Service Worker/连接中断拖垮） | 出参: Image
+// 入参: url, 重试次数 | 方法: 先查内存缓存，未命中再加载瓦片 | 出参: Image
 async function loadTileImage(url, retries = 3) {
+  const hit = _tileCache.get(url)
+  if (hit) {
+    // LRU：命中后移到队尾，淘汰时从队首出
+    _tileCache.delete(url)
+    _tileCache.set(url, hit)
+    return hit
+  }
+  const image = await loadTileImageRemote(url, retries)
+  _tileCache.set(url, image)
+  if (_tileCache.size > TILE_CACHE_LIMIT) {
+    const oldest = _tileCache.keys().next().value
+    if (oldest) _tileCache.delete(oldest)
+  }
+  return image
+}
+
+// 入参: url, 重试次数 | 方法: 用 Image 加载瓦片（避免 fetch 被 Service Worker/连接中断拖垮） | 出参: Image
+async function loadTileImageRemote(url, retries = 3) {
   let lastError = null
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
@@ -114,7 +135,7 @@ async function loadTileImage(url, retries = 3) {
 }
 
 // 入参: release {m,date,tileUrl}, plan, 输出画布, 裁剪偏移, 进度回调
-// 方法: 按行优先（即区域格网顺序）逐块取瓦片，直接画进输出画布，每批回调一次进度
+// 方法: 逐块取瓦片并直接画进输出画布，每批回调一次进度
 //   单块瓦片两次重试仍失败时跳过，不中断整幅抓图；缺口在最终成败判定里统计
 // 出参: 失败瓦片数
 async function drawTilesInto(ctx, release, plan, cropLeft, cropTop, onProgress) {
@@ -123,7 +144,6 @@ async function drawTilesInto(ctx, release, plan, cropLeft, cropTop, onProgress) 
   const fallbackTemplate = template.includes('wayback-a')
     ? template.replace('wayback-a', 'wayback-b')
     : (template.includes('wayback-b') ? template.replace('wayback-b', 'wayback-a') : '')
-  // 行优先：与地图上红框格网从左到右、从上到下的顺序一致
   const jobs = []
   for (let row = 0; row < plan.rows; row += 1) {
     for (let col = 0; col < plan.cols; col += 1) {
@@ -178,10 +198,10 @@ export function planWaybackResolution(bbox) {
 }
 
 // 入参: { release, bbox, maxSize?, zoom?, exactBbox?, canvas?, onProgress? }
-// 方法: 计算瓦片计划 → 按格网顺序逐格取瓦片并直接画进输出画布 → PNG
+// 方法: 计算瓦片计划 → 逐块取瓦片并直接画进输出画布 → PNG
 //   exactBbox=true 时输出严格裁到请求 bbox（双期共用同一像素帧）
 //   zoom 指定时复用另一期的缩放，保证两张图宽高一致
-//   canvas 传入时复用调用方画布（用于边抓边显示）；onProgress 每批瓦片回调一次
+//   canvas 传入时复用调用方画布；onProgress 每批瓦片回调一次
 // 出参: { blob, bbox, width, height, zoom, release }
 export async function captureWaybackImage({
   release,

@@ -751,6 +751,66 @@ export function getImageryVersion() {
   return _imageryVersion
 }
 
+// ==================== 影像预览瓦片预取 ====================
+// 视窗内瓦片由 OL 正常渲染时请求；这里补一层周边后台预取，
+// 视图切换过去时瓦片已在 OL 缓存里，直接出图。
+const PREFETCH_PAD = 1.8
+const PREFETCH_MAX_TILES = 400
+let _prefetchTimer = null
+let _prefetchHooked = false
+
+// 入参: 无 | 方法: 按当前视图 1.8 倍范围预取各预览层的瓦片 | 出参: 无
+function prefetchImageryTiles() {
+  if (!_map) return
+  const view = _map.getView()
+  const projection = view.getProjection()
+  const resolution = view.getResolution()
+  const size = _map.getSize()
+  if (!size || !resolution) return
+  const extent = view.calculateExtent(size)
+  const cx = (extent[0] + extent[2]) / 2
+  const cy = (extent[1] + extent[3]) / 2
+  const halfW = ((extent[2] - extent[0]) * PREFETCH_PAD) / 2
+  const halfH = ((extent[3] - extent[1]) * PREFETCH_PAD) / 2
+  const padded = [cx - halfW, cy - halfH, cx + halfW, cy + halfH]
+  const pixelRatio = _map.getPixelRatio()
+
+  _map.getLayers().forEach((layer) => {
+    if (!layer.get('imagery') || !layer.getVisible()) return
+    const source = layer.getSource()
+    if (typeof source?.getTile !== 'function') return
+    const grid = source.getTileGridForProjection?.(projection)
+    if (!grid) return
+    const z = grid.getZForResolution(resolution)
+    const range = grid.getTileRangeForExtentAndZ(padded, z)
+    const count = range.getWidth() * range.getHeight()
+    if (!Number.isFinite(count) || count <= 0 || count > PREFETCH_MAX_TILES) return
+    range.forEach((x, y) => {
+      try {
+        // getTile 命中缓存直接返回，未命中才发请求
+        source.getTile(z, x, y, pixelRatio, projection)
+      } catch (e) {
+        // 单块预取失败不影响其余瓦片
+      }
+    })
+  })
+}
+
+// 入参: 无 | 方法: 视图稳定后延迟预取，避免连续缩放时反复请求 | 出参: 无
+function scheduleImageryPrefetch() {
+  clearTimeout(_prefetchTimer)
+  _prefetchTimer = setTimeout(() => {
+    _prefetchTimer = null
+    prefetchImageryTiles()
+  }, 260)
+}
+
+function ensurePrefetchHook() {
+  if (_prefetchHooked || !_map) return
+  _map.on('moveend', scheduleImageryPrefetch)
+  _prefetchHooked = true
+}
+
 // 检索结果的景轮廓样式（虚线蓝，和业务矢量图层区分）
 const _footprintStyle = new Style({
   stroke: new Stroke({ color: '#4d6bfe', width: 1.5, lineDash: [7, 5] }),
@@ -791,6 +851,9 @@ export function addXyzLayer({ url, name, bbox = null, attribution = '', label = 
   }
   _map.addLayer(layer)
   bumpImageryVersion()
+  // 预览刚叠加：先按当前视图预取一轮周边瓦片
+  ensurePrefetchHook()
+  scheduleImageryPrefetch()
   return { loaded: true }
 }
 
