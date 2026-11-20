@@ -22,6 +22,7 @@ import { useSwipeCompare } from '@/composables/useSwipeCompare'
 import { useSampleStudio } from '@/composables/useSampleStudio'
 import { useSampleScene } from '@/composables/useSampleScene'
 import { useSampleEditor } from '@/composables/useSampleEditor'
+import { showRegionGrid, clearRegionGrid } from '@/composables/useRegionGrid'
 import { restoreBasemap } from '@/composables/useBasemap'
 import { captureWaybackImage } from '@/composables/useWaybackCapture'
 import { captureImagery, georeferenceImagery, getEsriWaybackReleases } from '@/services/imagery'
@@ -307,6 +308,8 @@ function onSampleClick() {
   changeDrawRequested.value = false
   if (!waybackReleases.value.length) loadWaybackReleases()
   sampleBBox.value = getViewBbox()
+  // 未框选时先用当前视图范围铺红框格网，框选后按新范围重画
+  if (sampleBBox.value?.length) showRegionGrid(sampleBBox.value)
   samplePhaseOpen.value = true
 }
 
@@ -319,6 +322,8 @@ function startSampleRegionDraw() {
   changeDialogOpen.value = false
   if (compareActive.value) stopCompareSwipe()
   if (dragBox) stopDraw()
+  // 重新框选时先收掉旧范围的红框格网，避免与拖拽框叠在一起
+  clearRegionGrid()
   startDraw('sample')
 }
 
@@ -377,6 +382,7 @@ async function requestExitSample() {
   sampleEditor.exit()
   exitScene()
   resetSession()
+  clearRegionGrid()
   setFeatureInfoEnabled(true)
 }
 
@@ -516,7 +522,10 @@ function startDraw(mode) {
     removeLayer('outline:capture-bbox', 'imagery-outline')
   }
   drawMode.value = mode
-  dragBox = new DragBox({ condition: always, className: 'ol-dragbox imagery-box' })
+  dragBox = new DragBox({
+    condition: always,
+    className: mode === 'sample' ? 'ol-dragbox imagery-box sample-box' : 'ol-dragbox imagery-box',
+  })
   dragBox.on('boxend', () => {
     const extent = dragBox.getGeometry().getExtent()
     // 视图是 3857，框选范围统一转回 4326 再交给检索/取图/变化检测（后端与弹窗都按经纬度）
@@ -537,6 +546,8 @@ function startDraw(mode) {
       showCaptureBBox(bbox)
     } else if (mode === 'sample') {
       sampleBBox.value = bbox
+      // 红框 + 正方形格网一直保留到退出标注，作为范围与比例参考
+      showRegionGrid(bbox)
       samplePhaseOpen.value = true
     } else {
       imagery.finishDraw(bbox)
@@ -630,6 +641,13 @@ watch(compareError, (msg) => {
   if (msg) ElMessage.warning(msg)
 })
 
+// 弹窗取消而非进入标注时收起红框格网；框选中/抓图中保持
+watch(samplePhaseOpen, (open) => {
+  if (open || sampleActive.value || sampleEntering.value) return
+  if (drawMode.value === 'sample') return
+  clearRegionGrid()
+})
+
 // 入参: event window 事件 | 方法: 底图/历史底图瓦片全失败时提示（5 秒内去重） | 出参: 无
 let lastBasemapErrorAt = 0
 function onBasemapErrorEvent(event) {
@@ -706,6 +724,7 @@ onBeforeUnmount(() => {
   sampleEditor.exit()
   exitScene({ restoreView: false })
   resetSession()
+  clearRegionGrid()
   setFeatureInfoEnabled(true)
   stopCompareDrag()
   stopCompareSwipe()
@@ -1463,6 +1482,12 @@ onBeforeUnmount(() => {
   border: 1.5px dashed var(--accent);
   background: rgba(77, 107, 254, 0.08);
   border-radius: 2px;
+}
+/* 样本区域：拖拽中即是最终红色边界，与落框后的格网同一颜色 */
+.ol-map-host :deep(.sample-box) {
+  border: 2px solid rgba(181, 74, 74, 0.95);
+  background: rgba(181, 74, 74, 0.035);
+  border-radius: 0;
 }
 
 /* ===== 框选提示（顶部居中）；样本工作范围红框提示复用同一外观 ===== */
