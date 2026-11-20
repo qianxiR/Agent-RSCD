@@ -3,7 +3,6 @@
 import { ref } from 'vue'
 import ImageLayer from 'ol/layer/Image'
 import ImageStatic from 'ol/source/ImageStatic'
-import ImageCanvasSource from 'ol/source/ImageCanvas'
 import { getRenderPixel } from 'ol/render'
 import { transformExtent } from 'ol/proj'
 import { captureWaybackImage } from '@/composables/useWaybackCapture'
@@ -16,49 +15,19 @@ const progress = ref('')
 const error = ref('')
 const swipeActive = ref(false)
 const ratio = ref(0.5)
-// 逐格抓图进度 0–100；0 表示不在逐格抓图
+// 逐格抓图进度 0–100；0 表示不在抓图
 const tilePercent = ref(0)
 
 let layerA = null
 let layerB = null
-let liveLayer = null
-let liveCanvas = null
-let liveSource = null
 let divider = null
 let clipped = false
 let dragging = false
 let previousView = null
 const cleanups = []
 
-function clearLive() {
-  const map = getMap()
-  if (map && liveLayer) map.removeLayer(liveLayer)
-  liveLayer = null
-  liveSource = null
-  liveCanvas = null
-  tilePercent.value = 0
-}
-
-// 入参: 图像 extent（3857） | 方法: 叠一张可直接改写的画布图层，抓图过程写进同一张画布即时显示 | 出参: 画布
-function startLiveLayer(extent) {
-  const map = getMap()
-  if (!map) throw new Error('地图尚未就绪')
-  clearLive()
-  liveCanvas = document.createElement('canvas')
-  liveCanvas.width = 1
-  liveCanvas.height = 1
-  liveSource = new ImageCanvasSource({
-    projection: 'EPSG:3857',
-    canvasFunction: () => liveCanvas,
-  })
-  liveLayer = new ImageLayer({ source: liveSource, zIndex: 19, extent })
-  map.addLayer(liveLayer)
-  return liveCanvas
-}
-
-// 入参: 进度 { done, total } | 方法: 让图层重画已写入的格子并更新百分比 | 出参: 无
-function refreshLive(info) {
-  liveSource?.changed()
+// 入参: 抓图进度 { done, total } | 方法: 更新进度百分比 | 出参: 无
+function setTileProgress(info) {
   const total = Number(info?.total) || 0
   const done = Number(info?.done) || 0
   tilePercent.value = total ? Math.round((done / total) * 100) : 0
@@ -66,7 +35,6 @@ function refreshLive(info) {
 
 function clearLayers() {
   cleanups.splice(0).forEach((fn) => fn())
-  clearLive()
   const map = getMap()
   if (map) {
     if (layerA) map.removeLayer(layerA)
@@ -74,6 +42,7 @@ function clearLayers() {
   }
   layerA = null
   layerB = null
+  tilePercent.value = 0
 }
 
 function removeDivider() {
@@ -184,8 +153,10 @@ function buildDivider() {
   placeDivider()
 }
 
-function clipLayerB() {
-  if (!layerB) return
+// 入参: 目标图层（默认当前 layerB） | 方法: 按分隔线右侧裁剪 B 层 | 出参: 无
+function clipLayerB(target = layerB) {
+  const layer = target
+  if (!layer) return
   const map = getMap()
   const onPre = (event) => {
     if (!swipeActive.value || !divider) return
@@ -235,24 +206,24 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
   capturing.value = true
   error.value = ''
   progress.value = '正在抓取时相 A…'
-  // 先记住进入前的视图，再框住范围，逐格抓图时能立刻看到已取到的部分
+  tilePercent.value = 0
+
   const view = map.getView()
   previousView = { center: view.getCenter(), zoom: view.getZoom() }
-  const sceneExtent = transformExtent(bbox, 'EPSG:4326', 'EPSG:3857')
-  view.fit(sceneExtent, { padding: [40, 40, 40, 40], duration: 0 })
-  startLiveLayer(sceneExtent)
+
+  clearLayers()
+  removeDivider()
+
   try {
     const capturedA = await captureWaybackImage({
       release: releaseA,
       bbox,
       exactBbox: true,
-      canvas: liveCanvas,
       onProgress: (info) => {
-        refreshLive(info)
+        setTileProgress(info)
         progress.value = `正在抓取时相 A… ${info.done}/${info.total}`
       },
     })
-    clearLive()
     progress.value = '正在写入时相 A…'
     const imageA = await georeferenceImagery({
       blob: capturedA.blob,
@@ -264,20 +235,18 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
     let capturedB = null
     let imageB = null
     if (releaseB?.m) {
+      tilePercent.value = 0
       progress.value = '正在抓取时相 B…'
-      startLiveLayer(sceneExtent)
       capturedB = await captureWaybackImage({
         release: releaseB,
         bbox: capturedA.bbox,
         exactBbox: true,
         zoom: capturedA.zoom,
-        canvas: liveCanvas,
         onProgress: (info) => {
-          refreshLive(info)
+          setTileProgress(info)
           progress.value = `正在抓取时相 B… ${info.done}/${info.total}`
         },
       })
-      clearLive()
       progress.value = '正在写入时相 B…'
       imageB = await georeferenceImagery({
         blob: capturedB.blob,
@@ -287,21 +256,14 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
       })
     }
 
-    clearLayers()
-    removeDivider()
-
-    const view2 = map.getView()
-    previousView = previousView || { center: view2.getCenter(), zoom: view2.getZoom() }
-
+    const extent = transformExtent(imageA.bbox, 'EPSG:4326', 'EPSG:3857')
     layerA = createImageLayer(imageA, 20)
     map.addLayer(layerA)
     if (imageB) {
       layerB = createImageLayer(imageB, 20.5)
       map.addLayer(layerB)
     }
-
-    const extent = transformExtent(imageA.bbox, 'EPSG:4326', 'EPSG:3857')
-    view2.fit(extent, { padding: [40, 40, 40, 40], duration: 0 })
+    map.getView().fit(extent, { padding: [40, 40, 40, 40], duration: 0 })
 
     swipeActive.value = Boolean(imageB)
     ratio.value = 0.5
@@ -341,7 +303,7 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
     error.value = e.message || '影像抓取失败'
     throw e
   } finally {
-    clearLive()
+    tilePercent.value = 0
     capturing.value = false
   }
 }

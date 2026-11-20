@@ -1448,21 +1448,20 @@ onBeforeUnmount(() => {
   z-index: 10;
 }
 
-/* ===== 样本影像抓取进度 ===== */
+/* ===== 样本影像抓取进度：贴工具条下方左对齐，不居中遮挡地图 ===== */
 .sample-capturing {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  top: 44px;
+  left: 10px;
   z-index: 30;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 8px 14px 10px;
   font-size: var(--fs-md);
   color: #fff;
   background: rgba(26, 26, 26, 0.86);
-  border-radius: 999px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-float);
   font-variant-numeric: tabular-nums;
 }
