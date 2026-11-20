@@ -2,10 +2,11 @@
 // ==================== 三栏主布局 + 拖拽分隔 ====================
 // ★ 对应原生 index.html 的 .header + .main 三栏结构
 //   header：logo + 系统标题 + WS 状态点（与原生前端一比一）
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useConversationStore } from '@/stores/conversation'
 import { useResize } from '@/composables/useResize'
+import { useSampleStudio } from '@/composables/useSampleStudio'
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue'
 import MapPanel from '@/components/map/MapPanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
@@ -30,6 +31,21 @@ const rightWidth = ref(294)
 // 左右栏收起状态（收起后宽度归零，内容保持挂载）
 const leftCollapsed = ref(false)
 const rightCollapsed = ref(false)
+
+// 标注时要更大的地图视野：进入样本标注后自动收起右侧聊天栏；退出时恢复原状态
+const { active: sampleActive } = useSampleStudio()
+let rightCollapsedBeforeSample = null
+watch(sampleActive, (active) => {
+  if (active) {
+    rightCollapsedBeforeSample = rightCollapsed.value
+    rightCollapsed.value = true
+    return
+  }
+  if (rightCollapsedBeforeSample !== null) {
+    rightCollapsed.value = rightCollapsedBeforeSample
+    rightCollapsedBeforeSample = null
+  }
+})
 
 // 复用统一拖拽 composable（与 ChatPanel 输入框拖拽同一套逻辑）
 const { startResize: startResizeRaw } = useResize()
