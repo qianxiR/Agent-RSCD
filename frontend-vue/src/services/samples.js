@@ -36,14 +36,14 @@ export function saveSampleAnnotations(body) {
 }
 
 // 入参: { project, taskDir }
-// 出参: { status, annotations }
+// 出参: { status, annotations, phase_previews }
 export function loadSampleAnnotations({ project, taskDir }) {
   const query = new URLSearchParams({ project, task_dir: taskDir })
   return request(`/api/v1/samples/annotations?${query.toString()}`)
 }
 
 // 入参: project
-// 出参: { status, tasks:[{name,instance_count,saved_at,width,height}] }
+// 出参: { status, tasks:[{name,instance_count,class_count,saved_at,width,height,phase_dates,restorable}] }
 export function listSampleTasks(project) {
   const query = new URLSearchParams({ project })
   return request(`/api/v1/samples/tasks?${query.toString()}`)

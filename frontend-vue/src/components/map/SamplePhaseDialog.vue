@@ -8,6 +8,7 @@ import BaseDialog from '@/shared/ui/BaseDialog.vue'
 import { useProjectStore } from '@/stores/project'
 import { useSampleStudio } from '@/composables/useSampleStudio'
 import { planWaybackResolution } from '@/composables/useWaybackCapture'
+import { listSampleTasks } from '@/services/samples'
 
 const props = defineProps({
   releases: { type: Array, default: () => [] },
@@ -15,7 +16,7 @@ const props = defineProps({
   bbox: { type: Array, default: null },
 })
 
-const emit = defineEmits(['confirm', 'request-region'])
+const emit = defineEmits(['confirm', 'request-region', 'restore'])
 const open = defineModel({ type: Boolean, default: false })
 
 const projectStore = useProjectStore()
@@ -25,6 +26,11 @@ const phaseAId = ref('')
 const phaseBId = ref('')
 const taskName = ref('')
 const error = ref('')
+// new: 新建任务（抓图）；restore: 打开历史任务（直接读回标注）
+const mode = ref('new')
+const selectedTask = ref('')
+const history = ref([])
+const historyLoading = ref(false)
 
 const projectId = computed(() => projectStore.activeProjectId || 'default')
 const projectLabel = computed(() => {
@@ -67,14 +73,57 @@ function defaultTaskName() {
     + `_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
 
+// 入参: 无 | 方法: 拉取当前项目的历史任务 | 出参: 无
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    const data = await listSampleTasks(projectId.value)
+    history.value = (data.tasks || []).filter((item) => item.restorable)
+  } catch (e) {
+    history.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// 入参: 无 | 方法: 切到新建任务：清空选择并给一个新任务名 | 出参: 无
+function startNewTask() {
+  mode.value = 'new'
+  selectedTask.value = ''
+  taskName.value = defaultTaskName()
+  error.value = ''
+}
+
+// 入参: 任务名 | 方法: 选中历史任务后改为读回模式，时相与范围由任务自身决定 | 出参: 无
+function pickHistory(name) {
+  if (!name) {
+    startNewTask()
+    return
+  }
+  mode.value = 'restore'
+  selectedTask.value = name
+  taskName.value = name
+  error.value = ''
+}
+
+// 入参: 历史任务 | 方法: 下拉项副标题（实例数 / 时相 / 保存时间） | 出参: 字符串
+function historyMeta(item) {
+  const parts = []
+  if (item.instance_count) parts.push(`${item.instance_count} 个标注`)
+  if (item.phase_dates?.length) parts.push(item.phase_dates.filter(Boolean).join(' ↔ '))
+  if (item.saved_at) parts.push(item.saved_at.slice(5, 16))
+  return parts.join(' · ')
+}
+
 // 入参: 无 | 方法: 打开时补齐默认时相与任务名 | 出参: 无
 function reset() {
   error.value = ''
+  loadHistory()
   if (!props.releases.length) return
   const exists = (id) => props.releases.some((item) => item.id === id)
   if (!exists(phaseAId.value)) phaseAId.value = props.releases[0].id
   if (!exists(phaseBId.value)) phaseBId.value = ''
-  if (!taskName.value) taskName.value = defaultTaskName()
+  if (mode.value === 'new' && !taskName.value) taskName.value = defaultTaskName()
 }
 
 watch(open, (value) => {
@@ -85,8 +134,18 @@ watch(() => props.releases.length, () => {
   if (open.value) reset()
 })
 
-// 入参: 无 | 方法: 校验并提交时相选择 | 出参: 无
+// 入参: 无 | 方法: 校验并提交：恢复历史任务直接读回，新建任务按所选时相抓图 | 出参: 无
 function submit() {
+  if (mode.value === 'restore') {
+    if (!selectedTask.value) {
+      error.value = '请选择历史任务'
+      return
+    }
+    taskDir.value = selectedTask.value
+    error.value = ''
+    emit('restore', { taskName: selectedTask.value, projectId: projectId.value })
+    return
+  }
   if (!releaseA.value) {
     error.value = '请选择时相 A'
     return
@@ -100,6 +159,10 @@ function submit() {
     return
   }
   const name = taskName.value.trim() || defaultTaskName()
+  if (history.value.some((item) => item.name === name)) {
+    error.value = `任务名 ${name} 已存在，请在下拉框选它或点加号新建`
+    return
+  }
   taskDir.value = name
   error.value = ''
   emit('confirm', {
@@ -135,6 +198,41 @@ function submit() {
 
     <div class="sp-body">
       <div class="sp-row">
+        <div class="sp-label">任务</div>
+        <div class="sp-task-row">
+          <el-select
+            v-model="selectedTask"
+            class="sp-task-select"
+            size="small"
+            filterable
+            :loading="historyLoading"
+            placeholder="选择历史任务，或点右侧加号新建"
+            @change="pickHistory"
+          >
+            <el-option v-if="!history.length" label="暂无历史任务" value="" disabled />
+            <el-option
+              v-for="item in history"
+              :key="item.name"
+              :label="item.name"
+              :value="item.name"
+            >
+              <span class="sp-task-name">{{ item.name }}</span>
+              <span class="sp-task-meta">{{ historyMeta(item) }}</span>
+            </el-option>
+          </el-select>
+          <BaseButton
+            variant="ghost"
+            size="md"
+            px="10"
+            title="新建任务"
+            @click="startNewTask"
+          >
+            <Icon name="plus" :size="14" />
+          </BaseButton>
+        </div>
+      </div>
+
+      <div v-if="mode === 'new'" class="sp-row">
         <div class="sp-label">任务名</div>
         <input v-model="taskName" class="sp-input" placeholder="sample_YYYYMMDD_HHMMSS" />
       </div>
@@ -143,54 +241,63 @@ function submit() {
         <span>项目：{{ projectLabel }}</span>
         <span>范围约 {{ areaKm2 < 0.01 ? areaKm2.toFixed(4) : areaKm2.toFixed(2) }} km²</span>
       </div>
-      <div v-if="resolutionText" class="sp-resolution" :class="{ coarse: resolutionCoarse }">
-        {{ resolutionText }}
-      </div>
-      <div class="sp-region">
-        <span class="sp-region-label">样本区域</span>
-        <button type="button" class="sp-region-btn" @click="$emit('request-region')">
-          <Icon name="scan" :size="13" />
-          <span>在地图上框选</span>
-        </button>
-      </div>
-      <div class="sp-bbox">{{ bboxText }}</div>
 
-      <div class="sp-grid">
-        <label class="sp-field">
-          <span>时相 A</span>
-          <el-select v-model="phaseAId" size="small" :loading="loading" placeholder="选择发布日期">
-            <el-option
-              v-for="item in releases"
-              :key="item.id"
-              :label="item.date"
-              :value="item.id"
-            />
-          </el-select>
-        </label>
-        <label class="sp-field">
-          <span>时相 B（可选）</span>
-          <el-select v-model="phaseBId" size="small" :loading="loading" placeholder="不启用">
-            <el-option label="不启用" value="" />
-            <el-option
-              v-for="item in releases"
-              :key="item.id"
-              :label="item.date"
-              :value="item.id"
-            />
-          </el-select>
-        </label>
-      </div>
+      <template v-if="mode === 'new'">
+        <div v-if="resolutionText" class="sp-resolution" :class="{ coarse: resolutionCoarse }">
+          {{ resolutionText }}
+        </div>
+        <div class="sp-region">
+          <span class="sp-region-label">样本区域</span>
+          <button type="button" class="sp-region-btn" @click="$emit('request-region')">
+            <Icon name="scan" :size="13" />
+            <span>在地图上框选</span>
+          </button>
+        </div>
+        <div class="sp-bbox">{{ bboxText }}</div>
 
-      <div class="sp-hint">
-        先点「在地图上框选」拖出样本区域，再选时相；范围过大时抓图会失败，建议放大地图后框选。<br />
-        只选时相 A：抓取该期影像直接标注；同时选 B：两期影像按同一范围抓取并进入卷帘。
+        <div class="sp-grid">
+          <label class="sp-field">
+            <span>时相 A</span>
+            <el-select v-model="phaseAId" size="small" :loading="loading" placeholder="选择发布日期">
+              <el-option
+                v-for="item in releases"
+                :key="item.id"
+                :label="item.date"
+                :value="item.id"
+              />
+            </el-select>
+          </label>
+          <label class="sp-field">
+            <span>时相 B（可选）</span>
+            <el-select v-model="phaseBId" size="small" :loading="loading" placeholder="不启用">
+              <el-option label="不启用" value="" />
+              <el-option
+                v-for="item in releases"
+                :key="item.id"
+                :label="item.date"
+                :value="item.id"
+              />
+            </el-select>
+          </label>
+        </div>
+
+        <div class="sp-hint">
+          先点「在地图上框选」拖出样本区域，再选时相；范围过大时抓图会失败，建议放大地图后框选。<br />
+          只选时相 A：抓取该期影像直接标注；同时选 B：两期影像按同一范围抓取并进入卷帘。
+        </div>
+      </template>
+
+      <div v-else class="sp-hint">
+        载入该任务已保存的影像与标注，退出后仍可再次从这里打开继续修改。
       </div>
 
       <div v-if="error" class="sp-error">{{ error }}</div>
 
       <div class="sp-actions">
         <BaseButton variant="ghost" @click="open = false">取消</BaseButton>
-        <BaseButton variant="primary" bold :disabled="loading" @click="submit">进入标注</BaseButton>
+        <BaseButton variant="primary" bold :disabled="loading" @click="submit">
+          {{ mode === 'restore' ? '打开任务' : '进入标注' }}
+        </BaseButton>
       </div>
     </div>
   </BaseDialog>
@@ -226,6 +333,11 @@ function submit() {
 .sp-body { padding: 14px 18px 16px; }
 .sp-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .sp-label { font-size: var(--fs-md); font-weight: 600; color: var(--text-primary); }
+.sp-task-row { display: flex; align-items: center; gap: 6px; }
+.sp-task-select { flex: 1; min-width: 0; }
+.sp-task-select :deep(.el-select__wrapper) { width: 100%; }
+.sp-task-name { color: var(--text-primary); }
+.sp-task-meta { margin-left: 10px; font-size: var(--fs-sm); color: var(--text-muted); }
 .sp-input {
   width: 100%;
   box-sizing: border-box;

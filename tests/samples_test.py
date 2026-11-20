@@ -93,6 +93,15 @@ def test_store_save_load_and_copy() -> None:
     assert data["image"]["path"] == "source_a.tif"
     assert data["image"]["phases"][0]["path"] == "source_a.tif"
     assert store.list_tasks("p1")[0]["name"] == "task_demo"
+    # 历史任务需带实例数、时相日期与可恢复标记，供前端下拉框与重新打开
+    row = store.list_tasks("p1")[0]
+    assert row["instance_count"] == 2
+    assert row["restorable"] is True
+    assert row["phase_dates"] == [payload["image"]["phases"][0]["date"]]
+    # 源影像在 agent-files 之外时不给预览地址（越界保护）
+    previews = store.phase_previews("p1", "task_demo", data)
+    assert previews and previews[0]["path"] == "source_a.tif"
+    assert previews[0]["preview_url"] == ""
 
     try:
         store.task_dir("p1", "../escape")

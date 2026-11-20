@@ -117,12 +117,42 @@ class SampleStore:
             tasks.append({
                 "name": item.name,
                 "instance_count": int(meta.get("instance_count") or 0),
+                "class_count": int(meta.get("class_count") or 0),
                 "saved_at": str(meta.get("saved_at") or ""),
                 "width": int(meta.get("width") or 0),
                 "height": int(meta.get("height") or 0),
+                "phase_dates": [
+                    str(p.get("date") or "")
+                    for p in (meta.get("phases") or [])
+                    if isinstance(p, dict)
+                ],
+                # 源影像还在才允许重新打开：退出后可直接接着标注
+                "restorable": any(item.glob("source_*")),
             })
         tasks.sort(key=lambda row: row["saved_at"], reverse=True)
         return tasks
+
+    # ==================== 历史任务影像 ====================
+
+    def phase_previews(self, project: str, task_dir: str, annotations: Dict[str, Any]) -> List[Dict[str, str]]:
+        """把任务目录里的源影像换成浏览器可预览的下载地址。"""
+        task_path = self.task_dir(project, task_dir)
+        previews: List[Dict[str, str]] = []
+        for phase in annotations.get("image", {}).get("phases") or []:
+            if not isinstance(phase, dict):
+                continue
+            name = str(phase.get("path") or "")
+            candidate = (task_path / name).resolve() if name else None
+            preview_url = ""
+            if candidate and candidate.is_file() and candidate.is_relative_to(self.file_root):
+                rel = candidate.relative_to(self.file_root).as_posix()
+                preview_url = f"/api/v1/download/{rel}?preview=1"
+            previews.append({
+                "date": str(phase.get("date") or ""),
+                "path": name,
+                "preview_url": preview_url,
+            })
+        return previews
 
     # ==================== 源影像复制 ====================
 

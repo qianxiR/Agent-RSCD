@@ -26,6 +26,7 @@ import { showRegionGrid, clearRegionGrid } from '@/composables/useRegionGrid'
 import { restoreBasemap } from '@/composables/useBasemap'
 import { captureWaybackImage } from '@/composables/useWaybackCapture'
 import { captureImagery, georeferenceImagery, getEsriWaybackReleases } from '@/services/imagery'
+import { loadSampleAnnotations } from '@/services/samples'
 import LayerPanel from '@/components/map/LayerPanel.vue'
 import ChangeDetectDialog from '@/components/map/ChangeDetectDialog.vue'
 import SamplePhaseDialog from '@/components/map/SamplePhaseDialog.vue'
@@ -94,12 +95,14 @@ const {
   mode: sampleMode,
   dirty: sampleDirty,
   beginSession,
+  restoreSession,
   resetSession,
 } = useSampleStudio()
 const {
   capturing: sampleCapturing,
   progress: sampleProgress,
   prepareScene,
+  loadStoredScene,
   exitScene,
 } = useSampleScene()
 const sampleEditor = useSampleEditor()
@@ -354,6 +357,44 @@ async function onSampleConfirm(payload) {
     ElMessage.success('影像已载入，可直接标注')
   } catch (e) {
     ElMessage.error(e.message || '影像抓取失败')
+    samplePhaseOpen.value = true
+  } finally {
+    sampleEntering.value = false
+  }
+}
+
+// 入参: { taskName, projectId }
+// 方法: 打开历史任务：读回标注 → 用任务目录源影像铺图 → 进入标注会话
+// 出参: 无
+async function onSampleRestore(payload) {
+  if (sampleEntering.value) return
+  sampleEntering.value = true
+  try {
+    const data = await loadSampleAnnotations({
+      project: payload.projectId,
+      taskDir: payload.taskName,
+    })
+    const annotations = data.annotations || {}
+    samplePhaseOpen.value = false
+    loadStoredScene({
+      phasePreviews: data.phase_previews,
+      bounds: annotations.image?.bounds,
+    })
+    const count = restoreSession({
+      projectId: payload.projectId,
+      taskName: payload.taskName,
+      annotations,
+      previews: data.phase_previews,
+    })
+    sampleEditor.enter(map)
+    setFeatureInfoEnabled(false)
+    if (popupRef.value) popupRef.value.innerHTML = ''
+    sampleEditor.setMode('draw')
+    // 历史任务恢复后同样铺回红框格网，保持版面一致
+    if (annotations.image?.bounds) showRegionGrid(annotations.image.bounds)
+    ElMessage.success(`已打开历史任务，载入 ${count} 个标注`)
+  } catch (e) {
+    ElMessage.error(e.message || '打开历史任务失败')
     samplePhaseOpen.value = true
   } finally {
     sampleEntering.value = false
@@ -982,6 +1023,7 @@ onBeforeUnmount(() => {
       :loading="waybackLoading"
       :bbox="sampleBBox"
       @confirm="onSampleConfirm"
+      @restore="onSampleRestore"
       @request-region="startSampleRegionDraw"
     />
   </div>

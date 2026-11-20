@@ -285,6 +285,44 @@ export async function prepareScene({ releaseA, releaseB, bbox, taskName }) {
   }
 }
 
+// 入参: { phasePreviews } | 方法: 直接用任务目录里的源影像铺图（不重新抓图） | 出参: 无
+export function loadStoredScene({ phasePreviews, bounds }) {
+  const map = getMap()
+  if (!map) throw new Error('地图尚未就绪')
+  const previews = (phasePreviews || []).filter((item) => item.preview_url)
+  if (!previews.length) throw new Error('历史任务的源影像已不存在')
+  const extent = transformExtent(bounds, 'EPSG:4326', 'EPSG:3857')
+
+  clearLayers()
+  removeDivider()
+  const view = map.getView()
+  previousView = { center: view.getCenter(), zoom: view.getZoom() }
+
+  const create = (preview, zIndex) => new ImageLayer({
+    source: new ImageStatic({
+      url: preview.preview_url,
+      imageExtent: extent,
+      projection: 'EPSG:3857',
+    }),
+    opacity: 1,
+    zIndex,
+  })
+  layerA = create(previews[0], 20)
+  map.addLayer(layerA)
+  if (previews[1]) {
+    layerB = create(previews[1], 20.5)
+    map.addLayer(layerB)
+  }
+
+  view.fit(extent, { padding: [40, 40, 40, 40], duration: 0 })
+  swipeActive.value = Boolean(previews[1])
+  ratio.value = 0.5
+  if (swipeActive.value) {
+    buildDivider()
+    clipLayerB()
+  }
+}
+
 // 入参: 无 | 方法: 移除样本影像/卷帘并回到进入前视图 | 出参: 无
 export function exitScene({ restoreView = true } = {}) {
   clearLayers()
@@ -306,6 +344,7 @@ export function useSampleScene() {
     swipeActive,
     ratio,
     prepareScene,
+    loadStoredScene,
     exitScene,
   }
 }

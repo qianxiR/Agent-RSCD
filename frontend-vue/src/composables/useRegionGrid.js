@@ -21,7 +21,7 @@ const boundStyle = new Style({
   fill: new Fill({ color: 'rgba(181, 74, 74, 0.035)' }),
 })
 const gridStyle = new Style({
-  stroke: new Stroke({ color: 'rgba(181, 74, 74, 0.5)', width: 1 }),
+  stroke: new Stroke({ color: 'rgba(181, 74, 74, 0.85)', width: 2 }),
 })
 
 let layer = null

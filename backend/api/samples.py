@@ -60,11 +60,12 @@ def load_annotations(
 ):
     try:
         annotations = store.load(project, task_dir)
+        previews = store.phase_previews(project, task_dir, annotations)
     except ValueError as exc:
         return _error(400, str(exc))
     except FileNotFoundError as exc:
         return _error(404, str(exc))
-    return {"status": "success", "annotations": annotations}
+    return {"status": "success", "annotations": annotations, "phase_previews": previews}
 
 
 @router.get("/api/v1/samples/tasks")

@@ -1,7 +1,7 @@
 // ==================== 样本制作会话状态 ====================
 // 模块级单例：MapPanel（地图交互）与 SamplePanel（实例列表）共用同一份会话状态。
 import { computed, ref } from 'vue'
-import { toLonLat } from 'ol/proj'
+import { toLonLat, transformExtent } from 'ol/proj'
 import {
   CUSTOM_CLASS_COLORS,
   SAMPLE_CLASSES,
@@ -108,6 +108,75 @@ function beginSession({ projectId, taskName, frameData, phaseList }) {
   savedAt.value = 0
   status.value = ''
   active.value = true
+}
+
+// 入参: { projectId, taskName, annotations, previews }
+// 方法: 从任务目录读回的标注恢复会话，保留原类别色与保存状态 | 出参: 恢复的实例数
+function restoreSession({ projectId, taskName, annotations, previews }) {
+  const image = annotations?.image || {}
+  const width = Number(image.width) || 0
+  const height = Number(image.height) || 0
+  if (!width || !height) throw new Error('历史任务缺少影像尺寸')
+  const bounds = (image.bounds || []).map(Number)
+  if (bounds.length !== 4 || bounds.some((v) => !Number.isFinite(v))) {
+    throw new Error('历史任务缺少影像范围')
+  }
+
+  project.value = projectId || 'default'
+  taskDir.value = taskName
+  sourceFrame.value = null
+  frame.value = {
+    width,
+    height,
+    bounds,
+    extent: transformExtent(bounds, 'EPSG:4326', 'EPSG:3857'),
+    crs: 'EPSG:4326',
+    path: image.path || '',
+    cropPx: image.crop_px || [0, 0, width, height],
+    sourceWidth: image.source_width || width,
+    sourceHeight: image.source_height || height,
+  }
+
+  phases.value = (previews || []).map((item) => ({
+    date: item.date,
+    path: item.path,
+    preview_url: item.preview_url,
+  }))
+
+  const stored = annotations.classes || []
+  classes.value = stored.length
+    ? stored.map((item) => ({
+      id: Number(item.id),
+      name: String(item.name),
+      color: [...(item.color || [0, 0, 0])],
+    }))
+    : SAMPLE_CLASSES.map((item) => ({ ...item, color: [...item.color] }))
+
+  const classById = new Map(classes.value.map((item) => [item.id, item]))
+  const classByName = new Map(classes.value.map((item) => [item.name, item]))
+  instances.value = (annotations.instances || []).map((item) => {
+    const cls = classByName.get(item.class_name)
+      || classById.get(Number(item.class_id))
+      || classes.value[0]
+    return {
+      id: String(item.id),
+      classId: cls.id,
+      points: (item.points || []).map(([x, y]) => [Number(x), Number(y)]),
+      score: item.score ?? null,
+      source: item.source || 'manual',
+      edited: Boolean(item.edited),
+    }
+  })
+
+  selectedId.value = ''
+  selectedIds.value = []
+  selectedVertex.value = null
+  mode.value = 'draw'
+  dirty.value = false
+  savedAt.value = Date.now()
+  status.value = `已载入历史任务，${instances.value.length} 个标注`
+  active.value = true
+  return instances.value.length
 }
 
 // 入参: 无 | 方法: 清空会话状态（地图图层由 useSampleScene 负责移除） | 出参: 无
@@ -343,6 +412,7 @@ export function useSampleStudio() {
     status,
     savedAt,
     beginSession,
+    restoreSession,
     resetSession,
     addShape,
     selectShape,
