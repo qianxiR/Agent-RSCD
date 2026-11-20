@@ -1,6 +1,6 @@
 <script setup>
 // ==================== 样本制作：实例列表与保存导出 ====================
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import Icon from '@/shared/ui/Icon.vue'
 import BaseButton from '@/shared/ui/BaseButton.vue'
@@ -8,6 +8,9 @@ import { useSampleStudio } from '@/composables/useSampleStudio'
 import { useSampleEditor } from '@/composables/useSampleEditor'
 
 defineEmits(['exit'])
+
+// 折叠状态：标注时收起面板腾出地图视野，工具条上仍可切换绘制/顶点/框选
+const collapsed = ref(false)
 
 const {
   taskDir,
@@ -119,119 +122,133 @@ function onDeleteSelected() {
 </script>
 
 <template>
-  <div class="sample-panel">
+  <div class="sample-panel" :class="{ collapsed }">
     <div class="sp-head">
       <div class="sp-title">
         <Icon name="audit" :size="14" />
         <span>样本制作</span>
+        <span v-if="collapsed && frame" class="sp-title-count">{{ instances.length }}</span>
+        <span v-if="collapsed && dirty" class="sp-title-dirty" title="有未保存修改">·</span>
       </div>
-      <BaseButton variant="icon" size="sm" title="退出样本制作" @click="$emit('exit')">
-        <Icon name="close" :size="14" />
-      </BaseButton>
-    </div>
-
-    <div class="sp-info">
-      <label class="sp-field">
-        <span>任务名</span>
-        <input v-model="taskDir" class="sp-input" :disabled="saving || Boolean(savedAt)" />
-      </label>
-      <div class="sp-meta">
-        <span>项目 {{ project }}</span>
-        <span v-if="frame">{{ frame.width }} × {{ frame.height }} px</span>
-        <span v-else-if="sourceFrame">{{ sourceFrame.width }} × {{ sourceFrame.height }} px</span>
+      <div class="sp-head-actions">
+        <BaseButton
+          variant="icon"
+          size="sm"
+          :title="collapsed ? '展开面板' : '折叠面板'"
+          @click="collapsed = !collapsed"
+        >
+          <Icon :name="collapsed ? 'chevronRight' : 'chevronDown'" :size="14" />
+        </BaseButton>
+        <BaseButton variant="icon" size="sm" title="退出样本制作" @click="$emit('exit')">
+          <Icon name="close" :size="14" />
+        </BaseButton>
       </div>
-      <div class="sp-phase">{{ phaseText }}</div>
     </div>
 
-    <div v-if="frame" class="sp-modes">
-      <button
-        type="button"
-        :class="{ active: mode === 'draw' }"
-        @click="toggleMode('draw')"
-      >绘制</button>
-      <button
-        type="button"
-        :class="{ active: mode === 'edit' }"
-        @click="toggleMode('edit')"
-      >顶点</button>
-      <button
-        type="button"
-        :class="{ active: mode === 'select' }"
-        @click="toggleMode('select')"
-      >框选</button>
-      <button
-        type="button"
-        class="sp-delete"
-        :disabled="!selectedId && !selectedIds.length"
-        title="删除选中的标注"
-        @click="onDeleteSelected"
-      >
-        <Icon name="trash" :size="13" />
-      </button>
-    </div>
-
-    <div v-if="frame" class="sp-count">
-      标注 <span class="sp-num">{{ instances.length }}</span>
-      <span v-if="dirty" class="sp-dirty">未保存</span>
-    </div>
-
-    <div v-if="frame" class="sp-list">
-      <div v-if="!instances.length" class="sp-empty">尚未绘制标注</div>
-      <div
-        v-for="shape in instances"
-        :key="shape.id"
-        class="sp-item"
-        :class="{ sel: isSelected(shape.id) }"
-        @click="selectShape(shape.id)"
-      >
-        <div class="sp-item-top">
-          <input
-            type="color"
-            class="sp-color"
-            :value="classColorHex(shape.classId)"
-            title="选择类别颜色"
-            @click.stop
-            @input="setClassColor(shape.classId, $event.target.value)"
-          />
-          <input
-            class="sp-class"
-            :value="classNameOf(shape)"
-            list="sp-class-options"
-            placeholder="输入类别"
-            @click.stop
-            @change="onClassNameChange(shape, $event)"
-          />
-          <span class="sp-area">{{ Math.round(polygonArea(shape.points)) }} px</span>
-          <BaseButton
-            variant="icon"
-            size="sm"
-            title="删除标注"
-            @click.stop="removeShape(shape.id)"
-          >
-            <Icon name="trash" :size="13" />
-          </BaseButton>
+    <template v-if="!collapsed">
+      <div class="sp-info">
+        <label class="sp-field">
+          <span>任务名</span>
+          <input v-model="taskDir" class="sp-input" :disabled="saving || Boolean(savedAt)" />
+        </label>
+        <div class="sp-meta">
+          <span>项目 {{ project }}</span>
+          <span v-if="frame">{{ frame.width }} × {{ frame.height }} px</span>
+          <span v-else-if="sourceFrame">{{ sourceFrame.width }} × {{ sourceFrame.height }} px</span>
         </div>
-        <div class="sp-item-sub">{{ shape.points.length }} 个顶点</div>
+        <div class="sp-phase">{{ phaseText }}</div>
       </div>
-      <datalist id="sp-class-options">
-        <option v-for="item in classes" :key="item.id" :value="item.name" />
-      </datalist>
-    </div>
 
-    <div v-if="frame" class="sp-status">{{ status || '左键绘制；F2/Enter 闭合；Shift 点顶点删除；框选后 Delete 批删' }}</div>
+      <div v-if="frame" class="sp-modes">
+        <button
+          type="button"
+          :class="{ active: mode === 'draw' }"
+          @click="toggleMode('draw')"
+        >绘制</button>
+        <button
+          type="button"
+          :class="{ active: mode === 'edit' }"
+          @click="toggleMode('edit')"
+        >顶点</button>
+        <button
+          type="button"
+          :class="{ active: mode === 'select' }"
+          @click="toggleMode('select')"
+        >框选</button>
+        <button
+          type="button"
+          class="sp-delete"
+          :disabled="!selectedId && !selectedIds.length"
+          title="删除选中的标注"
+          @click="onDeleteSelected"
+        >
+          <Icon name="trash" :size="13" />
+        </button>
+      </div>
 
-    <div v-if="frame" class="sp-actions">
-      <BaseButton variant="primary" bold :disabled="saving || !frame" @click="onSave">
-        {{ saving ? '保存中…' : '保存标注' }}
-      </BaseButton>
-      <BaseButton variant="ghost" :disabled="!canExport" @click="download('dataset')">
-        导出数据集
-      </BaseButton>
-    </div>
-    <div v-if="frame" class="sp-actions sp-actions-sub">
-      <BaseButton variant="ghost" :disabled="!canExport" @click="download('coco')">COCO</BaseButton>
-      <BaseButton variant="ghost" :disabled="!canExport" @click="download('shp')">SHP</BaseButton>
-    </div>
+      <div v-if="frame" class="sp-count">
+        标注 <span class="sp-num">{{ instances.length }}</span>
+        <span v-if="dirty" class="sp-dirty">未保存</span>
+      </div>
+
+      <div v-if="frame" class="sp-list">
+        <div v-if="!instances.length" class="sp-empty">尚未绘制标注</div>
+        <div
+          v-for="shape in instances"
+          :key="shape.id"
+          class="sp-item"
+          :class="{ sel: isSelected(shape.id) }"
+          @click="selectShape(shape.id)"
+        >
+          <div class="sp-item-top">
+            <input
+              type="color"
+              class="sp-color"
+              :value="classColorHex(shape.classId)"
+              title="选择类别颜色"
+              @click.stop
+              @input="setClassColor(shape.classId, $event.target.value)"
+            />
+            <input
+              class="sp-class"
+              :value="classNameOf(shape)"
+              list="sp-class-options"
+              placeholder="输入类别"
+              @click.stop
+              @change="onClassNameChange(shape, $event)"
+            />
+            <span class="sp-area">{{ Math.round(polygonArea(shape.points)) }} px</span>
+            <BaseButton
+              variant="icon"
+              size="sm"
+              title="删除标注"
+              @click.stop="removeShape(shape.id)"
+            >
+              <Icon name="trash" :size="13" />
+            </BaseButton>
+          </div>
+          <div class="sp-item-sub">{{ shape.points.length }} 个顶点</div>
+        </div>
+        <datalist id="sp-class-options">
+          <option v-for="item in classes" :key="item.id" :value="item.name" />
+        </datalist>
+      </div>
+
+      <div v-if="frame" class="sp-status">{{ status || '左键绘制；F2/Enter 闭合；Shift 点顶点删除；框选后 Delete 批删' }}</div>
+
+      <div v-if="frame" class="sp-actions">
+        <BaseButton variant="primary" bold :disabled="saving || !frame" @click="onSave">
+          {{ saving ? '保存中…' : '保存标注' }}
+        </BaseButton>
+        <BaseButton variant="ghost" :disabled="!canExport" @click="download('dataset')">
+          导出数据集
+        </BaseButton>
+      </div>
+      <div v-if="frame" class="sp-actions sp-actions-sub">
+        <BaseButton variant="ghost" :disabled="!canExport" @click="download('coco')">COCO</BaseButton>
+        <BaseButton variant="ghost" :disabled="!canExport" @click="download('shp')">SHP</BaseButton>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -252,11 +269,19 @@ function onDeleteSelected() {
   border-radius: var(--r-md);
   box-shadow: var(--shadow-float);
 }
+/* 折叠后只留标题行，宽度收窄，不遮挡地图 */
+.sample-panel.collapsed {
+  width: auto;
+  padding: 6px 8px;
+  gap: 0;
+}
 .sp-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
+.sp-head-actions { display: flex; align-items: center; gap: 2px; }
 .sp-title {
   display: flex;
   align-items: center;
@@ -264,6 +289,18 @@ function onDeleteSelected() {
   font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--text-primary);
+}
+.sample-panel.collapsed .sp-title { font-size: var(--fs-md); }
+.sp-title-count {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.sp-title-dirty {
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--accent-amber);
 }
 .sp-info { display: flex; flex-direction: column; gap: 5px; }
 .sp-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--text-secondary); }

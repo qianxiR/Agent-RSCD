@@ -126,8 +126,11 @@ function submit() {
         <span>范围约 {{ areaKm2 < 0.01 ? areaKm2.toFixed(4) : areaKm2.toFixed(2) }} km²</span>
       </div>
       <div class="sp-region">
-        <span>样本区域</span>
-        <button type="button" @click="$emit('request-region')">在地图上框选</button>
+        <span class="sp-region-label">样本区域</span>
+        <button type="button" class="sp-region-btn" @click="$emit('request-region')">
+          <Icon name="scan" :size="13" />
+          <span>在地图上框选</span>
+        </button>
       </div>
       <div class="sp-bbox">{{ bboxText }}</div>
 
@@ -158,9 +161,8 @@ function submit() {
       </div>
 
       <div class="sp-hint">
-        先在地图上框选样本区域；范围过大时抓图会失败，建议放大地图后框选。<br />
-        只选时相 A：抓取该期影像直接标注；同时选 B：两期影像按同一范围抓取并进入卷帘。<br />
-        进入标注后，还可在影像上框选更小的红框工作范围。
+        先点「在地图上框选」拖出样本区域，再选时相；范围过大时抓图会失败，建议放大地图后框选。<br />
+        只选时相 A：抓取该期影像直接标注；同时选 B：两期影像按同一范围抓取并进入卷帘。
       </div>
 
       <div v-if="error" class="sp-error">{{ error }}</div>
@@ -232,20 +234,33 @@ function submit() {
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
+  margin-bottom: 6px;
   font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
-.sp-region button {
-  padding: 0;
+.sp-region-label { color: var(--text-secondary); }
+/* 首次使用的主要动作：黑底实心 + 图标，避免被当成普通文字链接 */
+.sp-region-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
   font-family: inherit;
   font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--border-strong);
+  font-weight: 500;
+  color: #fff;
+  background: #1a1a1a;
+  border: 1px solid #1a1a1a;
+  border-radius: var(--r-sm);
   cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out);
 }
-.sp-region button:hover { color: var(--text-primary); }
+.sp-region-btn:hover {
+  color: #fff;
+  background: #111110;
+  border-color: #111110;
+}
 .sp-bbox {
   margin-bottom: 12px;
   padding: 7px 9px;
