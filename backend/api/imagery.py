@@ -162,13 +162,14 @@ async def imagery_georeference(
     name: str = Form(""),
     date: str = Form(""),
 ):
-    """浏览器拼接的 Esri Wayback 截图 → 带 CRS GeoTIFF（变化检测两期影像）。"""
+    """浏览器拼接的 Esri Wayback 截图 → 带 CRS GeoTIFF（样本制作 / 变化检测两期影像）。"""
     try:
         import json
         values = json.loads(bbox)
         content = await file.read()
-        if len(content) > 20 * 1024 * 1024:
-            return {"status": "error", "msg": "截图文件超过 20MB"}
+        # 拼图规格为 4096×4096，PNG 最大约 60MB，上限留出余量
+        if len(content) > 80 * 1024 * 1024:
+            return {"status": "error", "msg": "截图文件超过 80MB"}
         return await capture_service.georeference(
             content,
             values,

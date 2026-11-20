@@ -93,7 +93,7 @@ function planTiles(bbox, maxSize = MAX_SIZE, forcedZoom = null) {
 }
 
 // 入参: url, 重试次数 | 方法: 用 Image 加载瓦片（避免 fetch 被 Service Worker/连接中断拖垮） | 出参: Image
-async function loadTileImage(url, retries = 2) {
+async function loadTileImage(url, retries = 3) {
   let lastError = null
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
@@ -113,26 +113,25 @@ async function loadTileImage(url, retries = 2) {
   throw lastError || new Error('瓦片加载失败')
 }
 
-// 入参: release {m,date,tileUrl}, plan | 方法: 并发取瓦片并绘制到完整 mosaic | 出参: canvas
-async function buildMosaic(release, plan) {
-  const canvas = document.createElement('canvas')
-  canvas.width = plan.cols * TILE_SIZE
-  canvas.height = plan.rows * TILE_SIZE
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('浏览器不支持 canvas')
+// 入参: release {m,date,tileUrl}, plan, 输出画布, 裁剪偏移, 进度回调
+// 方法: 按行优先（即区域格网顺序）逐块取瓦片，直接画进输出画布，每批回调一次进度
+//   单块瓦片两次重试仍失败时跳过，不中断整幅抓图；缺口在最终成败判定里统计
+// 出参: 失败瓦片数
+async function drawTilesInto(ctx, release, plan, cropLeft, cropTop, onProgress) {
   const template = tileTemplate(release)
   // 主域被污染时 a/b 可能只有一个可用：取失败自动换另一个备用域
   const fallbackTemplate = template.includes('wayback-a')
     ? template.replace('wayback-a', 'wayback-b')
     : (template.includes('wayback-b') ? template.replace('wayback-b', 'wayback-a') : '')
+  // 行优先：与地图上红框格网从左到右、从上到下的顺序一致
   const jobs = []
   for (let row = 0; row < plan.rows; row += 1) {
     for (let col = 0; col < plan.cols; col += 1) {
       jobs.push({
         x: plan.x0 + col,
         y: plan.y0 + row,
-        px: col * TILE_SIZE,
-        py: row * TILE_SIZE,
+        px: col * TILE_SIZE - cropLeft,
+        py: row * TILE_SIZE - cropTop,
       })
     }
   }
@@ -140,7 +139,10 @@ async function buildMosaic(release, plan) {
     .replace('{z}', String(plan.zoom))
     .replace('{y}', String(job.y))
     .replace('{x}', String(job.x))
+
   const batchSize = 8
+  let done = 0
+  let failed = 0
   for (let start = 0; start < jobs.length; start += batchSize) {
     const batch = jobs.slice(start, start + batchSize)
     await Promise.all(batch.map(async (job) => {
@@ -148,13 +150,23 @@ async function buildMosaic(release, plan) {
       try {
         image = await loadTileImage(fill(template, job))
       } catch (e) {
-        if (!fallbackTemplate) throw e
-        image = await loadTileImage(fill(fallbackTemplate, job))
+        if (!fallbackTemplate) {
+          failed += 1
+          return
+        }
+        try {
+          image = await loadTileImage(fill(fallbackTemplate, job))
+        } catch (e2) {
+          failed += 1
+          return
+        }
       }
       ctx.drawImage(image, job.px, job.py)
     }))
+    done += batch.length
+    onProgress?.({ done, total: jobs.length, failed })
   }
-  return canvas
+  return failed
 }
 
 // 入参: 无 | 方法: 按当前上限预测给定范围会取到的层级与地面分辨率 | 出参: { zoom, gsd }
@@ -165,22 +177,24 @@ export function planWaybackResolution(bbox) {
   return { zoom: plan.zoom, gsd }
 }
 
-// 入参: { release, bbox, maxSize?, zoom?, exactBbox? }
-// 方法: 计算瓦片计划 → 拼接 → 裁剪 → PNG
+// 入参: { release, bbox, maxSize?, zoom?, exactBbox?, canvas?, onProgress? }
+// 方法: 计算瓦片计划 → 按格网顺序逐格取瓦片并直接画进输出画布 → PNG
 //   exactBbox=true 时输出严格裁到请求 bbox（双期共用同一像素帧）
 //   zoom 指定时复用另一期的缩放，保证两张图宽高一致
-// 出参: { blob, bbox, width, height, zoom }
+//   canvas 传入时复用调用方画布（用于边抓边显示）；onProgress 每批瓦片回调一次
+// 出参: { blob, bbox, width, height, zoom, release }
 export async function captureWaybackImage({
   release,
   bbox,
   maxSize = MAX_SIZE,
   zoom = null,
   exactBbox = false,
+  canvas = null,
+  onProgress = null,
 }) {
   if (!release?.m) throw new Error('缺少 Esri Wayback 版本')
   if (!Array.isArray(bbox) || bbox.length !== 4) throw new Error('缺少有效范围')
   const plan = planTiles(bbox, maxSize, zoom)
-  const mosaic = await buildMosaic(release, plan)
 
   let cropLeft = plan.left
   let cropTop = plan.top
@@ -201,16 +215,18 @@ export async function captureWaybackImage({
     outBbox = [minx, miny, maxx, maxy]
   }
 
-  const output = document.createElement('canvas')
+  const output = canvas || document.createElement('canvas')
   output.width = cropWidth
   output.height = cropHeight
   const ctx = output.getContext('2d')
   if (!ctx) throw new Error('浏览器不支持 canvas')
-  ctx.drawImage(
-    mosaic,
-    cropLeft, cropTop, cropWidth, cropHeight,
-    0, 0, cropWidth, cropHeight,
-  )
+  // 直接裁剪绘制，省掉整幅 mosaic 的中间画布
+  const failed = await drawTilesInto(ctx, release, plan, cropLeft, cropTop, onProgress)
+  // 全部瓦片都取不到才算失败；零星缺口保留，避免一个坏瓦片丢掉整幅影像
+  if (failed >= plan.cols * plan.rows) {
+    throw new Error('影像瓦片全部加载失败，请检查网络后重试')
+  }
+
   const blob = await new Promise((resolve, reject) => {
     try {
       output.toBlob((value) => (value ? resolve(value) : reject(new Error('PNG 编码失败'))), 'image/png')

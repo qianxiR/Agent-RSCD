@@ -101,6 +101,7 @@ const {
 const {
   capturing: sampleCapturing,
   progress: sampleProgress,
+  tilePercent: sampleTilePercent,
   prepareScene,
   loadStoredScene,
   exitScene,
@@ -973,10 +974,13 @@ onBeforeUnmount(() => {
         @exit="requestExitSample"
       />
 
-      <!-- 样本影像抓取进度 -->
+      <!-- 样本影像抓取进度：逐格抓图时胶囊底部显示完成比例 -->
       <div v-if="sampleEntering || sampleCapturing" class="sample-capturing">
         <span class="sample-spinner" />
         <span>{{ sampleProgress || '正在准备影像…' }}</span>
+        <span v-if="sampleTilePercent" class="sample-capturing-pct">
+          <span class="sample-capturing-bar" :style="{ width: `${sampleTilePercent}%` }" />
+        </span>
       </div>
 
       <!-- 影像预览清除（左下角，仅在存在预览图层时出现） -->
@@ -1460,6 +1464,24 @@ onBeforeUnmount(() => {
   background: rgba(26, 26, 26, 0.86);
   border-radius: 999px;
   box-shadow: var(--shadow-float);
+  font-variant-numeric: tabular-nums;
+}
+/* 逐格抓图进度条：贴在胶囊底部，宽度按瓦片完成比例增长 */
+.sample-capturing-pct {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 4px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.sample-capturing-bar {
+  display: block;
+  height: 100%;
+  background: #fff;
+  transition: width var(--t-fast) linear;
 }
 .sample-spinner {
   width: 12px;
